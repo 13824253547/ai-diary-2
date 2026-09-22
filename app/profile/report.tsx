@@ -1,8 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Screen } from '../../src/components/layout/screen';
-import { BottomTabs } from '../../src/components/navigation/bottom-tabs';
+import { GrowthScreen } from '../../src/components/profile/growth-screen';
 import { Button } from '../../src/components/common/button';
 import { EmptyResult } from '../../src/components/common/support-ui';
 import { getDiaryStatistics, useAppStore } from '../../src/store/use-app-store';
@@ -22,7 +22,7 @@ export default function ReportScreen() {
   const stats = getDiaryStatistics(useAppStore(s => s.diaries));
 
   return (
-    <Screen backgroundColor="#FFF3E5" footer={<BottomTabs current="profile" />} contentStyle={s.content}>
+    <GrowthScreen contentStyle={s.content}>
       <View style={s.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="返回" hitSlop={8} onPress={() => router.back()} style={s.back}>
           <Ionicons name="chevron-back" size={25} color={colors.textPrimary} />
@@ -43,9 +43,11 @@ export default function ReportScreen() {
             {insights.map(insight => (
               <View key={insight.title} style={s.card}>
                 <View style={s.iconHalo}>
-                  <View style={s.icon}>
-                    <MaterialCommunityIcons name={insight.icon} size={42} color="#FFFFFF" />
-                  </View>
+                  <LinearGradient colors={['#FFA318', '#FF9600']} style={s.icon}>
+                    {insight.icon === 'scale-balance'
+                      ? <MaterialCommunityIcons name="scale-balance" size={37} color="#FFFFFF" />
+                      : <Ionicons name={insight.icon === 'heart-outline' ? 'heart-outline' : 'happy-outline'} size={39} color="#FFFFFF" />}
+                  </LinearGradient>
                 </View>
                 <View style={s.copy}>
                   <Text style={s.cardTitle}>{insight.title}</Text>
@@ -57,20 +59,20 @@ export default function ReportScreen() {
           <Text style={s.note}>这不是定义，只是一面镜子 · 数据仅保存在本地</Text>
         </>
       )}
-    </Screen>
+    </GrowthScreen>
   );
 }
 
 const s = StyleSheet.create({
   content: { paddingHorizontal: 21, paddingTop: 7, paddingBottom: 32, gap: 0 },
-  header: { marginBottom: 29 },
+  header: { marginBottom: 26 },
   back: { width: 40, height: 34, justifyContent: 'center' },
   heading: { alignItems: 'center', gap: 12, marginTop: -1 },
-  title: { fontSize: 25, lineHeight: 35, fontWeight: '700', color: '#201A15', textAlign: 'center' },
+  title: { fontSize: 24, lineHeight: 35, fontWeight: '600', color: '#201A15', textAlign: 'center' },
   sub: { fontSize: 15, lineHeight: 23, color: '#8A7868' },
   cards: { gap: 18 },
   card: {
-    minHeight: 149, flexDirection: 'row', alignItems: 'center', gap: 18,
+    minHeight: 149, flexDirection: 'row', alignItems: 'center', gap: 17,
     paddingVertical: 21, paddingHorizontal: 19, borderRadius: 24, backgroundColor: '#FFFCF7',
     shadowColor: '#C48D51', shadowOpacity: 0.12, shadowRadius: 7, shadowOffset: { width: 0, height: 4 }, elevation: 2,
   },
@@ -82,6 +84,6 @@ const s = StyleSheet.create({
   icon: { width: 67, height: 67, borderRadius: 34, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FF9A00' },
   copy: { flex: 1, gap: 11 },
   cardTitle: { fontSize: 18, lineHeight: 25, fontWeight: '600', color: '#2B2118' },
-  body: { fontSize: 14, lineHeight: 26, color: '#897665' },
+  body: { fontSize: 14, lineHeight: 25, color: '#897665' },
   note: { textAlign: 'center', color: '#9B8471', fontSize: 12, lineHeight: 21, marginTop: 36 },
 });

@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Screen } from '../../src/components/layout/screen';
-import { BottomTabs } from '../../src/components/navigation/bottom-tabs';
+import { GrowthScreen } from '../../src/components/profile/growth-screen';
 import { Button } from '../../src/components/common/button';
 import { EmptyResult, IconAction, supportStyles as u } from '../../src/components/common/support-ui';
 import { useAppStore } from '../../src/store/use-app-store';
@@ -22,13 +21,13 @@ const groups: Record<string, string[]> = {
 // An anchor is a short excerpt of its linked diary, rather than its entire paragraph.
 function anchorExcerpt(diary: DiaryItem, tag: string) {
   const paragraphs = diary.blocks.filter(block => block.type === 'text').map(block => block.content);
-  const sentences = paragraphs.join('').match(/[^。！？]+[。！？]?/g) ?? [diary.summary];
+  const sentences = paragraphs.join('').match(/[^。！？]+[。！？]?/g) ?? [diary.summary || '这段回忆，值得好好收藏。'];
   const sentence = tag === '珍视旧友'
     ? sentences.find(value => diary.companionName && diary.companionName !== '自己' && value.includes(diary.companionName)) ?? sentences[0]
     : sentences[0];
-  if (sentence.length <= 34) return sentence;
-  const phraseEnd = sentence.lastIndexOf('，', 33);
-  return phraseEnd > 15 ? `${sentence.slice(0, phraseEnd)}。` : `${sentence.slice(0, 33)}…`;
+  if (sentence.length <= 28) return sentence;
+  const phraseEnd = sentence.lastIndexOf('，', 28);
+  return phraseEnd > 12 ? `${sentence.slice(0, phraseEnd)}…` : `${sentence.slice(0, 28)}…`;
 }
 
 export default function AnchorsScreen() {
@@ -47,7 +46,7 @@ export default function AnchorsScreen() {
   };
 
   return (
-    <Screen backgroundColor="#FFF3E5" footer={<BottomTabs current="profile" />} contentStyle={s.content}>
+    <GrowthScreen contentStyle={s.content}>
       <View style={s.header}>
         <View style={s.titleRow}>
           <Pressable accessibilityRole="button" accessibilityLabel="返回" hitSlop={8} onPress={() => router.back()} style={s.back}>
@@ -95,7 +94,7 @@ export default function AnchorsScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
-    </Screen>
+    </GrowthScreen>
   );
 }
 
@@ -115,10 +114,10 @@ const s = StyleSheet.create({
   pressed: { opacity: 0.72 },
   image: { width: 111, height: 124, borderRadius: 10 },
   copy: { flex: 1, gap: 16 },
-  cardTitle: { fontSize: 15, lineHeight: 23, fontWeight: '500', color: '#34271D', paddingRight: 20 },
+  cardTitle: { fontSize: 15, lineHeight: 23, fontWeight: '500', color: '#34271D', paddingRight: 35 },
   quote: { fontSize: 15, lineHeight: 27, color: '#8A7360' },
   saved: { color: colors.brandStrong, fontSize: 10, marginTop: -10 },
-  more: { position: 'absolute', top: 12, right: 8, width: 34, height: 36, alignItems: 'center', justifyContent: 'center' },
+  more: { position: 'absolute', top: 12, right: 8, width: 36, height: 40, alignItems: 'center', justifyContent: 'center' },
   correct: { borderRadius: 25, borderWidth: 1, borderColor: '#F5E2CC', paddingHorizontal: 29, paddingVertical: 12, alignSelf: 'center', marginTop: 34, backgroundColor: '#FFF6EA' },
   correctText: { color: '#957A63', fontSize: 15, lineHeight: 22 },
   modal: { flex: 1 },

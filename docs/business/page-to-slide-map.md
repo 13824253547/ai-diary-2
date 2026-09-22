@@ -5,7 +5,7 @@
 - 唯一设计源：`design/source/AI日记设计图04.pptx`。
 - PPT 原生媒体复制到 `design/extracted/ppt_media/`；每个页面的独立裁剪保存为 `design/extracted/step-01-*.png` 至 `step-22-*.png`。
 - 主流程取 slide 8–10 中四列手机的 `p:pic/a:srcRect` 裁剪，避免把整张流程图当作页面背景。
-- 补充页面取 slide 5、6、12 的四列手机裁剪。复杂角色、照片、树、花朵、邮戳和贴纸从原媒体切成 `assets/reference/*.png`，代码负责排版和文字。
+- 补充页面取 slide 5、6、12 的四列手机裁剪。复杂角色、照片、邮戳和贴纸从原媒体切成 `assets/reference/*.png`；成长模块的树、三花组合和玻璃罩使用修复后的 `assets/restored/*.png`，代码负责排版、文字及交互。
 - 原 PPT 是扁平导出图；素材清晰度受源图限制。`docs/business/asset-manifest.json` 记录每个片段的媒体来源、原始尺寸和裁剪像素，不对源图做放大承诺。
 
 ## 22 页映射
@@ -38,10 +38,12 @@
 ## 图片片段使用约定
 
 - `src/theme/assets.ts` 导出 `art`，用于代码直接引用独立素材；图片内的标题、导航、按钮和标签不作为页面背景复用。
-- `art.tree`、`art.flowerGold`、`art.flowerSecond`、`art.flowerLocked` 的文字标签区已透明处理，页面应把标签作为可点击文本层叠加，避免图片内容不可访问。
+- 成长页面不再使用旧 `art.tree`、`art.flowerGold`、`art.flowerSecond`、`art.flowerLocked` 片段。`assets/restored/` 保留标签底板、丝带和连续光影，只对字形修补，再叠加可点击原生文字。禁止将矩形标签区透明挖空；详见[成长素材记录](growth-assets.md)、[坐标与哈希](growth-assets.json)和[修复脚本](../../tools/restore-growth-assets.py)。
 - `art.mascotCamera`、`art.mascotReading`、`art.mascotHello`、`art.generationHero` 是独立角色姿态；`art.temple`、`art.street`、`art.sunset`、`art.food` 为主流程照片。
 - 页面使用真实系统安全区和自己的底部导航；参考图中的状态栏、Home 指示条和导航只用于比例验收。
 
 ## 视觉验收记录
 
 每个页面以对应 `step-*.png` 为内容参考，按照结构、主视觉/素材、字体与间距、阴影/图标顺序校验。截图验收排除系统栏和开发浮层，长页面允许滚动，不缩小整体内容强行塞进一屏。
+
+2026-09-22 成长模块的五处修复、同宽对比图、开发浮层排除方法和已知素材限制记录在[本轮验收记录](../verification/growth-20260922/README.md)。

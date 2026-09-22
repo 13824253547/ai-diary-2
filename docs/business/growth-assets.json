@@ -1,0 +1,252 @@
+{
+  "source": "AI日记设计图04.pptx",
+  "method": "Original illustration-only crops; dark glyph pixel inpainting; no rectangular transparent holes; edge color blending.",
+  "coordinates": "Boxes are [left, top, right, bottom] in native asset pixels. Scale all coordinates and text together by renderedWidth / nativeWidth. Native text overlays should have transparent backgrounds.",
+  "tree": {
+    "file": "assets/restored/growth-tree.png",
+    "source_media": "image14.png",
+    "source_size_px": [
+      2048,
+      1152
+    ],
+    "crop_px": [
+      38,
+      302,
+      497,
+      918
+    ],
+    "size_px": [
+      459,
+      616
+    ],
+    "background": "#FFF3E5",
+    "labels": [
+      {
+        "id": "friends",
+        "text": "珍视旧友",
+        "plate_box_px": [
+          14,
+          71,
+          118,
+          112
+        ],
+        "text_box_px": [
+          32,
+          82,
+          104,
+          101
+        ]
+      },
+      {
+        "id": "light",
+        "text": "追光的人",
+        "plate_box_px": [
+          337,
+          133,
+          442,
+          175
+        ],
+        "text_box_px": [
+          354,
+          144,
+          426,
+          164
+        ]
+      },
+      {
+        "id": "mountains",
+        "text": "山与海",
+        "plate_box_px": [
+          347,
+          327,
+          442,
+          370
+        ],
+        "text_box_px": [
+          366,
+          338,
+          426,
+          357
+        ]
+      },
+      {
+        "id": "food",
+        "text": "深夜食堂",
+        "plate_box_px": [
+          31,
+          356,
+          138,
+          400
+        ],
+        "text_box_px": [
+          45,
+          369,
+          119,
+          389
+        ]
+      },
+      {
+        "id": "ribbon",
+        "text": "人生旷野的寻路者",
+        "plate_box_px": [
+          173,
+          437,
+          376,
+          490
+        ],
+        "text_box_px": [
+          202,
+          456,
+          347,
+          477
+        ]
+      }
+    ]
+  },
+  "flowers": {
+    "locked_file": "assets/restored/growth-flowers-locked.png",
+    "unlocked_file": "assets/restored/growth-flowers-unlocked.png",
+    "source_media": "image14.png",
+    "crop_px": [
+      1043,
+      210,
+      1505,
+      705
+    ],
+    "size_px": [
+      462,
+      495
+    ],
+    "background": "#FFF3E5",
+    "labels": [
+      {
+        "id": "first",
+        "text": "人生旷野的寻路者",
+        "plate_box_px": [
+          32,
+          228,
+          222,
+          280
+        ],
+        "text_box_px": [
+          57,
+          238,
+          204,
+          260
+        ]
+      },
+      {
+        "id": "second",
+        "text": "觉察自我的思考者",
+        "plate_box_px": [
+          256,
+          275,
+          432,
+          320
+        ],
+        "text_box_px": [
+          279,
+          285,
+          416,
+          306
+        ]
+      },
+      {
+        "id": "third",
+        "text": "压力迷茫的疗愈者",
+        "plate_box_px": [
+          107,
+          415,
+          275,
+          479
+        ],
+        "text_box_px": [
+          124,
+          426,
+          262,
+          469
+        ]
+      }
+    ],
+    "third_state_text": {
+      "locked": "压力迷茫的疗愈者\n· 未解锁",
+      "unlocked": "压力迷茫的疗愈者\n· 已绽放"
+    },
+    "unlocked_composite": {
+      "bloom_source_crop_px": [
+        1075,
+        219,
+        1267,
+        358
+      ],
+      "size_px": [
+        149,
+        108
+      ],
+      "destination_px": [
+        1160,
+        497
+      ],
+      "note": "Demo-only original-source composite, not an unseen PPT design or AI-generated asset."
+    }
+  },
+  "globe": {
+    "file": "assets/restored/growth-globe.png",
+    "source_media": "image4.png",
+    "source_size_px": [
+      2048,
+      1152
+    ],
+    "crop_px": [
+      1808,
+      552,
+      1970,
+      734
+    ],
+    "size_px": [
+      162,
+      182
+    ],
+    "background": "#FFF9F1",
+    "note": "Original glass and its baked translucency retained."
+  },
+  "limitations": [
+    "PPT media are flat raster artwork; hidden background details and true per-layer transparency cannot be recovered losslessly.",
+    "Native tree is 459×616 px, flowers 462×495 px, glass globe 162×182 px; no false high-resolution claim.",
+    "The third unlocked flower is a local demonstration composite using an existing bloom; no corresponding unlocked reference was provided."
+  ],
+  "files": [
+    {
+      "path": "assets/restored/growth-tree.png",
+      "sha256": "343333b9e780607b2ee1dcfb41e26df51eb716541e9ba8c85760da027f4c66a5",
+      "size_px": [
+        459,
+        616
+      ]
+    },
+    {
+      "path": "assets/restored/growth-flowers-locked.png",
+      "sha256": "9c9c3aafdf8fd7aeb17812d40ad5e512cdb27a29f9dd590ed4de870de7ac3bf2",
+      "size_px": [
+        462,
+        495
+      ]
+    },
+    {
+      "path": "assets/restored/growth-flowers-unlocked.png",
+      "sha256": "c9d792371ffc8318a6d409184e16340ceddf206b6e6c66abadf56a25846e3d42",
+      "size_px": [
+        462,
+        495
+      ]
+    },
+    {
+      "path": "assets/restored/growth-globe.png",
+      "sha256": "c09eea8c94ddb4ca885f4c69af43cdfb6d0a490cee6bf8a933b9250d54f7938a",
+      "size_px": [
+        162,
+        182
+      ]
+    }
+  ]
+}

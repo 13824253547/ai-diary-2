@@ -1,7 +1,8 @@
 """Extract the authoritative PPT crops and reusable image fragments.
 
 Requires Pillow and NumPy. Does not modify the presentation. All image assets
-remain at native pixel size; cream removal is edge-connected only.
+remain at native pixel size; cream removal is edge-connected only. Growth
+art remains intact here; runtime label repair is a separate reproducible step.
 """
 from pathlib import Path
 from collections import deque
@@ -147,19 +148,11 @@ for key, source_name, box, threshold in fragments:
     result = source.crop(box)
     if threshold:
         result = cut_cream(result, threshold)
-    # Remove text areas from illustrative source fragments. Captions remain native UI.
-    if key in ('tree', 'flowerGold', 'flowerSecond', 'flowerLocked'):
-        data = np.array(result.convert('RGBA'))
-        removals = {
-            'tree': [(0, 72, 107, 117), (320, 131, 431, 180), (330, 328, 431, 375), (15, 354, 128, 406), (125, 439, 328, 486)],
-            'flowerGold': [(20, 230, 180, 258)],
-            'flowerSecond': [(13, 210, 180, 243)],
-            'flowerLocked': [(9, 125, 174, 183), (148, 0, 184, 34)],
-        }[key]
-        # Transparent source cutouts allow live text pills over the source art.
-        for left, top, right, bottom in removals:
-            data[top:bottom, left:right, 3] = 0
-        result = Image.fromarray(data)
+    # Keep complete originals here, including their caption plates and shadows.
+    # Never erase rectangles from growth artwork: that destroys the source's
+    # tree branches, glass highlights and warm background. Runtime growth
+    # illustrations are repaired separately by tools/restore-growth-assets.py,
+    # whose glyph-shaped masks remove only lettering and preserve the plates.
     if key == 'world':
         # Retain the supplied hill, orange mascot and clouds, discard the UI panel.
         mask = Image.new('L', result.size, 0)
