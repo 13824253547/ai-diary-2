@@ -1,0 +1,7 @@
+import {Pressable,StyleSheet,Text,View} from 'react-native';
+import {useLocalSearchParams,useRouter} from 'expo-router';
+import {Button} from '../../src/components/common/button';
+import {useAppStore} from '../../src/store/use-app-store';
+import {colors} from '../../src/theme/tokens';
+export default function More(){const router=useRouter();const {diaryId}=useLocalSearchParams<{diaryId?:string}>();const diary=useAppStore(s=>s.diaries.find(d=>d.id===diaryId));if(!diary)return <View style={s.empty}><Text style={s.text}>这篇日记不存在</Text><Button label="关闭" onPress={()=>router.back()}/></View>;const close=()=>router.back();return <View style={s.wrap}><Pressable onPress={close} style={StyleSheet.absoluteFill}/><View style={s.sheet}><Text style={s.title}>这篇日记</Text><Button variant="secondary" label="继续编辑" onPress={()=>{const id=useAppStore.getState().beginEdit(diary.id);if(id)router.replace({pathname:'/diary/[id]/edit',params:{id:diary.id,draftId:id}})}}/><Button variant="secondary" label="设置公开范围" onPress={()=>router.replace(`/share/privacy?diaryId=${diary.id}`)}/><Button label="分享这篇日记" onPress={()=>router.replace(`/share/result?diaryId=${diary.id}`)}/></View></View>}
+const s=StyleSheet.create({wrap:{flex:1,justifyContent:'flex-end',backgroundColor:'rgba(25,20,15,0.4)'},sheet:{backgroundColor:colors.background,borderTopLeftRadius:25,borderTopRightRadius:25,padding:22,paddingBottom:35,gap:12},title:{fontSize:19,fontWeight:'700',color:colors.textPrimary,textAlign:'center'},text:{color:colors.textPrimary},empty:{flex:1,justifyContent:'center',padding:25,gap:16}});

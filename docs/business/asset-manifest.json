@@ -1,0 +1,1046 @@
+{
+  "source": "AI日记设计图04.pptx",
+  "policy": "Native-resolution crops from PPT media. No synthesized or external image sources.",
+  "assets": [
+    {
+      "key": "mascot",
+      "file": "assets/reference/mascot.png",
+      "source": "image1.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        475,
+        145,
+        1135,
+        840
+      ],
+      "size_px": [
+        660,
+        695
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "mascotReading",
+      "file": "assets/reference/mascotReading.png",
+      "source": "image1.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1670,
+        86,
+        2005,
+        441
+      ],
+      "size_px": [
+        335,
+        355
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "mascotCamera",
+      "file": "assets/reference/mascotCamera.png",
+      "source": "image11.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        875,
+        1325,
+        1090,
+        1598
+      ],
+      "size_px": [
+        215,
+        273
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "mascotHello",
+      "file": "assets/reference/mascotHello.png",
+      "source": "image1.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1656,
+        510,
+        1990,
+        820
+      ],
+      "size_px": [
+        334,
+        310
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "generationHero",
+      "file": "assets/reference/generationHero.png",
+      "source": "image9.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        106,
+        178,
+        1060,
+        855
+      ],
+      "size_px": [
+        954,
+        677
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "tsuki",
+      "file": "assets/reference/tsuki.png",
+      "source": "image2.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        74,
+        165,
+        666,
+        956
+      ],
+      "size_px": [
+        592,
+        791
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "luyi",
+      "file": "assets/reference/luyi.png",
+      "source": "image2.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        718,
+        219,
+        1320,
+        950
+      ],
+      "size_px": [
+        602,
+        731
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "ralph",
+      "file": "assets/reference/ralph.png",
+      "source": "image2.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1364,
+        190,
+        1990,
+        950
+      ],
+      "size_px": [
+        626,
+        760
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "posterTsuki",
+      "file": "assets/reference/posterTsuki.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        806,
+        248,
+        981,
+        480
+      ],
+      "size_px": [
+        175,
+        232
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "posterLuyi",
+      "file": "assets/reference/posterLuyi.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        808,
+        516,
+        981,
+        751
+      ],
+      "size_px": [
+        173,
+        235
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "posterRalph",
+      "file": "assets/reference/posterRalph.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        798,
+        783,
+        983,
+        1018
+      ],
+      "size_px": [
+        185,
+        235
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "temple",
+      "file": "assets/reference/temple.png",
+      "source": "image11.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        111,
+        663,
+        586,
+        1030
+      ],
+      "size_px": [
+        475,
+        367
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "street",
+      "file": "assets/reference/street.png",
+      "source": "image11.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        597,
+        663,
+        1066,
+        1030
+      ],
+      "size_px": [
+        469,
+        367
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "sunset",
+      "file": "assets/reference/sunset.png",
+      "source": "image11.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        111,
+        1041,
+        586,
+        1404
+      ],
+      "size_px": [
+        475,
+        363
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "food",
+      "file": "assets/reference/food.png",
+      "source": "image11.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        597,
+        1041,
+        1066,
+        1328
+      ],
+      "size_px": [
+        469,
+        287
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "cafe",
+      "file": "assets/reference/cafe.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1344,
+        356,
+        1469,
+        442
+      ],
+      "size_px": [
+        125,
+        86
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "flowers",
+      "file": "assets/reference/flowers.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1065,
+        356,
+        1196,
+        468
+      ],
+      "size_px": [
+        131,
+        112
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "mountain",
+      "file": "assets/reference/mountain.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1044,
+        291,
+        1246,
+        515
+      ],
+      "size_px": [
+        202,
+        224
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "sea",
+      "file": "assets/reference/sea.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1209,
+        233,
+        1331,
+        344
+      ],
+      "size_px": [
+        122,
+        111
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "night",
+      "file": "assets/reference/night.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1345,
+        233,
+        1469,
+        344
+      ],
+      "size_px": [
+        124,
+        111
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "santorini",
+      "file": "assets/reference/santorini.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1044,
+        614,
+        1246,
+        811
+      ],
+      "size_px": [
+        202,
+        197
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "balloons",
+      "file": "assets/reference/balloons.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1261,
+        287,
+        1464,
+        474
+      ],
+      "size_px": [
+        203,
+        187
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "train",
+      "file": "assets/reference/train.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1261,
+        613,
+        1464,
+        813
+      ],
+      "size_px": [
+        203,
+        200
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "lake",
+      "file": "assets/reference/lake.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1209,
+        357,
+        1331,
+        438
+      ],
+      "size_px": [
+        122,
+        81
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "coastalSunset",
+      "file": "assets/reference/coastalSunset.png",
+      "source": "image7.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        187,
+        754,
+        311,
+        884
+      ],
+      "size_px": [
+        124,
+        130
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "blueHouse",
+      "file": "assets/reference/blueHouse.png",
+      "source": "image7.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        186,
+        434,
+        311,
+        578
+      ],
+      "size_px": [
+        125,
+        144
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "restaurant",
+      "file": "assets/reference/restaurant.png",
+      "source": "image7.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        186,
+        597,
+        311,
+        737
+      ],
+      "size_px": [
+        125,
+        140
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "dessert",
+      "file": "assets/reference/dessert.png",
+      "source": "image7.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        44,
+        475,
+        168,
+        578
+      ],
+      "size_px": [
+        124,
+        103
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "personSelf",
+      "file": "assets/reference/personSelf.png",
+      "source": "image10.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        174,
+        614,
+        526,
+        897
+      ],
+      "size_px": [
+        352,
+        283
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "personFriend",
+      "file": "assets/reference/personFriend.png",
+      "source": "image10.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        177,
+        1123,
+        525,
+        1403
+      ],
+      "size_px": [
+        348,
+        280
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "personSelfAlt",
+      "file": "assets/reference/personSelfAlt.png",
+      "source": "image10.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        333,
+        897,
+        443,
+        1007
+      ],
+      "size_px": [
+        110,
+        110
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "personFriendAlt",
+      "file": "assets/reference/personFriendAlt.png",
+      "source": "image10.png",
+      "source_size_px": [
+        1179,
+        2556
+      ],
+      "crop_px": [
+        451,
+        1408,
+        566,
+        1520
+      ],
+      "size_px": [
+        115,
+        112
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "tree",
+      "file": "assets/reference/tree.png",
+      "source": "image14.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        51,
+        300,
+        482,
+        918
+      ],
+      "size_px": [
+        431,
+        618
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "flowerGold",
+      "file": "assets/reference/flowerGold.png",
+      "source": "image14.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1071,
+        212,
+        1274,
+        488
+      ],
+      "size_px": [
+        203,
+        276
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "flowerSecond",
+      "file": "assets/reference/flowerSecond.png",
+      "source": "image14.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1292,
+        279,
+        1482,
+        526
+      ],
+      "size_px": [
+        190,
+        247
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "flowerLocked",
+      "file": "assets/reference/flowerLocked.png",
+      "source": "image14.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1146,
+        502,
+        1330,
+        692
+      ],
+      "size_px": [
+        184,
+        190
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "flowerGlobe",
+      "file": "assets/reference/flowerGlobe.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1814,
+        560,
+        1972,
+        734
+      ],
+      "size_px": [
+        158,
+        174
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "world",
+      "file": "assets/reference/world.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1723,
+        273,
+        2000,
+        542
+      ],
+      "size_px": [
+        277,
+        269
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "bookOrange",
+      "file": "assets/reference/bookOrange.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1548,
+        800,
+        1657,
+        979
+      ],
+      "size_px": [
+        109,
+        179
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "bookBlue",
+      "file": "assets/reference/bookBlue.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1668,
+        803,
+        1762,
+        977
+      ],
+      "size_px": [
+        94,
+        174
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "bookGreen",
+      "file": "assets/reference/bookGreen.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1773,
+        805,
+        1864,
+        978
+      ],
+      "size_px": [
+        91,
+        173
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "bookPink",
+      "file": "assets/reference/bookPink.png",
+      "source": "image4.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1881,
+        805,
+        1978,
+        978
+      ],
+      "size_px": [
+        97,
+        173
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "stamp",
+      "file": "assets/reference/stamp.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1339,
+        696,
+        1465,
+        779
+      ],
+      "size_px": [
+        126,
+        83
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "stampKyoto",
+      "file": "assets/reference/stampKyoto.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1074,
+        696,
+        1198,
+        779
+      ],
+      "size_px": [
+        124,
+        83
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "stampKamakura",
+      "file": "assets/reference/stampKamakura.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1205,
+        696,
+        1331,
+        779
+      ],
+      "size_px": [
+        126,
+        83
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "tape",
+      "file": "assets/reference/tape.png",
+      "source": "image7.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1928,
+        510,
+        1988,
+        553
+      ],
+      "size_px": [
+        60,
+        43
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "stickerHappy",
+      "file": "assets/reference/stickerHappy.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1070,
+        585,
+        1131,
+        643
+      ],
+      "size_px": [
+        61,
+        58
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "stickerCool",
+      "file": "assets/reference/stickerCool.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1240,
+        585,
+        1301,
+        643
+      ],
+      "size_px": [
+        61,
+        58
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "stickerCry",
+      "file": "assets/reference/stickerCry.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1327,
+        585,
+        1385,
+        643
+      ],
+      "size_px": [
+        58,
+        58
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "stickerLove",
+      "file": "assets/reference/stickerLove.png",
+      "source": "image3.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        1413,
+        585,
+        1466,
+        643
+      ],
+      "size_px": [
+        53,
+        58
+      ],
+      "edge_cream_removed": true
+    },
+    {
+      "key": "morning",
+      "file": "assets/reference/morning.png",
+      "source": "image14.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        577,
+        516,
+        709,
+        660
+      ],
+      "size_px": [
+        132,
+        144
+      ],
+      "edge_cream_removed": false
+    },
+    {
+      "key": "friendsDinner",
+      "file": "assets/reference/friendsDinner.png",
+      "source": "image14.png",
+      "source_size_px": [
+        2048,
+        1152
+      ],
+      "crop_px": [
+        577,
+        712,
+        709,
+        855
+      ],
+      "size_px": [
+        132,
+        143
+      ],
+      "edge_cream_removed": false
+    }
+  ]
+}

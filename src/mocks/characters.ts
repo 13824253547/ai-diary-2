@@ -1,0 +1,62 @@
+import type { DiaryCharacter } from '../types/diary';
+import { art } from '../theme/assets';
+
+export const mockCharacters: DiaryCharacter[] = [
+  {
+    id: 'character-blue',
+    name: 'tsuki',
+    roleLabel: '日式杂志 · 温柔叙事',
+    description: '擅长把旅行见闻写成轻快、温柔、带一点镜头感的故事。',
+    theme: 'blue',
+    image: art.tsuki,
+    avatarImage: require('../../assets/generated/home-avatar-tsuki.png'),
+    posterImage: art.posterTsuki,
+  },
+  {
+    id: 'character-green',
+    name: '路易',
+    roleLabel: '复古明信片 · 风景来信',
+    description: '更强调风景和陪伴感，适合照片比较丰富的旅行游记。',
+    theme: 'green',
+    image: art.luyi,
+    avatarImage: require('../../assets/generated/home-avatar-luyi.png'),
+    posterImage: art.posterLuyi,
+  },
+  {
+    id: 'character-brown',
+    name: '拉尔夫',
+    roleLabel: '北欧简约 · 留白诗意',
+    description: '适合把旅途中最有氛围的几张照片做成更有节奏的内容页。',
+    theme: 'brown',
+    image: art.ralph,
+    avatarImage: require('../../assets/generated/home-avatar-ralph.png'),
+    posterImage: art.posterRalph,
+  },
+  {
+    id: 'character-red',
+    name: '亮亮',
+    roleLabel: '热闹回忆录',
+    description: '更适合把惊喜、晚霞、夜市和笑声这些情绪高光写得更热烈。',
+    theme: 'red',
+    image: require('../../assets/illustrations/red-theme-mascot.png'),
+    avatarImage: require('../../assets/generated/home-avatar-liangliang.png'),
+  },
+  {
+    id: 'character-brown-2',
+    name: '老师傅',
+    roleLabel: '旧电影旁白',
+    description: '把旅程写得更像一段沉稳而有画面的旧时故事。',
+    theme: 'brown',
+    image: require('../../assets/illustrations/brown-theme-mascot.png'),
+    avatarImage: require('../../assets/generated/home-avatar-master.png'),
+  },
+  {
+    id: 'character-blue-2',
+    name: '主任',
+    roleLabel: '冷静观察派',
+    description: '更注重结构和场景顺序，适合整理路线更完整的一天。',
+    theme: 'blue',
+    image: require('../../assets/illustrations/blue-theme-mascot.png'),
+    avatarImage: require('../../assets/generated/home-avatar-director.png'),
+  },
+];

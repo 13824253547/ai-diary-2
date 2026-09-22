@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "AI Diary 2",
+    "slug": "ai-diary-2",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "ai-diary-2",
+    "ios": {
+      "bundleIdentifier": "com.hjd.aidiary2",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.hjd.aidiary2",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image",
+      "expo-dev-client"
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+import {LinearGradient} from 'expo-linear-gradient';
+import {Pressable,StyleSheet,Text,View} from 'react-native';
+import {colors} from '../../theme/tokens';
+type Props={label:string;onPress?:()=>void;variant?:'primary'|'secondary'|'ghost';disabled?:boolean};
+export function Button({label,onPress,variant='primary',disabled=false}:Props){const primary=variant==='primary';return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{disabled}} disabled={disabled} onPress={onPress} style={({pressed})=>({opacity:disabled?0.45:pressed?0.75:1})}>{primary?<LinearGradient colors={[colors.brandDeep,colors.brand]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.base}><Text style={s.light}>{label}</Text></LinearGradient>:<View style={[s.base,variant==='secondary'?s.outline:{backgroundColor:'transparent'}]}><Text style={s.orange}>{label}</Text></View>}</Pressable>}
+const s=StyleSheet.create({base:{minHeight:46,borderRadius:26,alignItems:'center',justifyContent:'center',paddingHorizontal:18},outline:{borderWidth:1,borderColor:colors.brandStrong,backgroundColor:colors.paper},light:{color:'white',fontSize:16,fontWeight:'600'},orange:{color:colors.brandStrong,fontSize:15,fontWeight:'500'}});

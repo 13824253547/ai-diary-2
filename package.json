@@ -1,0 +1,42 @@
+{
+  "name": "ai-diary-2",
+  "version": "0.1.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@expo/metro-runtime": "~57.0.16",
+    "@expo/vector-icons": "^15.0.2",
+    "expo": "~57.0.24",
+    "expo-constants": "~57.0.19",
+    "expo-dev-client": "~57.0.19",
+    "expo-image": "~57.0.5",
+    "expo-linear-gradient": "~57.0.2",
+    "expo-linking": "~57.0.10",
+    "expo-router": "~57.0.22",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-web": "^0.21.2",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "postinstall": "node ./tools/fix-expo-modules-jsi-xcode26.js",
+    "start": "expo start --clear",
+    "start:dev-client": "expo start --dev-client --clear",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "ios:device": "expo run:ios --device",
+    "prebuild:ios": "expo prebuild --platform ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true
+}

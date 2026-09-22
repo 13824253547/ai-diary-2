@@ -1,0 +1,10 @@
+/** Development-only deterministic scenes used for simulator visual acceptance. */
+import {useEffect,useRef} from 'react';
+import {useLocalSearchParams,useRouter} from 'expo-router';
+import {Screen} from '../src/components/layout/screen';
+import {Empty} from '../src/components/common/design-ui';
+import {useAppStore} from '../src/store/use-app-store';
+export default function Verification(){const {scene='home'}=useLocalSearchParams<{scene?:string}>();const router=useRouter();const last=useRef('');useEffect(()=>{if(!__DEV__||last.current===scene)return;last.current=scene;const st=useAppStore.getState();const routes:Record<string,string>={home:'/(tabs)/home',complete:'/create/complete?diaryId=diary-1',detail:'/diary/diary-1',privacy:'/share/privacy?diaryId=diary-1',share:'/share/result?diaryId=diary-1',library:'/library',pet:'/(tabs)/pet',memories:'/(tabs)/memories',postcard:'/postcard',discover:'/(tabs)/discover',profile:'/(tabs)/profile',growth:'/profile/insights',anchors:'/profile/anchors',flowers:'/profile/flowers',report:'/profile/report?scenario=unlocked',invalid:'/diary/not-found'};
+if(routes[scene]){router.replace(routes[scene] as never);return}if(scene==='anonymous'){st.savePrivacy('diary-1','anonymous',['block-1']);router.replace('/share/result?diaryId=diary-1');return}
+if(scene==='permission'){const id=st.beginCreation();router.replace('/(tabs)/home');setTimeout(()=>router.push({pathname:'/permission/photos',params:{draftId:id}}),150);return}
+const id=st.beginCreation();if(scene==='empty-photos')st.setDraftPhotos(id,[]);if(['naming','edit'].includes(scene)){const round=st.startGeneration(id);if(round!==undefined)st.finishGeneration(id,round)}const flow:Record<string,string>={album:'/album/select','empty-photos':'/album/select',template:'/create/template',character:'/create/character',generating:'/create/generating',naming:'/companion/naming',edit:'/diary/new/edit'};if(flow[scene])router.replace({pathname:flow[scene] as never,params:{draftId:id}});else router.replace('/(tabs)/home')},[scene,router]);return <Screen><Empty title={__DEV__?'正在准备验收页面':'页面不存在'} home/></Screen>}

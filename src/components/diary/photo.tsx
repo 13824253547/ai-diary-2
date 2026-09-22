@@ -1,0 +1,5 @@
+import {useState} from 'react';
+import {Image,View,type StyleProp,type ViewStyle} from 'react-native';
+import {appSelectors} from '../../store/use-app-store';
+export function Photo({id,style,anonymous=false}:{id:string;style?:StyleProp<ViewStyle>;anonymous?:boolean}){const p=appSelectors.photos.find(p=>p.id===id);const [size,setSize]=useState({width:0,height:0});if(!p?.image)return <View style={[{backgroundColor:'#EFE3D5'},style]}/>;const source=Image.resolveAssetSource(p.image);const scale=Math.max(size.width/source.width,size.height/source.height);const dx=(size.width-source.width*scale)/2,dy=(size.height-source.height*scale)/2;
+return <View onLayout={e=>setSize(e.nativeEvent.layout)} style={[{overflow:'hidden',backgroundColor:'#EFE3D5'},style]}><Image source={p.image} resizeMode="cover" style={{width:'100%',height:'100%'}}/>{anonymous?p.faceRects?.map((r,i)=><View key={i} accessibilityLabel="人物已匿名遮挡" style={{position:'absolute',left:r.x*source.width*scale+dx,top:r.y*source.height*scale+dy,width:r.width*source.width*scale,height:r.height*source.height*scale,backgroundColor:'#C0B6AA',borderRadius:8,opacity:1}}/>):null}</View>}
