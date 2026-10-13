@@ -1,6 +1,6 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import metadata from '../../../docs/business/growth-assets.json';
+import metadata from './growth-assets.json';
 
 type Props = { width: number; kind: 'tree' | 'flowers'; unlocked?: boolean; onLabelPress?: (label: string) => void; onFlowerPress?: () => void };
 export function GrowthArtwork({ width, kind, unlocked, onLabelPress, onFlowerPress }: Props) {

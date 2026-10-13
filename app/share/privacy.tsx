@@ -48,8 +48,7 @@ export default function PrivacyScreen() {
     router.push({ pathname: '/share/result', params: { diaryId: diary.id } });
   };
   const displayDate = diary.date.includes('–') ? diary.date.split('–').at(-1)?.replace('.', '月') ?? diary.date : diary.date.slice(5).replace('.', '月');
-  return <Screen contentStyle={styles.content} footer={<View style={styles.footer}><Button label="完成" onPress={finish} /></View>}>
-    <TopBar title="这篇日记给谁看？" onBackPress={() => router.back()} />
+  return <Screen header={<TopBar title="这篇日记给谁看？" onBackPress={() => router.back()} />} contentStyle={styles.content} footer={<View style={styles.footer}><Button label="完成" onPress={finish} /></View>}>
     <View style={styles.diary}>
       <Photo id={diary.coverPhotoId} style={styles.cover} />
       <View style={styles.diaryCopy}>

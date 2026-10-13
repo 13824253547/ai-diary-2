@@ -1,6 +1,6 @@
-# AI Diary 2
+# Orange Glow AI Diary
 
-`ai-diary-2` 是一个独立的 Expo + React Native iOS 前端原型项目。
+`Orange Glow AI Diary` 是一个独立的 Expo + React Native iOS 前端原型项目。
 
 ## 当前范围
 - 仅前端

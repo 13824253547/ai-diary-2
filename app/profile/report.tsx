@@ -22,8 +22,7 @@ export default function ReportScreen() {
   const stats = getDiaryStatistics(useAppStore(s => s.diaries));
 
   return (
-    <GrowthScreen contentStyle={s.content}>
-      <View style={s.header}>
+    <GrowthScreen header={<View style={s.header}>
         <Pressable accessibilityRole="button" accessibilityLabel="返回" hitSlop={8} onPress={() => router.back()} style={s.back}>
           <Ionicons name="chevron-back" size={25} color={colors.textPrimary} />
         </Pressable>
@@ -31,7 +30,7 @@ export default function ReportScreen() {
           <Text style={s.title}>小橘的专属洞察报告</Text>
           <Text style={s.sub}>基于你的 {stats.diaries} 篇记录生成</Text>
         </View>}
-      </View>
+      </View>} contentStyle={s.content}>
       {!unlocked ? (
         <EmptyResult title="再等一朵花盛开">
           <Text style={s.body}>集满 3 朵记忆花，即可查看专属洞察报告。</Text>

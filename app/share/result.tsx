@@ -46,8 +46,7 @@ export default function ShareResultScreen() {
     }
     setFeedback({ title: `${title}演示已完成`, detail: `${mode === 'save' || mode === 'pdf' ? '已生成当前内容的预览，未写入系统相册或文件。' : '已准备当前海报，未向第三方平台发送。'}${projected.anonymous ? '人物和姓名已按匿名设置遮挡。' : ''}` });
   };
-  return <Screen contentStyle={styles.screen}>
-    <TopBar title="分享日记" onBackPress={() => router.back()} trailing={<Pressable accessibilityRole="button" onPress={() => setPreview(true)}><Text style={styles.previewAction}>预览</Text></Pressable>} />
+  return <Screen header={<TopBar title="分享日记" onBackPress={() => router.back()} trailing={<Pressable accessibilityRole="button" onPress={() => setPreview(true)}><Text style={styles.previewAction}>预览</Text></Pressable>} />} contentStyle={styles.screen}>
     <View style={styles.posterArea}><SharePoster diary={projected} onQr={() => setQrVisible(true)} /></View>
     <Text style={styles.caption}>{diary.privacy === 'private' ? '私密日记仅供本地预览与保存' : '分享图已按你的公开范围设置生成'}</Text>
     <View style={styles.platforms}>{platforms.map(platform => <Pressable key={platform.id} accessibilityRole="button" accessibilityLabel={`分享到${platform.label}`} onPress={() => perform(platform.id, platform.label)} style={styles.platform}><View style={[styles.platformMark, { backgroundColor: platform.color }]}>{platform.mark === 'wechat' ? <Ionicons name="chatbubbles" size={17} color="#FFF" /> : <Text style={[styles.markText, platform.id === 'x' && { fontSize: 18, fontWeight: '400' }]}>{platform.mark}</Text>}</View><Text style={styles.platformLabel}>{platform.label}</Text></Pressable>)}</View>

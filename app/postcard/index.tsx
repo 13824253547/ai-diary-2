@@ -32,8 +32,7 @@ export default function PostcardScreen() {
   const decoration = params.decoration && decorations.includes(params.decoration) ? art[params.decoration as keyof typeof art] : art.mascot;
   const make = () => { setGenerated(true); };
   const shareDemo = (platform: string) => { setShare(false); Alert.alert(platform, '明信片预览已准备好。'); };
-  return <Screen>
-    <TopBar title="明信片" centered onBackPress={() => router.back()} trailing={<IconAction name="images-outline" label="选择素材" onPress={() => router.push('/library')} />} />
+  return <Screen header={<TopBar title="明信片" centered onBackPress={() => router.back()} trailing={<IconAction name="images-outline" label="选择素材" onPress={() => router.push('/library')} />} />}>
     <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View style={s.card}><Image source={image} style={s.image} /><View style={s.stamp}><Text style={s.stampText}>{materialPhoto ? `${materialPhoto.location}\n${materialPhoto.date}` : card.stamp}</Text></View><Text style={s.words}>把浪漫的瞬间，{`\n`}寄给未来的自己</Text><Image source={decoration} resizeMode="contain" style={s.mascot} /></View></View>
     <View style={s.switchRow}>{postcards.map((p, i) => <Pressable key={p.label} accessibilityLabel={`选择${p.label}明信片`} accessibilityState={{ selected: i === index && !materialPhoto }} onPress={() => { setIndex(i); setMaterialPhoto(undefined); setGenerated(false); }} style={[s.thumb, i === index && !materialPhoto && s.thumbSelected]}><Image source={p.image} style={s.thumbImage} /></Pressable>)}</View>
     <Button label={generated ? '明信片已生成 ✓' : '✦ 生成明信片'} onPress={make} />

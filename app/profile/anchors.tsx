@@ -46,8 +46,7 @@ export default function AnchorsScreen() {
   };
 
   return (
-    <GrowthScreen contentStyle={s.content}>
-      <View style={s.header}>
+    <GrowthScreen header={<View style={s.header}>
         <View style={s.titleRow}>
           <Pressable accessibilityRole="button" accessibilityLabel="返回" hitSlop={8} onPress={() => router.back()} style={s.back}>
             <Ionicons name="chevron-back" size={25} color={colors.textPrimary} />
@@ -56,7 +55,7 @@ export default function AnchorsScreen() {
           <View style={s.back} />
         </View>
         <Text style={s.subtitle}>小橘从你的日记里记住了这个</Text>
-      </View>
+      </View>} contentStyle={s.content}>
       <View style={s.cards}>
         {anchors.map(diary => {
           const savedCorrection = corrected[`${label}-${diary.id}`];

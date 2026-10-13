@@ -17,8 +17,7 @@ export default function FlowersScreen() {
     if (!unlocked) { Alert.alert('还差一朵记忆花', '集满 3 朵花后，就可以查看小橘的专属洞察报告。'); return; }
     router.push({ pathname: '/profile/report', params: scenario ? { scenario } : {} });
   };
-  return <GrowthScreen contentStyle={s.content}>
-    <View style={s.header}><TopBar title="记忆花朵" onBackPress={() => router.canGoBack() ? router.back() : router.replace('/profile/insights')} /></View>
+  return <GrowthScreen header={<View style={s.header}><TopBar title="记忆花朵" onBackPress={() => router.canGoBack() ? router.back() : router.replace('/profile/insights')} /></View>} contentStyle={s.content}>
     <GrowthArtwork kind="flowers" width={Math.min(width, 480) - 24} unlocked={unlocked} />
     <View style={s.lower}>
       <View style={s.milestonePanel}>

@@ -20,8 +20,7 @@ export default function MonthlyScreen() {
   const groups = getHistoryGroups(diaries);
   const [selectedId, setSelectedId] = useState<string | null>(month ? groups.find(g => g.label.includes(month))?.id ?? null : null);
   const selected = groups.find(g => g.id === selectedId);
-  return <Screen>
-    <TopBar title="月度装订" centered onBackPress={() => router.back()} />
+  return <Screen header={<TopBar title="月度装订" centered onBackPress={() => router.back()} />}>
     <Text style={s.intro}>把每个月的心情，装订成一本小小的日记。</Text>
     {groups.length === 0 ? <EmptyResult title="先写下第一篇日记吧" /> : <View style={s.grid}>{groups.map((g, i) => <Pressable accessibilityLabel={`打开${g.label}合集`} key={g.id} onPress={() => setSelectedId(g.id)} style={s.book}><View style={s.cover}><Image source={covers[i % covers.length]} style={s.image} /><View style={[s.coverLabel, { backgroundColor: coverColors[i % coverColors.length] }]}><Text style={s.coverTitle}>AI日记</Text><Text style={s.coverMonth}>{g.label}</Text></View></View><Text style={s.month}>{g.label}</Text><Text style={s.count}>{g.diaryIds.length} 篇回忆 · 点击翻阅</Text></Pressable>)}</View>}
     <BottomSheet visible={Boolean(selected)} onClose={() => setSelectedId(null)} title={selected ? `${selected.label} · 月度合集` : ''} scroll maxHeight="90%" sheetStyle={s.sheet} contentContainerStyle={s.sheetContent}>

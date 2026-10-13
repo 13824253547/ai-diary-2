@@ -1,5 +1,5 @@
 export const appConfig = {
-  appName: 'AI Diary 2',
+  appName: '橙光AI日记',
   mode: 'mock-only',
-  description: 'AI Diary 2 当前为 iOS 优先的前端原型，仅使用本地 mock 数据。',
+  description: 'Orange Glow AI Diary 当前为 iOS 优先的前端原型，仅使用本地 mock 数据。',
 };

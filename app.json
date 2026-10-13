@@ -1,15 +1,18 @@
 {
   "expo": {
-    "name": "AI Diary 2",
-    "slug": "ai-diary-2",
-    "version": "0.1.0",
+    "name": "橙光AI日记",
+    "slug": "ai-diary",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "ai-diary-2",
     "ios": {
-      "bundleIdentifier": "com.hjd.aidiary2",
-      "supportsTablet": true
+      "bundleIdentifier": "io.com.shihangbiji.www.aidiary",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.hjd.aidiary2",
@@ -26,6 +29,12 @@
       "expo-image",
       "expo-dev-client"
     ],
+    "extra": {
+      "eas": {
+        "projectId": "a6937efe-e957-4558-92a3-c046aae2b96e"
+      }
+    },
+    "owner": "2317946738",
     "web": {
       "favicon": "./assets/favicon.png"
     }

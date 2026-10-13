@@ -15,8 +15,7 @@ export default function Detail() {
   }
 
   return (
-    <Screen>
-      <TopBar
+    <Screen header={<TopBar
         onBackPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/memories'))}
         trailing={
           <Pressable
@@ -29,7 +28,7 @@ export default function Detail() {
             <Ionicons name="ellipsis-horizontal" size={22} color={colors.textPrimary} />
           </Pressable>
         }
-      />
+      />}>
       <DiaryPaper diary={diary} />
       <Pressable onPress={() => router.push('/profile/anchors')} style={s.helperCard}>
         <Image source={art.mascotHello} style={s.helperMascot} resizeMode="contain" />

@@ -47,8 +47,7 @@ export default function LibraryScreen() {
     close();
     router.push({ pathname: '/diary/[id]/edit', params: { id: diaryId, draftId: id } });
   };
-  return <Screen>
-    <TopBar title="素材库 · 灵感" centered onBackPress={() => router.back()} trailing={<IconAction name="search-outline" label="搜索素材" onPress={() => setSearching(!searching)} />} />
+  return <Screen header={<TopBar title="素材库 · 灵感" centered onBackPress={() => router.back()} trailing={<IconAction name="search-outline" label="搜索素材" onPress={() => setSearching(!searching)} />} />}>
     {searching ? <SearchField value={search} onChangeText={setSearch} placeholder="搜索照片与地点" /> : null}
     <SectionTitle title="我的照片素材" action="上传" onPress={() => setSheet('upload')} />
     <View style={s.grid}>{photos.map(p => <Pressable accessibilityRole="button" accessibilityLabel={`预览${p.title}`} key={p.id} onPress={() => setPreview({ title: p.title, image: p.image!, photoId: p.id })} style={s.photo}><Image source={p.image} style={s.image} />{!diaries.some(d => d.photoIds.includes(p.id)) ? <Text style={s.badge}>未生成日记</Text> : null}</Pressable>)}<Pressable accessibilityLabel="添加照片" onPress={() => setSheet('upload')} style={s.add}><Ionicons name="add-outline" size={27} color={colors.textSecondary} /></Pressable></View>

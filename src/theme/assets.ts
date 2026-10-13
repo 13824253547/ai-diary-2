@@ -1,7 +1,6 @@
 /** Native-resolution artwork extracted from AI日记设计图04.pptx. */
 export const art = {
   mascot: require('../../assets/reference/mascot.png'),
-  mascotReading: require('../../assets/reference/mascotReading.png'),
   mascotCamera: require('../../assets/reference/mascotCamera.png'),
   mascotHello: require('../../assets/reference/mascotHello.png'),
   generationHero: require('../../assets/reference/generationHero.png'),
@@ -32,11 +31,6 @@ export const art = {
   personFriend: require('../../assets/reference/personFriend.png'),
   personSelfAlt: require('../../assets/reference/personSelfAlt.png'),
   personFriendAlt: require('../../assets/reference/personFriendAlt.png'),
-  tree: require('../../assets/reference/tree.png'),
-  flowerGold: require('../../assets/reference/flowerGold.png'),
-  flowerSecond: require('../../assets/reference/flowerSecond.png'),
-  flowerLocked: require('../../assets/reference/flowerLocked.png'),
-  flowerGlobe: require('../../assets/reference/flowerGlobe.png'),
   world: require('../../assets/reference/world.png'),
   bookOrange: require('../../assets/reference/bookOrange.png'),
   bookBlue: require('../../assets/reference/bookBlue.png'),
@@ -51,7 +45,6 @@ export const art = {
   stickerCry: require('../../assets/reference/stickerCry.png'),
   stickerLove: require('../../assets/reference/stickerLove.png'),
   morning: require('../../assets/reference/morning.png'),
-  friendsDinner: require('../../assets/reference/friendsDinner.png'),
 } as const;
 
 export type ArtName = keyof typeof art;

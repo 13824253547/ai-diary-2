@@ -9,12 +9,13 @@ export default function SelfHarmSupportNoticeScreen() {
   const router = useRouter();
 
   return (
-    <Screen>
-      <View style={styles.header}>
+    <Screen
+      header={
         <Pressable onPress={() => router.back()} style={[styles.circleButton, shadow.soft]}>
           <Ionicons color={colors.black} name="chevron-back" size={22} />
         </Pressable>
-      </View>
+      }
+    >
 
       <Text style={styles.title}>We noticed{'\n'}something in your{'\n'}entry</Text>
 
@@ -35,10 +36,6 @@ export default function SelfHarmSupportNoticeScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    paddingTop: spacing.sm,
-    marginBottom: spacing.md,
-  },
   circleButton: {
     width: 44,
     height: 44,

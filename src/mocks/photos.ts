@@ -15,4 +15,10 @@ export const mockPhotos: DiaryPhoto[] = [
   { id: 'photo-12', title: '一起旅行的人', location: '台南 · 老街', emoji: '📸', color: '#E8DCD0', date: '2024.09.14', image: art.personFriend, personIds: ['person-friend'], faceRects: [{ x: 0.28, y: 0.07, width: 0.46, height: 0.49 }] },
   { id: 'photo-13', title: '蓝白色的夏天', location: '圣托里尼', emoji: '🏝', color: '#D9E8EC', date: '2026.08.20', image: art.santorini },
   { id: 'photo-14', title: '清晨的热气球', location: '卡帕多奇亚', emoji: '🎈', color: '#E9D7C9', date: '2026.08.15', image: art.balloons },
+  { id: 'photo-15', title: '湖边的小镇', location: '因特拉肯', emoji: '🏞', color: '#D7E7E4', date: '2026.08.10', image: art.lake },
+  { id: 'photo-16', title: '黄昏海岸线', location: '高雄 · 西子湾', emoji: '🌇', color: '#EAD6C3', date: '2026.08.09', image: art.coastalSunset },
+  { id: 'photo-17', title: '蓝色小屋前', location: '海边小镇', emoji: '🏠', color: '#DDE7F2', date: '2026.08.08', image: art.blueHouse },
+  { id: 'photo-18', title: '一起吃晚饭', location: '台南 · 餐馆', emoji: '🍽', color: '#E7D8CC', date: '2026.08.07', image: art.restaurant },
+  { id: 'photo-19', title: '甜点收尾', location: '台南 · 甜品店', emoji: '🍮', color: '#F1DFC9', date: '2026.08.07', image: art.dessert },
+  { id: 'photo-20', title: '清晨问候', location: '旅途清晨', emoji: '☀️', color: '#F3E2C7', date: '2026.08.06', image: art.morning },
 ];
