@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Diary {
+  id        String   @id @default(cuid())
+  ownerDeviceId String
+  draftId   String
+  title     String
+  summary   String
+  location  String   @default("")
+  date      DateTime
+  privacy   String
+  photoIds  Json
+  publicBlockIds Json?
+  version   Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerDeviceId, date])
+}
+
+model Draft {
+  id               String   @id @default(cuid())
+  ownerDeviceId    String
+  sourceDiaryId    String?
+  type             String
+  characterId      String
+  selectedPhotoIds Json
+  privacy          String
+  version          Int
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([ownerDeviceId, createdAt])
+}
+
+model SaveCommand {
+  id               String   @id @default(cuid())
+  ownerDeviceId    String
+  idempotencyKey   String
+  draftId           String
+  sourceDiaryId     String?
+  sourceDiaryVersion Int?
+  diaryId           String
+  savedVersion      Int
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([ownerDeviceId, idempotencyKey])
+}
+
+model GenerationJob {
+  jobId            String   @id @default(cuid())
+  ownerDeviceId    String
+  draftId          String
+  draftVersion     Int
+  idempotencyKey   String
+  status           String
+  stage            String
+  progressPercent  Int?
+  attemptCount     Int      @default(0)
+  maxAttempts      Int      @default(1)
+  errorCode        String?
+  errorMessage     String?
+  retryable        Boolean?
+  inputSnapshot    Json?
+  result           Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([ownerDeviceId, idempotencyKey])
+  @@index([ownerDeviceId, createdAt])
+}

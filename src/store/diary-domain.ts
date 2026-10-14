@@ -1,3 +1,4 @@
+import type { GenerationResultContract } from '../contracts/core-diary-contract';
 import type { ContentBlock, DiaryDraft, DiaryItem, DiaryPerson, DiaryPhoto, HistoryGroup } from '../types/diary';
 
 export const MIN_SELECTED_PHOTOS = 3;
@@ -100,6 +101,58 @@ export function projectDiaryForSharing(source: DiaryItem): DiaryItem {
 }
 export const projectDiaryForShare = projectDiaryForSharing;
 export const buildHistoryGroups = getHistoryGroups;
+
+export function buildGeneratedDiaryFromResult(draft: DiaryDraft, result: GenerationResultContract): DiaryItem | undefined {
+  const allowed = new Set(draft.selectedPhotoIds);
+  const coverPhotoId = allowed.has(result.coverPhotoId) ? result.coverPhotoId : undefined;
+  if (!coverPhotoId) return undefined;
+  if (result.posterPhotoIds.some(id => !allowed.has(id))) return undefined;
+
+  const blocks: ContentBlock[] = [];
+  let hasStructuredText = false;
+  for (const block of result.blocks) {
+    if (block.type === 'photo') {
+      if (!allowed.has(block.photoId)) return undefined;
+      blocks.push({ ...block });
+      continue;
+    }
+
+    const photoIds = block.photoIds && [...new Set(block.photoIds)];
+    if (photoIds?.some(id => !allowed.has(id))) return undefined;
+    if (block.type === 'text' && block.content.trim()) hasStructuredText = true;
+    if (block.type === 'quote' && block.content.trim()) hasStructuredText = true;
+    blocks.push(photoIds ? { ...block, photoIds } : { ...block });
+  }
+
+  if (!hasStructuredText) return undefined;
+
+  const people = (result.people ?? [])
+    .map(person => ({
+      ...person,
+      name: person.name.trim() || (person.id === 'person-self' ? '我' : '同行人'),
+      photoIds: person.photoIds.filter(id => allowed.has(id)),
+    }))
+    .filter(person => person.photoIds.length > 0)
+    .map(person => ({
+      ...person,
+      avatarPhotoId: person.photoIds.includes(person.avatarPhotoId) ? person.avatarPhotoId : person.photoIds[0],
+    }));
+
+  return normalizeDiaryPhotos({
+    ...draft.diary,
+    status: 'ready',
+    title: result.title,
+    summary: result.summary,
+    location: result.location,
+    date: result.date,
+    companionName: result.companionName.trim() || (people.some(person => person.id !== 'person-self') ? '同行人' : '自己'),
+    people,
+    photoIds: [...draft.selectedPhotoIds],
+    coverPhotoId,
+    posterPhotoIds: [...result.posterPhotoIds],
+    blocks,
+  }, draft.selectedPhotoIds);
+}
 
 export function buildGeneratedDiary(draft: DiaryDraft): DiaryItem {
   const diary = cloneDiary(draft.diary);

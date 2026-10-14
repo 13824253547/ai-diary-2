@@ -8,7 +8,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-diary-domain-'));
 try {
   const files = [
     'src/types/diary.ts', 'src/types/creation.ts', 'src/types/share.ts', 'src/types/companion.ts',
-    'src/store/diary-domain.ts', 'src/store/use-app-store.ts',
+    'src/store/diary-domain.ts', 'src/store/create-app-store.ts', 'src/store/use-app-store.ts',
     'src/mocks/diaries.ts', 'src/mocks/photos.ts', 'src/mocks/characters.ts',
     'src/mocks/companions.ts', 'src/mocks/creation.ts', 'src/mocks/share-options.ts',
     'tools/diary-domain.test.ts',

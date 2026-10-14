@@ -241,6 +241,9 @@ PODS:
     - ExpoModulesCore
   - ExpoLogBox (57.0.4):
     - React-Core
+  - ExpoMediaLibrary (57.0.5):
+    - ExpoModulesCore
+    - React-Core
   - ExpoModulesCore (57.0.18):
     - boost
     - DoubleConversion
@@ -3262,6 +3265,7 @@ DEPENDENCIES:
   - ExpoLinearGradient (from `../node_modules/expo-linear-gradient/ios`)
   - ExpoLinking (from `../node_modules/expo-linking/ios`)
   - "ExpoLogBox (from `../node_modules/@expo/log-box`)"
+  - ExpoMediaLibrary (from `../node_modules/expo-media-library/ios`)
   - ExpoModulesCore (from `../node_modules/expo-modules-core`)
   - ExpoModulesJSI (from `../node_modules/expo-modules-jsi/apple`)
   - ExpoModulesWorklets (from `../node_modules/expo-modules-core`)
@@ -3408,6 +3412,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-linking/ios"
   ExpoLogBox:
     :path: "../node_modules/@expo/log-box"
+  ExpoMediaLibrary:
+    :path: "../node_modules/expo-media-library/ios"
   ExpoModulesCore:
     :path: "../node_modules/expo-modules-core"
   ExpoModulesJSI:
@@ -3613,6 +3619,7 @@ SPEC CHECKSUMS:
   ExpoLinearGradient: f08a0dea5ad3fe23042d15b1ced831312c9141b8
   ExpoLinking: 15c8ddb0eb4a778950712ea4a6feedf021778852
   ExpoLogBox: 80957303325cd4439137765c90a87d7f22aaf2ff
+  ExpoMediaLibrary: 341321256621e7bf220b6272c42fedcb095607d0
   ExpoModulesCore: e1ecd5fcf63abd44d0c75773d96c41d77907959e
   ExpoModulesJSI: 9df8e7c9719f59e8c001ec33611774137fc1484a
   ExpoModulesWorklets: 986cf72c18400743869b4642d243115f831e404d

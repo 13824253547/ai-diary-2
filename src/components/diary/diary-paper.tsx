@@ -16,12 +16,12 @@ export function DiaryPaper({ diary }: { diary: DiaryItem }) {
   const heroId = diary.coverPhotoId || diary.photoIds[0] || '';
 
   return (
-    <View style={[s.paper, nordic && s.nordic, postcard && s.postcard]}>
-      <View style={[s.heroFrame, { transform: [{ rotate: nordic ? '0deg' : '-3deg' }] }]}>
+    <View testID={`diary-paper-${diary.id}`} style={[s.paper, nordic && s.nordic, postcard && s.postcard]}>
+      <View testID={`diary-hero-frame-${diary.id}`} style={[s.heroFrame, { transform: [{ rotate: nordic ? '0deg' : '-3deg' }] }]}>
         <Photo id={heroId} anonymous={diary.anonymous} style={s.hero} />
         {!nordic ? <Image source={art.stamp} resizeMode="contain" style={s.stamp} /> : null}
       </View>
-      <Text style={[s.title, nordic && s.nordicTitle]}>
+      <Text testID={`diary-title-${diary.id}`} style={[s.title, nordic && s.nordicTitle]}>
         {diary.title}
         <Text style={s.sun}> ☼</Text>
       </Text>
@@ -38,6 +38,7 @@ export function DiaryPaper({ diary }: { diary: DiaryItem }) {
         return (
           <View
             key={block.id}
+            testID={`diary-row-${block.id}`}
             style={[s.row, index % 2 === 1 && { flexDirection: 'row-reverse' }, postcard && s.postcardRow]}
           >
             <Text style={[s.body, postcard && s.postcardBody]}>

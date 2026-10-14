@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../src/components/common/button';
 import { Empty } from '../../src/components/common/design-ui';
@@ -23,32 +23,62 @@ export default function PrivacyScreen() {
   const router = useRouter();
   const { diaryId, returnTo } = useLocalSearchParams<{ diaryId?: string; returnTo?: string }>();
   const diary = useAppStore(state => state.diaries.find(item => item.id === diaryId));
+  const setDiaryVisibility = useAppStore(state => state.setDiaryVisibility);
   const [privacy, setPrivacy] = useState<DiaryPrivacy>(diary?.privacy ?? 'private');
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>(diary?.publicBlockIds ?? (diary ? publicParagraphs(diary).map(block => block.id) : []));
   const [expanded, setExpanded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const activeDiaryIdRef = useRef<string | undefined>(diaryId);
+  const saveRequestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
   useEffect(() => {
+    activeDiaryIdRef.current = diaryId;
+    saveRequestIdRef.current += 1;
+    setSaving(false);
     if (diary) {
       setPrivacy(diary.privacy);
       setSelectedBlocks(diary.publicBlockIds ?? publicParagraphs(diary).map(block => block.id));
     }
   }, [diaryId]);
+
+  useEffect(() => () => {
+    isMountedRef.current = false;
+    saveRequestIdRef.current += 1;
+  }, []);
+
   if (!diary) return <Screen><Empty title="没有找到这篇日记" detail="请从已保存的日记进入分享。" home /></Screen>;
   const blocks = publicParagraphs(diary);
   const visibleBlocks = expanded ? blocks : blocks.slice(0, 2);
-  const finish = () => {
+  const finish = async () => {
+    if (saving) return;
+    const requestId = saveRequestIdRef.current + 1;
+    saveRequestIdRef.current = requestId;
+    const targetDiaryId = diary.id;
+    const targetReturnTo = returnTo;
     const ids = selectedBlocks.length === blocks.length ? undefined : selectedBlocks;
-    if (!useAppStore.getState().savePrivacy(diary.id, privacy, ids)) {
-      Alert.alert('至少公开一段内容', '勾选一段正文或引用，再生成分享预览。');
+    setSaving(true);
+    const result = await setDiaryVisibility(targetDiaryId, privacy, ids);
+    if (!isMountedRef.current || saveRequestIdRef.current !== requestId || activeDiaryIdRef.current !== targetDiaryId) {
       return;
     }
-    if (returnTo === 'detail') {
+    setSaving(false);
+    if (!result.ok) {
+      if (result.reason === 'invalid_input') {
+        Alert.alert('至少公开一段内容', '勾选一段正文或引用，再生成分享预览。');
+        return;
+      }
+      Alert.alert('保存失败', result.message);
+      return;
+    }
+    if (targetReturnTo === 'detail') {
       router.back();
       return;
     }
-    router.push({ pathname: '/share/result', params: { diaryId: diary.id } });
+    router.push({ pathname: '/share/result', params: { diaryId: targetDiaryId } });
   };
   const displayDate = diary.date.includes('–') ? diary.date.split('–').at(-1)?.replace('.', '月') ?? diary.date : diary.date.slice(5).replace('.', '月');
-  return <Screen header={<TopBar title="这篇日记给谁看？" onBackPress={() => router.back()} />} contentStyle={styles.content} footer={<View style={styles.footer}><Button label="完成" onPress={finish} /></View>}>
+  return <Screen header={<TopBar title="这篇日记给谁看？" onBackPress={() => router.back()} />} contentStyle={styles.content} footer={<View style={styles.footer}><Button label={saving ? '保存中...' : '完成'} onPress={finish} disabled={saving} /></View>}>
     <View style={styles.diary}>
       <Photo id={diary.coverPhotoId} style={styles.cover} />
       <View style={styles.diaryCopy}>

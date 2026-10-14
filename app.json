@@ -27,6 +27,12 @@
     "plugins": [
       "expo-router",
       "expo-image",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "允许访问你的相册，用来读取你选择的照片并生成回忆日记。"
+        }
+      ],
       "expo-dev-client"
     ],
     "extra": {

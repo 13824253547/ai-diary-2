@@ -1,0 +1,386 @@
+{
+  "provider": "deterministic",
+  "generatedAt": "2026-10-13T12:22:28.097Z",
+  "results": [
+    {
+      "fixtureId": "travel-green-people",
+      "fixtureTitle": "台南双人出行",
+      "structureChecks": [
+        {
+          "id": "title",
+          "label": "标题存在且非空",
+          "passed": true,
+          "detail": "标题长度 14"
+        },
+        {
+          "id": "summary",
+          "label": "摘要存在且非空",
+          "passed": true,
+          "detail": "摘要长度 53"
+        },
+        {
+          "id": "location-date",
+          "label": "地点与日期存在",
+          "passed": true,
+          "detail": "location=台南 · 赤崁楼 / 台南 · 神农街, date=2024.09.12"
+        },
+        {
+          "id": "cover-photo",
+          "label": "封面照片来自输入集合",
+          "passed": true,
+          "detail": "coverPhotoId=photo-1"
+        },
+        {
+          "id": "poster-photos",
+          "label": "海报照片集合合法",
+          "passed": true,
+          "detail": "posterPhotoIds=photo-1, photo-2"
+        },
+        {
+          "id": "blocks",
+          "label": "至少包含一个正文块",
+          "passed": true,
+          "detail": "text=3, quote=1, photo=1"
+        },
+        {
+          "id": "photo-reference",
+          "label": "所有照片引用均来自输入集合",
+          "passed": true,
+          "detail": "共引用 5 次"
+        },
+        {
+          "id": "photo-block",
+          "label": "包含至少一个配图块",
+          "passed": true,
+          "detail": "photoBlocks=1"
+        },
+        {
+          "id": "people",
+          "label": "人物候选符合场景预期",
+          "passed": true,
+          "detail": "people=2, invalidRefs=none"
+        }
+      ],
+      "structurePassed": true,
+      "result": {
+        "title": "赤崁楼的午后，把旅程写成一页",
+        "summary": "把 台南 · 赤崁楼 / 台南 · 神农街 的风景慢慢写下来，和同行人一起走过的画面，终于被认真地留住了。",
+        "location": "台南 · 赤崁楼 / 台南 · 神农街",
+        "date": "2024.09.12",
+        "companionName": "同行人",
+        "coverPhotoId": "photo-1",
+        "posterPhotoIds": [
+          "photo-1",
+          "photo-2"
+        ],
+        "blocks": [
+          {
+            "id": "fixture-travel-green-people-remote-p1",
+            "type": "text",
+            "title": "把旅程重新展开",
+            "content": "把 台南 · 赤崁楼 / 台南 · 神农街 的风景慢慢写下来，和同行人一起走过的画面，终于被认真地留住了。",
+            "photoIds": [
+              "photo-1",
+              "photo-2",
+              "photo-11",
+              "photo-12"
+            ]
+          },
+          {
+            "id": "fixture-travel-green-people-remote-p2",
+            "type": "text",
+            "title": "照片里的细节",
+            "content": "从 一路上的片段 到 同行的脚步，每张照片都在补完这一天的层次。",
+            "photoIds": []
+          },
+          {
+            "id": "fixture-travel-green-people-remote-p3",
+            "type": "text",
+            "title": "留给以后再看的心情",
+            "content": "等回头再翻开这一页时，还是能重新想起当时的温度、路线和停下来的理由。",
+            "photoIds": []
+          },
+          {
+            "id": "fixture-travel-green-people-remote-quote",
+            "type": "quote",
+            "content": "回忆不是把照片排好，而是把当时的心情重新接回来。",
+            "relatedBlockId": "fixture-travel-green-people-remote-p3"
+          },
+          {
+            "id": "fixture-travel-green-people-remote-photo-1",
+            "type": "photo",
+            "photoId": "photo-1",
+            "caption": "赤崁楼的午后",
+            "relatedBlockId": "fixture-travel-green-people-remote-p1"
+          }
+        ],
+        "people": [
+          {
+            "id": "person-self",
+            "name": "我",
+            "photoIds": [
+              "photo-11"
+            ],
+            "avatarPhotoId": "photo-11"
+          },
+          {
+            "id": "person-friend",
+            "name": "同行人",
+            "photoIds": [
+              "photo-12"
+            ],
+            "avatarPhotoId": "photo-12"
+          }
+        ]
+      }
+    },
+    {
+      "fixtureId": "travel-blue-landscape",
+      "fixtureTitle": "圣托里尼风景组",
+      "structureChecks": [
+        {
+          "id": "title",
+          "label": "标题存在且非空",
+          "passed": true,
+          "detail": "标题长度 14"
+        },
+        {
+          "id": "summary",
+          "label": "摘要存在且非空",
+          "passed": true,
+          "detail": "摘要长度 52"
+        },
+        {
+          "id": "location-date",
+          "label": "地点与日期存在",
+          "passed": true,
+          "detail": "location=圣托里尼 / 卡帕多奇亚, date=2026.08.20"
+        },
+        {
+          "id": "cover-photo",
+          "label": "封面照片来自输入集合",
+          "passed": true,
+          "detail": "coverPhotoId=photo-13"
+        },
+        {
+          "id": "poster-photos",
+          "label": "海报照片集合合法",
+          "passed": true,
+          "detail": "posterPhotoIds=photo-13, photo-14"
+        },
+        {
+          "id": "blocks",
+          "label": "至少包含一个正文块",
+          "passed": true,
+          "detail": "text=3, quote=1, photo=1"
+        },
+        {
+          "id": "photo-reference",
+          "label": "所有照片引用均来自输入集合",
+          "passed": true,
+          "detail": "共引用 5 次"
+        },
+        {
+          "id": "photo-block",
+          "label": "包含至少一个配图块",
+          "passed": true,
+          "detail": "photoBlocks=1"
+        },
+        {
+          "id": "people",
+          "label": "人物候选符合场景预期",
+          "passed": true,
+          "detail": "people=1, invalidRefs=none"
+        }
+      ],
+      "structurePassed": true,
+      "result": {
+        "title": "蓝白色的夏天，把旅程写成一页",
+        "summary": "从 蓝白色的夏天 开始，这次旅程的情绪慢慢展开。照片里的风、街道和停留过的地方，都值得写进今天的日记里。",
+        "location": "圣托里尼 / 卡帕多奇亚",
+        "date": "2026.08.20",
+        "companionName": "自己",
+        "coverPhotoId": "photo-13",
+        "posterPhotoIds": [
+          "photo-13",
+          "photo-14"
+        ],
+        "blocks": [
+          {
+            "id": "fixture-travel-blue-landscape-remote-p1",
+            "type": "text",
+            "title": "把旅程重新展开",
+            "content": "从 蓝白色的夏天 开始，这次旅程的情绪慢慢展开。照片里的风、街道和停留过的地方，都值得写进今天的日记里。",
+            "photoIds": [
+              "photo-13",
+              "photo-14",
+              "photo-15",
+              "photo-17"
+            ]
+          },
+          {
+            "id": "fixture-travel-blue-landscape-remote-p2",
+            "type": "text",
+            "title": "照片里的细节",
+            "content": "从 一路上的片段 到 同行的脚步，每张照片都在补完这一天的层次。",
+            "photoIds": []
+          },
+          {
+            "id": "fixture-travel-blue-landscape-remote-p3",
+            "type": "text",
+            "title": "留给以后再看的心情",
+            "content": "等回头再翻开这一页时，还是能重新想起当时的温度、路线和停下来的理由。",
+            "photoIds": []
+          },
+          {
+            "id": "fixture-travel-blue-landscape-remote-quote",
+            "type": "quote",
+            "content": "回忆不是把照片排好，而是把当时的心情重新接回来。",
+            "relatedBlockId": "fixture-travel-blue-landscape-remote-p3"
+          },
+          {
+            "id": "fixture-travel-blue-landscape-remote-photo-1",
+            "type": "photo",
+            "photoId": "photo-13",
+            "caption": "蓝白色的夏天",
+            "relatedBlockId": "fixture-travel-blue-landscape-remote-p1"
+          }
+        ],
+        "people": [
+          {
+            "id": "person-self",
+            "name": "我",
+            "photoIds": [
+              "photo-13"
+            ],
+            "avatarPhotoId": "photo-13"
+          }
+        ]
+      }
+    },
+    {
+      "fixtureId": "travel-brown-city",
+      "fixtureTitle": "城市夜行与街景",
+      "structureChecks": [
+        {
+          "id": "title",
+          "label": "标题存在且非空",
+          "passed": true,
+          "detail": "标题长度 14"
+        },
+        {
+          "id": "summary",
+          "label": "摘要存在且非空",
+          "passed": true,
+          "detail": "摘要长度 57"
+        },
+        {
+          "id": "location-date",
+          "label": "地点与日期存在",
+          "passed": true,
+          "detail": "location=台南 · 老街 / 台南 · 中西区, date=2024.09.13"
+        },
+        {
+          "id": "cover-photo",
+          "label": "封面照片来自输入集合",
+          "passed": true,
+          "detail": "coverPhotoId=photo-4"
+        },
+        {
+          "id": "poster-photos",
+          "label": "海报照片集合合法",
+          "passed": true,
+          "detail": "posterPhotoIds=photo-4, photo-5"
+        },
+        {
+          "id": "blocks",
+          "label": "至少包含一个正文块",
+          "passed": true,
+          "detail": "text=3, quote=1, photo=1"
+        },
+        {
+          "id": "photo-reference",
+          "label": "所有照片引用均来自输入集合",
+          "passed": true,
+          "detail": "共引用 5 次"
+        },
+        {
+          "id": "photo-block",
+          "label": "包含至少一个配图块",
+          "passed": true,
+          "detail": "photoBlocks=1"
+        },
+        {
+          "id": "people",
+          "label": "人物候选符合场景预期",
+          "passed": true,
+          "detail": "people=1, invalidRefs=none"
+        }
+      ],
+      "structurePassed": true,
+      "result": {
+        "title": "一碗台南味道，把旅程写成一页",
+        "summary": "台南 · 老街 / 台南 · 中西区 的光线很轻，照片里的节奏也很慢。把这一天拆成几段，再重新拼成一页完整的回忆。",
+        "location": "台南 · 老街 / 台南 · 中西区",
+        "date": "2024.09.13",
+        "companionName": "自己",
+        "coverPhotoId": "photo-4",
+        "posterPhotoIds": [
+          "photo-4",
+          "photo-5"
+        ],
+        "blocks": [
+          {
+            "id": "fixture-travel-brown-city-remote-p1",
+            "type": "text",
+            "title": "把旅程重新展开",
+            "content": "台南 · 老街 / 台南 · 中西区 的光线很轻，照片里的节奏也很慢。把这一天拆成几段，再重新拼成一页完整的回忆。",
+            "photoIds": [
+              "photo-4",
+              "photo-5",
+              "photo-8",
+              "photo-9"
+            ]
+          },
+          {
+            "id": "fixture-travel-brown-city-remote-p2",
+            "type": "text",
+            "title": "照片里的细节",
+            "content": "从 一路上的片段 到 同行的脚步，每张照片都在补完这一天的层次。",
+            "photoIds": []
+          },
+          {
+            "id": "fixture-travel-brown-city-remote-p3",
+            "type": "text",
+            "title": "留给以后再看的心情",
+            "content": "等回头再翻开这一页时，还是能重新想起当时的温度、路线和停下来的理由。",
+            "photoIds": []
+          },
+          {
+            "id": "fixture-travel-brown-city-remote-quote",
+            "type": "quote",
+            "content": "回忆不是把照片排好，而是把当时的心情重新接回来。",
+            "relatedBlockId": "fixture-travel-brown-city-remote-p3"
+          },
+          {
+            "id": "fixture-travel-brown-city-remote-photo-1",
+            "type": "photo",
+            "photoId": "photo-4",
+            "caption": "一碗台南味道",
+            "relatedBlockId": "fixture-travel-brown-city-remote-p1"
+          }
+        ],
+        "people": [
+          {
+            "id": "person-self",
+            "name": "我",
+            "photoIds": [
+              "photo-4"
+            ],
+            "avatarPhotoId": "photo-4"
+          }
+        ]
+      }
+    }
+  ]
+}

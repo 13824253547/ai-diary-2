@@ -11,7 +11,9 @@ export type ContentBlock =
 export type FaceRect = { x: number; y: number; width: number; height: number };
 export type DiaryPhoto = {
   id: string; title: string; location: string; emoji: string; color: string; date: string;
-  image?: number; selected?: boolean; personIds?: string[]; faceRects?: FaceRect[];
+  image?: number; uri?: string; localUri?: string; albumId?: string; albumTitle?: string;
+  width?: number; height?: number; filename?: string; source?: 'mock' | 'device';
+  selected?: boolean; personIds?: string[]; faceRects?: FaceRect[];
 };
 export type DiaryCharacter = {
   id: string; name: string; roleLabel: string; description: string; theme: CharacterTheme;
@@ -23,6 +25,7 @@ export type DiaryItem = {
   location: string; date: string; summary: string; helperMessage: string; characterId: string;
   companionName: string; privacy: DiaryPrivacy; photoIds: string[]; coverPhotoId: string;
   blocks: ContentBlock[]; exportedImage: boolean; exportedPdf: boolean; shareModes: ShareMode[];
+  version?: number;
   /** Undefined shares every block; explicit selection contains only paragraph/quote IDs. */
   publicBlockIds?: string[];
   posterPhotoIds?: string[];
@@ -33,7 +36,16 @@ export type DiaryItem = {
   anonymous?: boolean;
 };
 export type HistoryGroup = { id: string; label: string; diaryIds: string[] };
-export type GenerationState = { round: number; progress: number; status: 'idle' | 'running' | 'complete' };
+export type GenerationStatus = 'idle' | 'running' | 'complete' | 'failed' | 'cancelled';
+export type GenerationStage = 'queued' | 'analyzing-photos' | 'drafting' | 'structuring' | 'completed' | 'failed' | 'cancelled';
+export type GenerationState = {
+  round: number;
+  progress: number;
+  status: GenerationStatus;
+  remoteJobId?: string;
+  remoteStage?: GenerationStage;
+  errorMessage?: string;
+};
 export type DiaryDraft = {
   id: string; sourceDiaryId?: string; diary: DiaryItem; selectedPhotoIds: string[];
   people: DiaryPerson[]; generation: GenerationState; dirty: boolean; savedDiaryId?: string;
