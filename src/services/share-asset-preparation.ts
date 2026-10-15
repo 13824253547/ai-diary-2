@@ -1,11 +1,12 @@
 import { Image } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import type { DiaryItem, DiaryPhoto, ShareMode } from '../types/diary';
+import type { DiaryItem, DiaryPhoto, FaceRect, ShareMode } from '../types/diary';
 
 type ShareAssetPreparationReason =
   | 'missing_photo'
   | 'missing_source'
   | 'missing_face_rects'
+  | 'invalid_face_rects'
   | 'render_failed';
 
 export type PreparedShareAsset = {
@@ -29,6 +30,7 @@ type ShareAssetPreparationDeps = {
   getCacheDirectory?: () => string | undefined;
   getPhotoSourceUri?: (photo: DiaryPhoto) => string | undefined;
   renderAnonymousAsset?: (input: AssetRendererInput) => Promise<string>;
+  isPreparedAssetReadable?: (uri: string) => Promise<boolean>;
 };
 
 type PrepareDiaryShareAssetsInput = {
@@ -37,21 +39,32 @@ type PrepareDiaryShareAssetsInput = {
   getPhotoById: (photoId: string) => DiaryPhoto | undefined;
 };
 
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 const MASK_DIRECTORY = 'anonymous-share-assets';
-
-function escapeXml(value: string) {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
+const MASK_COLOR = { red: 192, green: 182, blue: 170, alpha: 255 };
 
 function buildRectToken(photo: DiaryPhoto) {
   return (photo.faceRects ?? [])
     .map(rect => `${rect.x},${rect.y},${rect.width},${rect.height}`)
     .join('|');
+}
+
+function isValidFaceRect(value: unknown): value is FaceRect {
+  if (typeof value !== 'object' || value === null) return false;
+  const rect = value as Partial<FaceRect>;
+  return Number.isFinite(rect.x)
+    && Number.isFinite(rect.y)
+    && Number.isFinite(rect.width)
+    && Number.isFinite(rect.height)
+    && (rect.width ?? 0) > 0
+    && (rect.height ?? 0) > 0
+    && (rect.x ?? 1) < 1
+    && (rect.y ?? 1) < 1
+    && (rect.x ?? 0) + (rect.width ?? 0) > 0
+    && (rect.y ?? 0) + (rect.height ?? 0) > 0;
+}
+
+function hasValidFaceRects(photo: DiaryPhoto) {
+  return Array.isArray(photo.faceRects) && photo.faceRects.length > 0 && photo.faceRects.every(isValidFaceRect);
 }
 
 function getFallbackSourceUri(photo: DiaryPhoto) {
@@ -64,33 +77,95 @@ function getFallbackSourceUri(photo: DiaryPhoto) {
   return undefined;
 }
 
-function buildAnonymousSvg(photo: DiaryPhoto, sourceUri: string) {
-  const resolved = photo.image ? Image.resolveAssetSource(photo.image) : undefined;
-  const width = photo.width ?? resolved?.width ?? 1200;
-  const height = photo.height ?? resolved?.height ?? 1200;
-  const masks = (photo.faceRects ?? [])
-    .map(rect => `<rect x="${rect.x * width}" y="${rect.y * height}" width="${rect.width * width}" height="${rect.height * height}" rx="12" ry="12" fill="#C0B6AA" />`)
-    .join('');
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="${SVG_NAMESPACE}" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <image href="${escapeXml(sourceUri)}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="none" />
-  ${masks}
-</svg>`;
+function normalizeReadableUri(uri: string) {
+  if (uri.startsWith('file://') || uri.startsWith('data:')) {
+    return uri;
+  }
+  if (uri.startsWith('/')) {
+    return `file://${uri}`;
+  }
+  return uri;
 }
 
-async function renderAnonymousAssetToSvg(input: AssetRendererInput, getCacheDirectory: () => string | undefined) {
+async function writeBase64File(uri: string, base64: string) {
+  if (uri.startsWith('file://')) {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const { Buffer } = require('buffer');
+      const filePath = uri.replace(/^file:\/\//, '');
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+      return;
+    } catch {}
+  }
+  await FileSystem.writeAsStringAsync(uri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+}
+
+async function readBase64File(uri: string) {
+  if (uri.startsWith('file://')) {
+    try {
+      const fs = require('fs');
+      const filePath = uri.replace(/^file:\/\//, '');
+      return fs.readFileSync(filePath).toString('base64');
+    } catch {}
+  }
+  return FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+}
+
+async function doesFileExist(uri: string) {
+  if (uri.startsWith('file://')) {
+    try {
+      const fs = require('fs');
+      return fs.existsSync(uri.replace(/^file:\/\//, ''));
+    } catch {}
+  }
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists;
+  } catch {
+    return false;
+  }
+}
+
+async function renderAnonymousAssetToPng(input: AssetRendererInput, getCacheDirectory: () => string | undefined) {
   const cacheDirectory = getCacheDirectory();
   if (!cacheDirectory) {
     throw new Error('cache directory unavailable');
   }
   const baseDir = `${cacheDirectory}${MASK_DIRECTORY}/`;
-  const uri = `${baseDir}${encodeURIComponent(input.cacheKey)}.svg`;
+  const uri = `${baseDir}${encodeURIComponent(input.cacheKey)}.png`;
   await FileSystem.makeDirectoryAsync(baseDir, { intermediates: true });
-  const info = await FileSystem.getInfoAsync(uri);
-  if (!info.exists) {
-    await FileSystem.writeAsStringAsync(uri, buildAnonymousSvg(input.photo, input.sourceUri), {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+  if (!(await doesFileExist(uri))) {
+    const Jimp = require('jimp-compact');
+    const { Buffer } = require('buffer');
+    const readableUri = normalizeReadableUri(input.sourceUri);
+    const sourceBase64 = readableUri.startsWith('data:')
+      ? readableUri.replace(/^data:[^;]+;base64,/, '')
+      : await readBase64File(readableUri);
+    const image = await Jimp.read(Buffer.from(sourceBase64, 'base64'));
+    const maskColor = Jimp.rgbaToInt(MASK_COLOR.red, MASK_COLOR.green, MASK_COLOR.blue, MASK_COLOR.alpha);
+    for (const rect of input.photo.faceRects ?? []) {
+      const left = Math.floor(Math.max(0, rect.x) * image.bitmap.width);
+      const top = Math.floor(Math.max(0, rect.y) * image.bitmap.height);
+      const right = Math.ceil(Math.min(1, rect.x + rect.width) * image.bitmap.width);
+      const bottom = Math.ceil(Math.min(1, rect.y + rect.height) * image.bitmap.height);
+      const width = Math.max(1, Math.min(image.bitmap.width - left, right - left));
+      const height = Math.max(1, Math.min(image.bitmap.height - top, bottom - top));
+      image.scan(left, top, width, height, (_x: number, _y: number, idx: number) => {
+        image.bitmap.data[idx] = MASK_COLOR.red;
+        image.bitmap.data[idx + 1] = MASK_COLOR.green;
+        image.bitmap.data[idx + 2] = MASK_COLOR.blue;
+        image.bitmap.data[idx + 3] = MASK_COLOR.alpha;
+      });
+      image.setPixelColor(maskColor, left, top);
+    }
+    const encoded = await image.getBufferAsync(Jimp.MIME_PNG);
+    await writeBase64File(uri, encoded.toString('base64'));
   }
   return uri;
 }
@@ -98,7 +173,11 @@ async function renderAnonymousAssetToSvg(input: AssetRendererInput, getCacheDire
 export function createShareAssetPreparationService(deps: ShareAssetPreparationDeps = {}) {
   const getCacheDirectory = deps.getCacheDirectory ?? (() => FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? undefined);
   const getPhotoSourceUri = deps.getPhotoSourceUri ?? getFallbackSourceUri;
-  const renderAnonymousAsset = deps.renderAnonymousAsset ?? (input => renderAnonymousAssetToSvg(input, getCacheDirectory));
+  const renderAnonymousAsset = deps.renderAnonymousAsset ?? (input => renderAnonymousAssetToPng(input, getCacheDirectory));
+  const isPreparedAssetReadable = deps.isPreparedAssetReadable ?? (async uri => {
+    if (!uri.startsWith('file://') && !uri.startsWith('/')) return true;
+    return doesFileExist(uri);
+  });
   const assetCache = new Map<string, Promise<string>>();
 
   async function getAnonymousAsset(photo: DiaryPhoto, diary: DiaryItem, target: ShareMode): Promise<PreparedShareAsset> {
@@ -108,6 +187,9 @@ export function createShareAssetPreparationService(deps: ShareAssetPreparationDe
     }
     if (!photo.faceRects?.length) {
       throw new Error('missing_face_rects');
+    }
+    if (!hasValidFaceRects(photo)) {
+      throw new Error('invalid_face_rects');
     }
     const cacheKey = [
       diary.id,
@@ -130,6 +212,10 @@ export function createShareAssetPreparationService(deps: ShareAssetPreparationDe
       assetCache.set(cacheKey, task);
     }
     const uri = await task;
+    if (!(await isPreparedAssetReadable(uri))) {
+      assetCache.delete(cacheKey);
+      throw new Error('render_failed');
+    }
     return {
       photoId: photo.id,
       uri,
@@ -165,6 +251,13 @@ export function createShareAssetPreparationService(deps: ShareAssetPreparationDe
             anonymous: false,
           });
           continue;
+        }
+        if (photo.faceRects?.length && !hasValidFaceRects(photo)) {
+          return {
+            ok: false,
+            reason: 'invalid_face_rects',
+            message: '当前有照片包含无效的人脸遮挡区域，暂时不能匿名分享。',
+          };
         }
         if (!photo.faceRects?.length && (photo.personIds?.length ?? 0) > 0) {
           return {

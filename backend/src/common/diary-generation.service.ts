@@ -91,8 +91,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function asStringArray(value: unknown) {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+function requireProviderString(value: unknown, field: string) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`provider result is missing ${field}`);
+  }
+  return value.trim();
 }
 
 function stripMarkdownFence(value: string) {
@@ -111,25 +114,47 @@ function parseJsonObject(value: string) {
   return JSON.parse(cleaned.slice(start, end + 1)) as unknown;
 }
 
-function normalizePhotoIds(value: unknown, selectedPhotoIds: string[]) {
+function normalizePhotoIds(value: unknown, selectedPhotoIds: string[], source: string) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`${source} must be an array`);
+  }
+
   const selected = new Set(selectedPhotoIds);
-  return asStringArray(value).filter(photoId => selected.has(photoId));
+  return value.map(photoId => {
+    if (typeof photoId !== 'string' || !photoId.trim()) {
+      throw new Error(`${source} contains an invalid photo ID`);
+    }
+    if (!selected.has(photoId)) {
+      throw new Error(`${source} references a photo outside the selected set`);
+    }
+    return photoId;
+  });
 }
 
 function normalizePeople(value: unknown, selectedPhotoIds: string[]) {
-  if (!Array.isArray(value)) return undefined;
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error('provider people must be an array');
   const people = value
     .filter(isRecord)
     .map(person => {
+      const photoIds = normalizePhotoIds(person.photoIds, selectedPhotoIds, 'person photoIds');
+      if (
+        typeof person.avatarPhotoId === 'string'
+        && !selectedPhotoIds.includes(person.avatarPhotoId)
+      ) {
+        throw new Error('person avatarPhotoId references a photo outside the selected set');
+      }
       if (
         typeof person.id !== 'string'
+        || !person.id.trim()
         || typeof person.name !== 'string'
+        || !person.name.trim()
         || typeof person.avatarPhotoId !== 'string'
       ) {
         return undefined;
       }
-      const photoIds = normalizePhotoIds(person.photoIds, selectedPhotoIds);
-      if (!photoIds.length || !selectedPhotoIds.includes(person.avatarPhotoId)) return undefined;
+      if (!photoIds.length) return undefined;
       return {
         id: person.id,
         name: person.name,
@@ -142,40 +167,53 @@ function normalizePeople(value: unknown, selectedPhotoIds: string[]) {
 }
 
 function normalizeRewritePhotoIds(value: unknown, selectedPhotoIds: string[]) {
-  const normalized = normalizePhotoIds(value, selectedPhotoIds);
+  const normalized = normalizePhotoIds(value, selectedPhotoIds, 'rewrite photoIds');
   return normalized.length ? normalized : undefined;
 }
 
 function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
   if (!Array.isArray(value)) throw new Error('provider blocks must be an array');
   const blocks = value
-    .filter(isRecord)
     .map((block, index) => {
+      if (!isRecord(block)) {
+        throw new Error('provider blocks contain invalid entries');
+      }
       if (typeof block.type !== 'string' || typeof block.id !== 'string') {
         throw new Error('provider blocks contain invalid identifiers');
       }
       if (block.type === 'text') {
-        if (typeof block.content !== 'string') throw new Error('text block content is missing');
+        if (typeof block.content !== 'string' || !block.content.trim()) {
+          throw new Error('text block content is missing');
+        }
         return {
           id: block.id,
           type: 'text' as const,
-          title: typeof block.title === 'string' ? block.title : undefined,
+          title: block.title === undefined ? undefined : requireProviderString(block.title, 'text block title'),
           content: block.content,
-          photoIds: normalizePhotoIds(block.photoIds, input.selectedPhotoIds),
+          photoIds: normalizePhotoIds(block.photoIds, input.selectedPhotoIds, 'text block photoIds'),
         };
       }
       if (block.type === 'quote') {
-        if (typeof block.content !== 'string') throw new Error('quote block content is missing');
+        if (typeof block.content !== 'string' || !block.content.trim()) {
+          throw new Error('quote block content is missing');
+        }
         return {
           id: block.id,
           type: 'quote' as const,
           content: block.content,
-          photoIds: normalizePhotoIds(block.photoIds, input.selectedPhotoIds),
-          relatedBlockId: typeof block.relatedBlockId === 'string' ? block.relatedBlockId : undefined,
+          photoIds: normalizePhotoIds(block.photoIds, input.selectedPhotoIds, 'quote block photoIds'),
+          relatedBlockId: block.relatedBlockId === undefined
+            ? undefined
+            : requireProviderString(block.relatedBlockId, 'quote block relatedBlockId'),
         };
       }
       if (block.type === 'photo') {
-        if (typeof block.photoId !== 'string' || typeof block.caption !== 'string') {
+        if (
+          typeof block.photoId !== 'string'
+          || !block.photoId.trim()
+          || typeof block.caption !== 'string'
+          || !block.caption.trim()
+        ) {
           throw new Error('photo block is missing required fields');
         }
         if (!input.selectedPhotoIds.includes(block.photoId)) {
@@ -186,7 +224,9 @@ function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
           type: 'photo' as const,
           photoId: block.photoId,
           caption: block.caption,
-          relatedBlockId: typeof block.relatedBlockId === 'string' ? block.relatedBlockId : undefined,
+          relatedBlockId: block.relatedBlockId === undefined
+            ? undefined
+            : requireProviderString(block.relatedBlockId, 'photo block relatedBlockId'),
         };
       }
       throw new Error(`unsupported generation block type: ${block.type}`);
@@ -201,39 +241,35 @@ function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
 
   return blocks.map((block, index) => ({
     ...block,
-    id: block.id || `${input.draftId}-provider-block-${index + 1}`,
+    id: block.id.trim() || `${input.draftId}-provider-block-${index + 1}`,
   }));
 }
 
 function normalizeResult(raw: unknown, input: GenerationInputSnapshot): GenerationResultRecord {
   if (!isRecord(raw)) throw new Error('provider result must be an object');
-  const coverPhotoId = typeof raw.coverPhotoId === 'string' && input.selectedPhotoIds.includes(raw.coverPhotoId)
-    ? raw.coverPhotoId
-    : input.selectedPhotoIds[0];
-  if (!coverPhotoId) throw new Error('generation result is missing a valid cover photo');
+  const title = requireProviderString(raw.title, 'title');
+  const summary = requireProviderString(raw.summary, 'summary');
+  const location = requireProviderString(raw.location, 'location');
+  const date = requireProviderString(raw.date, 'date');
+  const companionName = requireProviderString(raw.companionName, 'companionName');
+  const coverPhotoId = requireProviderString(raw.coverPhotoId, 'coverPhotoId');
+  if (!input.selectedPhotoIds.includes(coverPhotoId)) {
+    throw new Error('coverPhotoId references a photo outside the selected set');
+  }
+  if (!Array.isArray(raw.posterPhotoIds)) {
+    throw new Error('posterPhotoIds must be an array');
+  }
+  if (raw.people !== undefined && raw.people !== null && !Array.isArray(raw.people)) {
+    throw new Error('provider people must be an array');
+  }
   const blocks = normalizeBlocks(raw.blocks, input);
-  const posterPhotoIds = normalizePhotoIds(raw.posterPhotoIds, input.selectedPhotoIds).slice(0, 2);
-  const facts = PHOTO_FACTS[coverPhotoId];
-  const location = typeof raw.location === 'string' && raw.location.trim()
-    ? raw.location.trim()
-    : (facts?.location ?? '旅途中的一个角落');
-  const date = typeof raw.date === 'string' && raw.date.trim()
-    ? raw.date.trim()
-    : (facts?.date ?? '2026.10.13');
-  const title = typeof raw.title === 'string' && raw.title.trim()
-    ? raw.title.trim()
-    : `${facts?.title ?? '旅途里的片刻'}，把旅程写成一页`;
-  const summary = typeof raw.summary === 'string' && raw.summary.trim()
-    ? raw.summary.trim()
-    : title.slice(0, 72);
+  const posterPhotoIds = normalizePhotoIds(raw.posterPhotoIds, input.selectedPhotoIds, 'posterPhotoIds').slice(0, 2);
   return {
     title,
     summary,
     location,
     date,
-    companionName: typeof raw.companionName === 'string' && raw.companionName.trim()
-      ? raw.companionName.trim()
-      : '自己',
+    companionName,
     coverPhotoId,
     posterPhotoIds,
     blocks,
@@ -293,8 +329,92 @@ function parsePositiveInt(value: string | undefined, fallback: number) {
   return parsed;
 }
 
+function parseTemperature(value: string | undefined, fallback: number) {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return fallback;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 2) return fallback;
+  return parsed;
+}
+
+function resolveOpenAIResponseFormat() {
+  const mode = (process.env.AI_PROVIDER_RESPONSE_FORMAT ?? 'json_object').trim().toLowerCase();
+  if (!mode || mode === 'off' || mode === 'none' || mode === 'disabled') {
+    return undefined;
+  }
+  if (mode === 'json_object') {
+    return { type: 'json_object' as const };
+  }
+  throw new DiaryGenerationProviderError('provider_failed', `unsupported AI provider response format: ${mode}`, false);
+}
+
+function buildOpenAICompatibleChatBody(input: {
+  model: string;
+  temperature: number;
+  messages: Array<{ role: 'system' | 'user'; content: string }>;
+}) {
+  const body: {
+    model: string;
+    temperature: number;
+    messages: Array<{ role: 'system' | 'user'; content: string }>;
+    response_format?: { type: 'json_object' };
+  } = {
+    model: input.model,
+    temperature: input.temperature,
+    messages: input.messages,
+  };
+  const responseFormat = resolveOpenAIResponseFormat();
+  if (responseFormat) {
+    body.response_format = responseFormat;
+  }
+  return body;
+}
+
 function isAbortError(error: unknown) {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+const RETRYABLE_NETWORK_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+
+function readErrorCode(error: unknown) {
+  if (isRecord(error) && typeof error.code === 'string') {
+    return error.code;
+  }
+  const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
+  if (isRecord(cause) && typeof cause.code === 'string') {
+    return cause.code;
+  }
+  return undefined;
+}
+
+function isRetryableNetworkError(error: unknown) {
+  if (isAbortError(error)) return false;
+  const code = readErrorCode(error);
+  if (code && RETRYABLE_NETWORK_ERROR_CODES.has(code)) return true;
+  return error instanceof TypeError && /fetch failed|network|socket|connect/i.test(error.message);
+}
+
+function buildRetryableNetworkFailureMessage(error: unknown) {
+  const code = readErrorCode(error);
+  if (code) {
+    return `AI provider network request failed (${code})`;
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return `AI provider network request failed: ${error.message.trim()}`;
+  }
+  return 'AI provider network request failed';
 }
 
 function isRetryableStatus(status: number) {
@@ -334,6 +454,7 @@ export class DiaryGenerationService {
     }
 
     const timeoutMs = parsePositiveInt(process.env.AI_PROVIDER_TIMEOUT_MS, 15000);
+    const temperature = parseTemperature(process.env.AI_PROVIDER_GENERATION_TEMPERATURE, 0.7);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -344,10 +465,9 @@ export class DiaryGenerationService {
           'content-type': 'application/json',
           authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
+        body: JSON.stringify(buildOpenAICompatibleChatBody({
           model,
-          temperature: 0.7,
-          response_format: { type: 'json_object' },
+          temperature,
           messages: [
             {
               role: 'system',
@@ -355,7 +475,7 @@ export class DiaryGenerationService {
                 '你是一个中文旅行日记整理助手。',
                 '请只输出 JSON，不要输出解释文字。',
                 '必须返回 title、summary、location、date、companionName、coverPhotoId、posterPhotoIds、blocks、people 字段。',
-                'blocks 至少包含 1 个 text 块，photo 块引用的 photoId 必须来自输入的 selectedPhotoIds。',
+                'blocks 至少包含 1 个 text 块。coverPhotoId、posterPhotoIds、blocks 和 people 中的所有照片引用都必须来自输入的 selectedPhotoIds。',
               ].join('\n'),
             },
             {
@@ -372,7 +492,7 @@ export class DiaryGenerationService {
               ].join('\n'),
             },
           ],
-        }),
+        })),
         signal: controller.signal,
       });
 
@@ -392,6 +512,9 @@ export class DiaryGenerationService {
       if (isAbortError(error)) {
         throw new DiaryGenerationProviderError('timeout', `AI provider request timed out after ${timeoutMs}ms`, true);
       }
+      if (isRetryableNetworkError(error)) {
+        throw new DiaryGenerationProviderError('provider_failed', buildRetryableNetworkFailureMessage(error), true);
+      }
       if (error instanceof Error) {
         throw new DiaryGenerationProviderError('provider_failed', error.message, false);
       }
@@ -410,6 +533,7 @@ export class DiaryGenerationService {
     }
 
     const timeoutMs = parsePositiveInt(process.env.AI_PROVIDER_TIMEOUT_MS, 15000);
+    const temperature = parseTemperature(process.env.AI_PROVIDER_REWRITE_TEMPERATURE, 0.7);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const scopedPhotoIds = input.photoIds?.length ? input.photoIds : input.selectedPhotoIds.slice(0, 2);
@@ -421,10 +545,9 @@ export class DiaryGenerationService {
           'content-type': 'application/json',
           authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
+        body: JSON.stringify(buildOpenAICompatibleChatBody({
           model,
-          temperature: 0.7,
-          response_format: { type: 'json_object' },
+          temperature,
           messages: [
             {
               role: 'system',
@@ -451,7 +574,7 @@ export class DiaryGenerationService {
               ].join('\n'),
             },
           ],
-        }),
+        })),
         signal: controller.signal,
       });
 

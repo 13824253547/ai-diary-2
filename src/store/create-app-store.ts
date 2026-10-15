@@ -66,6 +66,7 @@ export type AppStore = {
   currentDiaryId: string;
   generationPhaseIndex: number;
   companionName: string;
+  photos: DiaryPhoto[];
   diaries: DiaryItem[];
   issueLog: string[];
   activeDraftId?: string;
@@ -116,6 +117,7 @@ export type AppStore = {
   savePrivacy: (diaryId: string, privacy: DiaryPrivacy, publicBlockIds?: string[]) => boolean;
   setDiaryVisibility: (diaryId: string, privacy: DiaryPrivacy, publicBlockIds?: string[]) => Promise<DiaryVisibilitySaveResult>;
   recordShareDemo: (diaryId: string, mode: ShareMode) => boolean;
+  confirmShareDelivery: (input: { diaryId: string; mode: ShareMode; operationId: string; version: number }) => boolean;
   sendChat: (text: string) => void;
   toggleDiscoveryLike: (id: string) => void;
   addMaterialPhoto: (id: string) => void;
@@ -162,6 +164,14 @@ type CreationStep = import('../types/creation').CreationStep;
 
 const platforms: ShareMode[] = ['wechat', 'moments', 'xiaohongshu', 'weibo', 'x'];
 
+function clonePhotoAsset(photo: DiaryPhoto): DiaryPhoto {
+  return {
+    ...photo,
+    personIds: photo.personIds ? [...photo.personIds] : undefined,
+    faceRects: photo.faceRects?.map(rect => ({ ...rect })),
+  };
+}
+
 export function createDefaultAppStoreDeps(overrides: AppStoreDeps = {}): Required<AppStoreDeps> {
   const now = overrides.now ?? (() => Date.now());
   let nextSequence = 1;
@@ -207,7 +217,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
   const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
   const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
 
-  const restoreDraftFromSnapshot = (value: unknown): DiaryDraft | undefined => {
+  const restoreDraftFromSnapshot = (value: unknown, photos: DiaryPhoto[]): DiaryDraft | undefined => {
     if (!isRecord(value) || !isRecord(value.diary) || !isRecord(value.generation)) return undefined;
     if (typeof value.id !== 'string' || typeof value.diary.id !== 'string') return undefined;
     if (typeof value.diary.title !== 'string' || typeof value.diary.summary !== 'string') return undefined;
@@ -229,14 +239,14 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       .map(person => ({
         id: person.id as string,
         name: person.name as string,
-        photoIds: sanitizePhotoIds(person.photoIds as string[], resolved.photos),
+        photoIds: sanitizePhotoIds(person.photoIds as string[], photos),
         avatarPhotoId: person.avatarPhotoId as string,
         aliases: isStringArray(person.aliases) ? [...new Set(person.aliases)] : undefined,
       }))
       .filter(person => person.photoIds.length > 0);
 
-    const selectedPhotoIds = sanitizePhotoIds(value.selectedPhotoIds, resolved.photos);
-    const diaryPhotoIds = sanitizePhotoIds(value.diary.photoIds, resolved.photos);
+    const selectedPhotoIds = sanitizePhotoIds(value.selectedPhotoIds, photos);
+    const diaryPhotoIds = sanitizePhotoIds(value.diary.photoIds, photos);
     const diary = normalizeDiaryPhotos({
       id: value.diary.id,
       type: value.diary.type as DiaryType,
@@ -259,7 +269,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       exportModes: isStringArray(value.diary.exportModes) ? value.diary.exportModes as ShareMode[] : [],
       version: typeof value.diary.version === 'number' ? value.diary.version : undefined,
       publicBlockIds: isStringArray(value.diary.publicBlockIds) ? value.diary.publicBlockIds : undefined,
-      posterPhotoIds: isStringArray(value.diary.posterPhotoIds) ? sanitizePhotoIds(value.diary.posterPhotoIds, resolved.photos) : undefined,
+      posterPhotoIds: isStringArray(value.diary.posterPhotoIds) ? sanitizePhotoIds(value.diary.posterPhotoIds, photos) : undefined,
       people,
       createdInSession: isBoolean(value.diary.createdInSession) ? value.diary.createdInSession : true,
       anonymous: isBoolean(value.diary.anonymous) ? value.diary.anonymous : undefined,
@@ -290,6 +300,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     let activeMonthlyExportController: AbortController | undefined;
     const pendingDiscardDraftIds = new Set<string>();
     const pendingVisibilityRequests = new Map<string, Promise<DiaryVisibilitySaveResult>>();
+    const confirmedShareOperations = new Map<string, string>();
     const pendingRewriteRequestIds = new Map<string, number>();
     const pendingRewriteFingerprints = new Map<string, string>();
     let nextRewriteRequestId = 1;
@@ -318,10 +329,19 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       failed: 4,
       cancelled: 4,
     };
+    const applyShareRecord = (diaryId: string, mode: ShareMode) => {
+      set(state => ({
+        diaries: state.diaries.map(item => item.id !== diaryId ? item : platforms.includes(mode)
+          ? { ...item, shareModes: [...new Set([...item.shareModes, mode])] }
+          : { ...item, exportModes: [...new Set([...(item.exportModes ?? []), mode])], exportedPdf: item.exportedPdf || mode === 'pdf', exportedImage: item.exportedImage || ['save', 'image', 'poster'].includes(mode) }),
+      }));
+    };
+    const getConfirmedShareScope = (input: { diaryId: string; mode: ShareMode; version: number }) => `${input.diaryId}::${input.version}::${input.mode}`;
 
     const buildMemoryDiaryItem = (input: { id: string; title: string; summary: string; location: string; date: string; privacy: DiaryPrivacy; photoIds: string[]; version: number }) => {
       const existing = get().diaries.find(item => item.id === input.id);
-      const coverPhotoId = input.photoIds[0] ?? existing?.coverPhotoId ?? resolved.photos[0]?.id ?? '';
+      const photos = get().photos;
+      const coverPhotoId = input.photoIds[0] ?? existing?.coverPhotoId ?? photos[0]?.id ?? '';
       const firstPhotoIds = input.photoIds.slice(0, 3);
       return normalizeDiaryPhotos({
         id: input.id,
@@ -805,6 +825,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       currentDiaryId: 'diary-1',
       generationPhaseIndex: 0,
       companionName: '',
+      photos: [...resolved.photos],
       diaries: resolved.diaries.map(cloneDiary),
       issueLog: [],
       drafts: {},
@@ -834,7 +855,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const id = resolved.createId('draft');
         const photoIds: string[] = [];
         const diary = cloneDiary(resolved.diaries[0]);
-        const people = getPeopleForPhotos(photoIds, resolved.photos);
+        const people = getPeopleForPhotos(photoIds, get().photos);
         const draft: DiaryDraft = {
           id,
           diary: {
@@ -887,7 +908,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           return existing.id;
         }
         const id = resolved.createId('draft');
-        const people = getPeopleForPhotos(diary.photoIds, resolved.photos, diary.people);
+        const people = getPeopleForPhotos(diary.photoIds, get().photos, diary.people);
         const draft: DiaryDraft = {
           id,
           sourceDiaryId: diaryId,
@@ -912,10 +933,11 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       },
       updateDraft: (id, patch) => mutateDraft(id, draft => ({ ...draft, dirty: true, diary: cloneDiary({ ...draft.diary, ...patch, id: draft.diary.id }) })),
       setDraftPhotos: (id, incoming) => {
-        const photoIds = sanitizePhotoIds(incoming, resolved.photos);
+        const photos = get().photos;
+        const photoIds = sanitizePhotoIds(incoming, photos);
         mutateDraft(id, draft => {
           if (photoIds.join('|') === draft.selectedPhotoIds.join('|')) return draft;
-          const people = getPeopleForPhotos(photoIds, resolved.photos, draft.people);
+          const people = getPeopleForPhotos(photoIds, photos, draft.people);
           const diary = normalizeDiaryPhotos({ ...draft.diary, photoIds, people }, photoIds);
           return {
             ...draft,
@@ -986,9 +1008,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       updateDraftBlock: (id, blockId, content) => replaceDraftBlockContent(id, blockId, content),
       setDraftBlockPhotos: (id, blockId, incoming) => mutateDraft(id, draft => {
         if (!draft.diary.blocks.some(block => block.id === blockId && block.type !== 'photo')) return draft;
-        const photoIds = sanitizePhotoIds(incoming, resolved.photos);
+        const photos = get().photos;
+        const photoIds = sanitizePhotoIds(incoming, photos);
         const all = [...new Set([...draft.selectedPhotoIds, ...photoIds])];
-        const people = getPeopleForPhotos(all, resolved.photos, draft.people);
+        const people = getPeopleForPhotos(all, photos, draft.people);
         const target = draft.diary.blocks.find(block => block.id === blockId);
         const previousRefs = new Set(target && 'photoIds' in target ? target.photoIds ?? [] : []);
         const blocks = draft.diary.blocks.flatMap(block => {
@@ -1157,9 +1180,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         if (draft.savedDiaryId) return draft.savedDiaryId;
         if (!draft.sourceDiaryId && (draft.generation.status !== 'complete' || !canGenerate(draft.selectedPhotoIds))) return undefined;
         if (draft.sourceDiaryId && !get().diaries.some(diary => diary.id === draft.sourceDiaryId)) return undefined;
+        const photos = get().photos;
         const diaryId = draft.sourceDiaryId ?? resolved.createId('diary');
         const people = draft.people.map(person => ({ ...person, name: person.name.trim() || (person.id === 'person-self' ? '我' : '同行人') }));
-        const diary = cloneDiary(normalizeDiaryPhotos({ ...draft.diary, id: diaryId, status: 'ready', people, version: draft.generation.round }, sanitizePhotoIds(draft.selectedPhotoIds, resolved.photos)));
+        const diary = cloneDiary(normalizeDiaryPhotos({ ...draft.diary, id: diaryId, status: 'ready', people, version: draft.generation.round }, sanitizePhotoIds(draft.selectedPhotoIds, photos)));
         set(state => ({
           diaries: draft.sourceDiaryId ? state.diaries.map(item => item.id === diaryId ? diary : item) : [diary, ...state.diaries],
           memoriesSourceItems: draft.sourceDiaryId
@@ -1214,6 +1238,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
 
         const repository = resolved.adapters.diaryRepository;
         const targetDiaryId = draft.sourceDiaryId ?? resolved.createId('diary');
+        const photos = get().photos;
         const people = draft.people.map(person => ({ ...person, name: person.name.trim() || (person.id === 'person-self' ? '我' : '同行人') }));
         const normalizedDiary = cloneDiary(normalizeDiaryPhotos({
           ...draft.diary,
@@ -1221,7 +1246,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           status: 'ready',
           people,
           version: draft.generation.round,
-        }, sanitizePhotoIds(draft.selectedPhotoIds, resolved.photos)));
+        }, sanitizePhotoIds(draft.selectedPhotoIds, photos)));
         const destination: 'detail' | 'complete' = draft.sourceDiaryId ? 'detail' : 'complete';
         const finishLocalSave = (savedDiaryId: string, savedVersion: number) => {
           const diary = cloneDiary({
@@ -1431,11 +1456,18 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       recordShareDemo: (diaryId, mode) => {
         const diary = get().diaries.find(item => item.id === diaryId);
         if (!diary || (platforms.includes(mode) && diary.privacy === 'private')) return false;
-        set(state => ({
-          diaries: state.diaries.map(item => item.id !== diaryId ? item : platforms.includes(mode)
-            ? { ...item, shareModes: [...new Set([...item.shareModes, mode])] }
-            : { ...item, exportModes: [...new Set([...(item.exportModes ?? []), mode])], exportedPdf: item.exportedPdf || mode === 'pdf', exportedImage: item.exportedImage || ['save', 'image', 'poster'].includes(mode) }),
-        }));
+        applyShareRecord(diaryId, mode);
+        return true;
+      },
+      confirmShareDelivery: ({ diaryId, mode, operationId, version }) => {
+        const diary = get().diaries.find(item => item.id === diaryId);
+        const currentVersion = diary?.version ?? 0;
+        if (!diary || currentVersion !== version || (platforms.includes(mode) && diary.privacy === 'private')) return false;
+        const scope = getConfirmedShareScope({ diaryId, mode, version: currentVersion });
+        const existingScope = confirmedShareOperations.get(operationId);
+        if (existingScope) return existingScope === scope;
+        confirmedShareOperations.set(operationId, scope);
+        applyShareRecord(diaryId, mode);
         return true;
       },
       sendChat: text => {
@@ -1451,7 +1483,11 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         set(state => ({ chatMessages: [...state.chatMessages, { id: resolved.createId('chat'), role: 'user', text: message }, { id: resolved.createId('chat'), role: 'assistant', text: reply }] }));
       },
       toggleDiscoveryLike: id => set(state => ({ likedDiscoveryIds: state.likedDiscoveryIds.includes(id) ? state.likedDiscoveryIds.filter(item => item !== id) : [...state.likedDiscoveryIds, id] })),
-      addMaterialPhoto: id => { if (resolved.photos.some(photo => photo.id === id)) set(state => ({ materialPhotoIds: [...new Set([...state.materialPhotoIds, id])] })); },
+      addMaterialPhoto: id => {
+        if (get().photos.some(photo => photo.id === id)) {
+          set(state => ({ materialPhotoIds: [...new Set([...state.materialPhotoIds, id])] }));
+        }
+      },
       correctAnchor: (id, text) => { if (text.trim()) set(state => ({ correctedAnchors: { ...state.correctedAnchors, [id]: text.trim() } })); },
       setFlowerUnlocked: flowerUnlocked => set({ flowerUnlocked }),
       setCurrentStep: currentStep => set({ currentStep }),
@@ -1474,7 +1510,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const next = ids.includes(photoId) ? ids.filter(id => id !== photoId) : [...ids, photoId];
         const draftId = get().activeDraftId;
         if (draftId) get().setDraftPhotos(draftId, next);
-        else set({ selectedPhotoIds: sanitizePhotoIds(next, resolved.photos) });
+        else set({ selectedPhotoIds: sanitizePhotoIds(next, get().photos) });
       },
       setCompanionName: companionName => {
         set({ companionName });
@@ -1501,25 +1537,32 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         get().saveDraft(id);
       },
       setDiaryPrivacy: (id, privacy) => { get().savePrivacy(id, privacy); },
-      markShared: (id, mode) => { get().recordShareDemo(id, mode); },
+      markShared: (id, mode) => {
+        const diary = get().diaries.find(item => item.id === id);
+        if (!diary) return;
+        get().confirmShareDelivery({
+          diaryId: id,
+          mode,
+          version: diary.version ?? 0,
+          operationId: resolved.createId('share-confirmed'),
+        });
+      },
       logIssue: message => set(state => ({ issueLog: [...state.issueLog, message] })),
       registerPhotos: photos => {
         if (!photos.length) return;
-        const nextById = new Map(photos.map(photo => [photo.id, photo]));
-        let changed = false;
-        for (const [index, photo] of resolved.photos.entries()) {
-          const incoming = nextById.get(photo.id);
-          if (!incoming) continue;
-          resolved.photos[index] = { ...photo, ...incoming };
-          nextById.delete(photo.id);
-          changed = true;
-        }
-        for (const photo of nextById.values()) {
-          resolved.photos.push(photo);
-          changed = true;
-        }
-        if (!changed) return;
-        set(state => ({ photoCatalogVersion: state.photoCatalogVersion + 1 }));
+        set(state => {
+          const nextById = new Map(state.photos.map(photo => [photo.id, photo]));
+          let changed = false;
+          for (const photo of photos) {
+            const incoming = clonePhotoAsset(photo);
+            const existing = nextById.get(photo.id);
+            nextById.set(photo.id, existing ? { ...existing, ...incoming } : incoming);
+            changed = true;
+          }
+          return changed
+            ? { photos: [...nextById.values()], photoCatalogVersion: state.photoCatalogVersion + 1 }
+            : state;
+        });
       },
       hydratePhotoPermission: async () => {
         if (get().hydratedPhotoPermission) return;
@@ -1549,8 +1592,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           return;
         }
 
+        const photos = get().photos;
         const restoredEntries = Object.entries(rawSnapshot.drafts)
-          .map(([draftId, value]) => [draftId, restoreDraftFromSnapshot(value)] as const);
+          .map(([draftId, value]) => [draftId, restoreDraftFromSnapshot(value, photos)] as const);
         const restoredDrafts = Object.fromEntries(
           restoredEntries.filter((entry): entry is [string, DiaryDraft] => Boolean(entry[1]) && !entry[1]?.savedDiaryId),
         );
@@ -1866,14 +1910,14 @@ export function createAppSelectors(store: AppStoreHook, deps: AppStoreDeps = cre
     characters: resolved.characters,
     availableCharacters,
     companions: resolved.companions,
-    photos: resolved.photos,
+    get photos() { return store.getState().photos; },
     historyGroups,
     generationPhases: resolved.generationPhases,
     shareOptions: resolved.shareOptions,
     minSelectedPhotos: MIN_SELECTED_PHOTOS,
     maxSelectedPhotos: resolved.photos.length,
     getDiaryById(diaryId: string) { return store.getState().diaries.find(diary => diary.id === diaryId); },
-    getPhotoById(photoId: string) { return resolved.photos.find(photo => photo.id === photoId); },
+    getPhotoById(photoId: string) { return store.getState().photos.find(photo => photo.id === photoId); },
     getHistoryGroups,
     getStats: getDiaryStatistics,
   };

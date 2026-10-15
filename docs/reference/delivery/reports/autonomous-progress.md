@@ -95,6 +95,15 @@
   - `backend/test/app.e2e-spec.ts` 本轮继续补了 provider 超时的 e2e 证据：`AbortError` 触发后，真实生成任务会按 `timeout` 落成失败快照，并持久化 `retryable=true` 与精确超时文案，而不是只停留在 service 单测结论
   - `backend/test/app.e2e-spec.ts` 本轮又补了 provider 超时自动重试成功的 e2e 证据：第一次 `AbortError` 超时后，后端会在同一 `jobId` 上按默认 `maxAttempts=2` 自动重试并成功返回最终快照，不会新建第二个任务
   - `backend/test/app.e2e-spec.ts` 已补“可重试 provider 失败自动重试后成功”和“不可重试 provider 失败详情写回任务快照”的真实 e2e 证据
+  - `backend/src/common/diary-generation.service.ts` / `backend/src/common/diary-generation.service.spec.ts` 本轮又把 provider 网络连接失败并入默认重试骨架：`ECONNRESET`、`ECONNREFUSED`、`ENOTFOUND`、undici timeout/socket 与 `fetch failed` 这类错误会统一转成可重试 `provider_failed`，并保留精确网络错误文案
+  - `backend/test/app.e2e-spec.ts` 本轮继续补了 provider 网络异常 e2e：第一次 `ECONNRESET` 连接抖动、第二次成功时，会在同一 `jobId` 上自动重试并完成；若持续 `ECONNREFUSED` 无法连通，则会把 `AI provider network request failed (...)`、`retryable=true` 与 `attemptCount/maxAttempts` 写回任务快照，不会误归成不可重试失败
+  - `backend/src/common/diary-generation.service.ts` / `backend/.env.example` 本轮补齐 provider 请求参数配置：生成与 rewrite 温度可分开配置，超出 0～2 或无法解析时回退工程默认值；`AI_PROVIDER_RESPONSE_FORMAT` 默认使用 `json_object`，也可关闭以兼容不支持该请求字段的服务。`backend/src/common/diary-generation.service.spec.ts` 已覆盖默认值、无效温度回退、分别透传、关闭字段和不支持格式前置拒绝；这些是工程兼容配置，不代表 Q-002 正式质量策略。
+  - `backend/src/common/diary-generation.service.ts` / `backend/src/common/diary-generation.service.spec.ts` 本轮收紧 provider 照片归属校验：普通文本/引言块 `photoIds`、海报照片、显式封面、人物照片/头像及 rewrite 照片引用，只要超出本轮 `selectedPhotoIds` 即按不可重试 `provider_failed` 拒绝，不再静默过滤后返回成功；缺失或 `null` 的可选照片数组仍归一为空数组。生成提示也要求所有引用只能使用本轮所选照片。
+  - 人物记录在因缺少合法 `id` / `name` 而被忽略前，也会先校验其显式 `photoIds` 与 `avatarPhotoId`；malformed 候选携带越界照片引用时同样拒绝。`backend/src/common/diary-generation.service.spec.ts` 已补两条专属回归，`backend/test/app.e2e-spec.ts` 也验证该结果会在同一 `jobId` 写回不可重试失败快照。
+  - `normalizeBlocks(...)` 不再静默过滤 `blocks` 数组中的非对象元素；即使数组内同时存在有效正文块，也会按不可重试 `provider_failed` 拒绝。service 单测覆盖 `null` / 字符串元素，backend e2e 验证同一 `jobId` 失败快照。
+  - `openai-compatible` 输出契约要求的标题、摘要、地点、日期、同行者、封面及海报照片字段现严格验证；缺失/空值/类型错误或非法 `people` 容器会按不可重试 `provider_failed` 拒绝，不再回退到 `PHOTO_FACTS` 或默认文案制造成功结果。deterministic provider 路径不变。
+  - backend 生成 block 校验已与前端 `GenerationResultContract` 的非空规则对齐：空正文、空图片说明、空显式标题/关联 ID 或空照片引用 ID 不会进入 succeeded 快照；无效人物候选仍按现有语义忽略，不会输出非法人物对象。
+  - `backend/test/app.e2e-spec.ts` 已补生成任务链路证据：provider 返回普通文本块越界照片引用时，同一 `jobId` 会写回 `failed`、`provider_failed` 与 `retryable=false`，不会误标成功；现有 photo block 越界引用 e2e 仍覆盖其对应失败语义。
   - `backend/src/common/diary-generation-evaluation.ts` / `backend/src/common/diary-generation-evaluation.spec.ts` / `backend/src/scripts/run-diary-generation-evaluation.ts` 已补 `CRE-005` 质量基线，当前仓库可用固定夹具执行自动结构校验，并生成 `cre-005-quality-baseline.md` / `.json` 留档
   - `app/__tests__/generating-screen.spec.tsx` 又补了前置不足的页面反馈：当草稿仍少于 3 张有效图片等条件不满足时，生成页会直接弹出“当前草稿还不能生成，请返回上一页检查照片和排版师。”，且不会发起轮询
   - `app/__tests__/generating-screen.spec.tsx` 又补了缺失任务失败文案：当生成任务已失效时，生成页会直接弹出“生成任务已失效，请重新生成。”，并允许在同一草稿上直接重开新轮次
@@ -132,6 +141,17 @@
     - `npm --prefix backend run test -- diary-generation.service.spec.ts`
     - `npm --prefix backend run test -- diary-generation.service.spec.ts diary-generation-evaluation.spec.ts`
     - `npm --prefix backend run eval:diary-generation`
+    - `npm --prefix backend run test -- diary-generation.service.spec.ts`（2026-10-15 复跑，provider 请求配置与网络失败分类共 16 项通过）
+    - `npm --prefix backend run test -- diary-generation.service.spec.ts`（2026-10-15 复跑，provider 照片归属与前后端结构契约校验矩阵共 43 项通过）
+    - `npm --prefix backend run test:e2e -- --testNamePattern="records malformed provider success payloads as non-retryable generation failures"`（2026-10-15，生成任务中的 photo block 越界引用失败收口通过）
+    - `npm --prefix backend run test:e2e -- --testNamePattern="rejects unselected text block photo references on the generation job"`（2026-10-15，普通文本块越界引用在同一 `jobId` 失败收口通过）
+    - `npm --prefix backend run test:e2e -- --testNamePattern="rejects unselected photo references in malformed people on the generation job"`（2026-10-15，malformed 人物越界照片引用在同一 `jobId` 失败收口通过）
+    - `npm --prefix backend run test:e2e -- --testNamePattern="rejects malformed generation block entries on the generation job"`（2026-10-15，畸形 block 元素在同一 `jobId` 失败收口通过）
+    - `npm --prefix backend run test:e2e -- --testNamePattern="rejects provider results missing required diary fields on the generation job"`（2026-10-15，缺少标题的 provider 结果在同一 `jobId` 失败收口通过）
+    - `npm --prefix backend run test:e2e -- --testNamePattern="rejects empty generated block content on the generation job"`（2026-10-15，空白正文不会进入 succeeded）
+    - `npm --prefix backend run test:e2e -- --testNamePattern="provider network"`（2026-10-15，网络重试成功与连接拒绝失败快照 2 项通过）
+    - `npm --prefix backend run build`（2026-10-15 复跑）
+    - `npm run typecheck`（2026-10-15 复跑）
     - `npm --prefix backend run test:e2e -- --testNamePattern="generation"`
     - `npm --prefix backend run test:e2e -- --testNamePattern="generation|retries retryable provider failures once before succeeding"`
     - `npm --prefix backend run test:e2e`
@@ -158,6 +178,7 @@
   - `app/album/select.tsx` 进入读取前现会先调用 `getPhotoPermissionStatus()` 与原生权限状态重新对齐；原生侧若直接返回未授权，页面会回落到现有“需要相册权限”引导，不再把权限异常误记为通用读取失败。
   - `app/__tests__/album-select-screen.spec.tsx` 已补 0/1/2 张下限、新建/替换确认写回同一草稿、新建取消继续/放弃、替换取消不提交、第三张失效后阻断确认，以及旧请求不覆盖新相册结果、旧草稿迟到结果不污染新草稿、分页去重和分页失败反馈保留当前勾选的页面级证据。
   - `app/__tests__/album-select-screen.spec.tsx` / `app/__tests__/edit-screen.spec.tsx` 又补了整篇换图链路回归：未保存新建草稿在 `replace` 模式下重新挑图后，旧照片不会继续混进本轮确认集合；回到编辑页后，即便仍保持 3 张有效照片，保存也会明确提示需要重新生成并提供直达生成页入口。
+  - 2026-10-15 复跑 `npx jest --runInBand app/__tests__/album-select-screen.spec.tsx`，13/13 通过；当前代码、CRE-002 任务/CASE 和四份执行台账仍一致，真实 iOS 原生权限阻塞与 Q-003/Q-018/Q-008 未决规则保持原状态。
   - 已在本地 iOS 模拟器继续推进真实验收：当前 `iPhone 17 Pro (C5C4764C-8D1B-469D-AD55-333A7A942274)` 的 dev client 能稳定复现 Metro 日志 `WARN  [album-select] load device photos failed [Error: E_NO_PERMISSIONS: undefined reason (at ExpoModulesCore/Promise.swift:65)]`；同时模拟器 TCC 库已记录 `kTCCServicePhotos|io.com.shihangbiji.www.aidiary|2|4`，说明阻塞已收窄到“模拟器权限记录与原生媒体库返回不一致”，不再是 JS 选择逻辑本身。
   - 已验证：
     - `npm run typecheck`
@@ -304,8 +325,14 @@
   - `src/store/diary-domain.ts` / `src/components/diary/photo.tsx` / `app/share/result.tsx` 本轮开始收口 `SHR-003`：当前代码已存在匿名文本替换与基于 `faceRects` 的展示层遮挡，`projectDiaryForSharing(...)` 会把标题、副标题、摘要、地点、正文、小标题和图片说明中的姓名/别名统一替换为“同行人”，`share/result` 页则把匿名标记同时传给海报与全文里的 `Photo`。
   - `app/__tests__/share-result-screen.spec.tsx` 本轮新增了 `SHR-003` 的页面级回归：当匿名公开与“只选 B1”同时生效时，海报与全文预览都会读取匿名后的选段投影，不再显示“小林/小可”，被排除的 `B2/P2` 也不会因匿名逻辑而回退出现，因此 `CASE-SHR-003-004` 已具备真实页面证据。
   - `src/components/diary/__tests__/photo.spec.tsx` 本轮补了匿名遮挡组件回归：同一张带 `faceRects` 的照片在宽裁切和高裁切两种尺寸下都会重新计算遮挡框坐标，不会沿用固定位置；配合 `src/store/__tests__/diary-domain.spec.ts` 既有的匿名文本投影断言，`CASE-SHR-003-001` 已可按 passed 记录，并为后续真实 iOS 视觉取证打好了坐标基线。
-  - `src/services/share-asset-preparation.ts` 本轮继续把 `SHR-003` 往资产链路推进了一段：匿名资产准备现在会按 `diaryId + version + target + photoId` 隔离 key；已知人物照片若缺少 `faceRects` 会返回失败结果；渲染失败也会清理失败缓存，避免不同目标或不同内容版本串用旧结果。
-  - `src/services/__tests__/share-asset-preparation.spec.ts` 本轮补上了 `A05` 的服务层证据：同一 `diary/version/target` 会复用缓存，目标变更或版本变更会重新准备；渲染失败不会残留脏缓存。当前 `CASE-SHR-003-003/005/006` 仍按 partial 诚实推进，页面侧失败反馈不再超前记为已验收。 
+  - `src/services/share-asset-preparation.ts` 本轮继续把 `SHR-003` 往资产链路推进了一段：匿名资产准备现在会默认输出真实 PNG 匿名衍生文件，并按 `diaryId + version + target + photoId` 隔离 key；已知人物照片若缺少 `faceRects` 会返回失败结果；坐标包含非有限值、零/负面积或完全位于图像外时会在渲染前失败，部分越界但与图像相交的区域会裁切到源图边界；渲染失败也会清理失败缓存，避免不同目标或不同内容版本串用旧结果。
+  - `src/services/__tests__/share-asset-preparation.spec.ts` 本轮补上了 `A03/A05` 的服务层证据：缓存按作品/目标/版本隔离，渲染失败或不可读文件不会留下脏缓存，非法遮挡坐标会被拒绝，边缘越界坐标会裁切后遮挡，且输出 PNG 像素已遮挡、原图不被改写。`CASE-SHR-003-003` 保持已执行，`CASE-SHR-003-005/006` 仍为 partial，页面侧失败反馈不提前标记完成。
+  - `app/share/result.tsx` / `app/__tests__/share-result-screen.spec.tsx` 本轮继续做了 `SHR-004` 的完成度审计，确认当前分享页已不应再记为“未开始”：海报与全文预览都真实消费 `projectDiaryForSharing(...)` 的同一份投影，无效 `diaryId` 会落空态，关闭预览会回到同一分享页且不改平台/导出记录，切换到另一篇作品后旧内容不会残留。
+  - `app/__tests__/share-result-screen.spec.tsx` 本轮又补了 `SHR-004` 的三条页面回归：无效目标不回退展示其他作品、关闭预览不改分享记录，以及切换作品后页面只保留当前目标内容。基于这组证据，`CASE-SHR-004-001/002/003/004/006` 已可按 passed 记录，`A04` 则只保留真实异步读取/渲染失败反馈这部分缺口。
+- `src/services/share-delivery-orchestrator.ts` 本轮开始推进 `SHR-005`，先把不依赖正式前端改动的真实交付规则收口到服务层：私密作品发起外部分享时会在任何资源准备或渠道适配器调用前被拦截；所有分享/导出动作都会先依赖 `prepareShareAssetsForDiary(...)` 准备当前投影资产；只有外部渠道或导出文件返回“已确认完成”后，才允许通过 `onConfirmed(...)` 记录平台/导出结果。
+- `src/services/__tests__/share-delivery-orchestrator.spec.ts` 已补 `SHR-005` 的首批服务层证据：当前已验证私密外部分享不会误调渠道适配器、取消态不会误记成功、同一 `diaryId + version + mode` 的重复提交会复用在途操作，而不同内容版本会彼此隔离，不会把旧版本结果串写到新版本。`SHR-005` 因此从“未开始”推进到“进行中”，但页面仍停留在 `recordShareDemo(...)` 演示路径，真实文件导出与正式渠道适配器仍待后续接线。
+- `src/store/create-app-store.ts` / `src/store/__tests__/diary-domain.spec.ts` 本轮继续补强 `SHR-005` 的记录层约束，新增 `confirmShareDelivery(...)`：只有 `operationId + diaryId + version + mode` 四元组匹配时，才允许把确认事件写回平台/导出记录；同一操作 ID 的重复确认只记一次，旧版本或错目标的晚到回调会被直接拒绝。这样页面后续从 `recordShareDemo(...)` 切到正式交付编排时，底层已具备防重复与防串写的真实领域证据。
+- `src/services/share-export-file-service.ts` 本轮继续把 `SHR-005` 往真实本地导出推进：新增了服务层真实文件渲染器，并已接到 `share-delivery-orchestrator` 的默认本地导出分支。当前 `save` 会生成真实 PNG 文件，`pdf` 会生成结构有效且含作品内容字节的 PDF 文件；输出路径按 `diaryId + version + operationId + mode` 隔离，不会覆盖其他作品或内容版本，也不会改写原日记。PDF 已改用 `STSong-Light` / `UniGB-UCS2-H` CJK Type0 字体映射，不捆绑字体资源；macOS Quick Look 实际预览已确认中文可读。PNG 仍是“已准备图片拼贴 + 结构化内容骨架”的服务层拼版输出；`CASE-SHR-005-002` 继续 partial，待 Q-014 最终版式、iOS 保存/打开及跨阅读器兼容验证。
   - `src/store/__tests__/diary-domain.spec.ts` 本轮继续补了 A05 的专属闭环：同一篇日记第一次编辑后放弃会恢复原始快照且列表数量不变；第二次重新编辑后提交保存，会沿用原 `diary-1` 更新标题与正文，不新增列表项，也不会串改别的已保存作品。
   - `app/diary/[id]/edit.tsx` / `app/__tests__/edit-screen.spec.tsx` 又补了 A04 页面级证据：日记 ID 不存在时会直接落到“没有找到这篇日记”空态；没有正文/引用块时，“重写本段”会禁用并展示“当前没有可重写的文字段落”；预选中的目标块失效后，也会展示“当前选中的段落已失效，请重新点选需要重写的文字。”，并保持禁用，不会误作用到其他段落。
   - `src/store/__tests__/diary-domain.spec.ts` / `src/repositories/__tests__/http-core-diary-repository.spec.ts` / `backend/src/common/diary-generation.service.spec.ts` 本轮又补了 A06 的超时与畸形输出矩阵：rewrite 返回 `timeout` 或仓库因畸形 payload 收口为 `provider_failed` 时，目标段落仍保留原文，`issueLog` 会记录对应错误；`openai-compatible` rewrite 请求的 `AbortError` 也已确认会被后端归类为可重试 `timeout`。
@@ -350,11 +377,30 @@
     - `npm run typecheck`（2026-10-14 复跑，SHR-003）
     - `npx jest --runInBand src/services/__tests__/share-asset-preparation.spec.ts app/__tests__/share-result-screen.spec.tsx`（2026-10-14 新增，SHR-003 匿名资产准备与失败阻断）
     - `npm run typecheck`（2026-10-14 复跑，SHR-003 匿名资产准备）
+    - `npx jest --runInBand src/services/__tests__/share-asset-preparation.spec.ts`（2026-10-14 复跑，SHR-003 不可读匿名文件与跨作品缓存隔离）
+    - `npm run typecheck`（2026-10-14 复跑，SHR-003 服务层补强）
+    - `npx jest --runInBand src/services/__tests__/share-asset-preparation.spec.ts`（2026-10-14 复跑，SHR-003 真实 PNG 匿名资产与原图保持不变）
+    - `npm run typecheck`（2026-10-14 复跑，SHR-003 PNG 匿名资产）
+    - `npx jest --runInBand app/__tests__/share-result-screen.spec.tsx`（2026-10-14 复跑，SHR-004 海报/预览空态与目标切换）
+    - `npm run typecheck`（2026-10-14 复跑，SHR-004）
+    - `npx jest --runInBand src/services/__tests__/share-delivery-orchestrator.spec.ts`（2026-10-14 新增，SHR-005 分享交付编排）
+    - `npm run typecheck`（2026-10-14 复跑，SHR-005）
+    - `npx jest --runInBand src/store/__tests__/diary-domain.spec.ts -t "SHR-005|E14 CASE-BAS-004-005 private preview remains whole; platform shares and exports use separate history"`（2026-10-14 新增，SHR-005 确认事件去重与错版本拦截）
+    - `npm run typecheck`（2026-10-14 复跑，SHR-005 store 记录层）
+      - `npx jest --runInBand src/services/__tests__/share-export-file-service.spec.ts`（2026-10-14 新增，SHR-005 真实 PNG/PDF 文件导出）
+      - `npx jest --runInBand src/services/__tests__/share-delivery-orchestrator.spec.ts`（2026-10-14 复跑，SHR-005 默认导出适配器接线）
+      - `npm run typecheck`（2026-10-14 复跑，SHR-005 文件导出服务接线）
+    - `npx jest --runInBand src/services/__tests__/share-asset-preparation.spec.ts src/services/__tests__/share-delivery-orchestrator.spec.ts src/services/__tests__/share-export-file-service.spec.ts src/store/__tests__/diary-domain.spec.ts app/__tests__/share-result-screen.spec.tsx`（2026-10-15 复跑，5 个套件、103 项通过）
+    - `npx jest --runInBand src/services/__tests__/share-asset-preparation.spec.ts`（2026-10-15 复跑，10 项通过，含无效坐标阻断与边界裁切像素验证）
+    - `npm run typecheck`（2026-10-15 复跑，SHR-003 人脸区域校验）
+    - `qlmanage -t -s 800 -o /tmp <测试生成的 SHR-005 PDF>`（2026-10-15，CJK 字体修复后实际预览确认中文标题/正文/匿名标记可读；iOS 与跨阅读器仍待验证）
 
 ### 下一步
 
 - 继续补 `CRE-005` 的真实 AI 适配器、正式重试覆盖策略与质量评测。
-- 在 `SHR-003` 中继续补匿名像素资产与真实导出链路：当前已完成文本匿名、匿名 + 选段组合、失败阻断与目标/版本缓存隔离；后续还需把本地 SVG 包装资产推进为真正的匿名像素文件，并补跨作品缓存竞态与真实 iOS 视觉/导出证据，再继续推进 A03/A05。
+- 在 `SHR-003` 中继续补真实导出链路：当前已完成文本匿名、匿名 + 选段组合、真实 PNG 匿名资产、失败阻断、不可读匿名文件拦截，以及作品/目标/版本缓存隔离；后续还需补不扩展正式页面前提下的真实 iOS 视觉验收和导出链路闭环，再继续推进 A02/A05。
+- 在 `SHR-004` 中继续补真实异步读取/渲染失败语义：当前已完成统一投影海报、全文预览、无效目标空态与切换目标不残留旧内容；后续还需补真实加载/失败反馈与二维码面板 CASE，并与 `SHR-005` 的正式导出链路一起收口分享交付闭环。
+- 在 `SHR-005` 中继续把页面从 `recordShareDemo(...)` 演示路径切到正式交付编排；当前服务层和领域层已补齐私密拦截、真实 PNG/PDF 文件生成、确认后记记录、取消不误记成功、操作 ID 去重，以及按目标/版本隔离的写回保护，下一步需结合 Q-014 收口最终文件规格、iOS 系统保存/打开矩阵与正式渠道适配器契约，再补页面接线和外部平台调用证据。
 - `DIA-004` 当前仅剩 `CASE-DIA-004-006` 受 Q-008 待决策约束；现有 A01~A04 已按当前代码与测试证据收口。
 - 在 `NAV-001` 中继续补冷启动/深链、页面映射整表核验与权限恢复矩阵；详情正式菜单路径仍等 Q-009 决策后再收口。
 - 在 Q-002 / Q-003 / Q-008 收口后，把 `DIA-002` 的编辑矩阵延伸到真实重写质量、文本边界与候选采用联调。
@@ -363,3 +409,11 @@
 - 在 Q-001 / Q-008 规则收口后，补回 `DIA-005` 的重启恢复与既有换图待决策 CASE。
   - `app/__tests__/edit-screen.spec.tsx` 本轮又补了 `DIA-005-003` 的显式保护证据：编辑草稿点击返回后选择“继续编辑”，会保留当前草稿改动、不导航离开、不发起 `submitDraft`，且已保存原件保持不变；对应 CASE 已从 `partial` 推进为 `passed`。
 - 持续同步任务状态、CASE 与验收矩阵。
+
+## 2026-10-15 增量推进
+
+- `MAT-001` 当前仍无真实素材导入页面接线；本轮在不改变正式页面行为的前提下修复 store 资产目录隔离：`registerPhotos(...)` 不再原地修改外部/全局照片数组，目录作为每个 store 的状态独立更新；新照片对象及 `personIds/faceRects` 会复制到当前 store；selector 与 `addMaterialPhoto(...)` 读取当前 store 注册资产。
+- `src/store/__tests__/diary-domain.spec.ts` 新增回归：非 mock 设备照片注册后可被所属 store 解析并进入素材成员集合，重复添加只留一项，未注册 ID 被忽略，调用方后续修改输入对象不会反向污染 store，第二个 store 与全局 mock 照片均不受影响。该证据只覆盖内存资产注册，不宣称真实导入完成。
+- 已验证：定向 domain 用例通过、`npm run test:domain`（3 个 suite / 87 项通过）、`npx jest --runInBand app/__tests__/album-select-screen.spec.tsx app/__tests__/edit-screen.spec.tsx src/components/diary/__tests__/photo.spec.tsx src/components/diary/__tests__/diary-paper.spec.tsx app/__tests__/saved-diary-screens.spec.tsx`（5 个 suite / 55 项通过）、`npm run typecheck` 通过。真实导入、URI 持久化、素材页预览和跨模块设备资产读取仍待后续推进。
+- `BAS-004-A03` 新增 `src/test-utils/fakes/create-async-fault-plan.ts`，可按脚本注入 resolve、reject、deferred 三种异步结果，并显式报错于脚本耗尽。`src/store/__tests__/diary-domain.spec.ts` 新增 `E15 CASE-BAS-004-003`：首次保存写入失败后，草稿和已保存列表快照不变、saving 状态清理；同幂等键重试延迟成功后只新增一篇作品。该增量只覆盖保存写失败/重试路径，A03 整体仍进行中。
+- 已验证：`npx jest --runInBand src/test-utils/fakes/create-async-fault-plan.spec.ts`（3 项通过）、`npm run test:domain`（3 个 suite / 88 项通过）、`npm run typecheck` 通过。

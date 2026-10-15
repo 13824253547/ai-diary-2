@@ -855,6 +855,83 @@ describe('Backend foundation (e2e)', () => {
     expect(completed.body.data.errorMessage).toBeUndefined();
   });
 
+  it('retries retryable provider network failures once before succeeding on the same generation job', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '2';
+    let requestCount = 0;
+    global.fetch = jest.fn().mockImplementation(async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        throw Object.assign(new TypeError('fetch failed'), {
+          cause: { code: 'ECONNRESET' },
+        });
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  title: '网络重试后的成功结果',
+                  summary: '第一次连接抖动后，第二次尝试返回结构化结果。',
+                  location: '台南',
+                  date: '2026.10.13',
+                  companionName: '自己',
+                  coverPhotoId: 'photo-1',
+                  posterPhotoIds: ['photo-1', 'photo-2'],
+                  blocks: [
+                    {
+                      id: 'provider-block-network-retry',
+                      type: 'text',
+                      content: '连接恢复后，生成任务继续在同一 job 上成功完成。',
+                      photoIds: ['photo-1', 'photo-2'],
+                    },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+      };
+    }) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-network-retry',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-network-retry',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-network-retry-round-1',
+      })
+      .expect(201);
+
+    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
+    expect(requestCount).toBe(2);
+    expect(completed.body.data.status).toBe('succeeded');
+    expect(completed.body.data.attemptCount).toBe(2);
+    expect(completed.body.data.maxAttempts).toBe(2);
+    expect(completed.body.data.errorCode).toBeUndefined();
+    expect(completed.body.data.errorMessage).toBeUndefined();
+  });
+
   it('records malformed provider success payloads as non-retryable generation failures', async () => {
     process.env.AI_PROVIDER = 'openai-compatible';
     process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
@@ -933,6 +1010,401 @@ describe('Backend foundation (e2e)', () => {
     throw new Error('generation job with malformed provider payload did not fail in time');
   });
 
+  it('rejects unselected text block photo references on the generation job', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '2';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                title: '引用范围错误',
+                summary: '普通段落引用了未选择的照片。',
+                location: '台南',
+                date: '2026.10.13',
+                companionName: '自己',
+                coverPhotoId: 'photo-8',
+                posterPhotoIds: ['photo-8'],
+                blocks: [
+                  {
+                    id: 'provider-block-invalid-text-photo',
+                    type: 'text',
+                    content: '这段内容不应关联未选择的照片。',
+                    photoIds: ['photo-999'],
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-invalid-text-photo',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-invalid-text-photo',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-invalid-text-photo-round-1',
+      })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const failed = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.data.jobId}`)
+        .set('x-device-id', deviceA)
+        .expect(200);
+      if (failed.body.data.status === 'failed') {
+        expect(failed.body.data.attemptCount).toBe(1);
+        expect(failed.body.data.maxAttempts).toBe(2);
+        expect(failed.body.data.errorCode).toBe('provider_failed');
+        expect(failed.body.data.errorMessage).toBe(
+          'text block photoIds references a photo outside the selected set',
+        );
+        expect(failed.body.data.retryable).toBe(false);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    throw new Error('generation job with unselected text photo reference did not fail in time');
+  });
+
+  it('rejects unselected photo references in malformed people on the generation job', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '2';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                title: '人物引用范围错误',
+                summary: '无效人物候选引用了未选择的照片。',
+                location: '台南',
+                date: '2026.10.13',
+                companionName: '自己',
+                coverPhotoId: 'photo-8',
+                posterPhotoIds: ['photo-8'],
+                blocks: [
+                  {
+                    id: 'provider-block-valid',
+                    type: 'text',
+                    content: '海风把散步的片段留在傍晚。',
+                    photoIds: ['photo-8'],
+                  },
+                ],
+                people: [{
+                  name: '同行者',
+                  photoIds: ['photo-999'],
+                  avatarPhotoId: 'photo-8',
+                }],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-invalid-malformed-person-photo',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-invalid-malformed-person-photo',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-invalid-malformed-person-photo-round-1',
+      })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const failed = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.data.jobId}`)
+        .set('x-device-id', deviceA)
+        .expect(200);
+      if (failed.body.data.status === 'failed') {
+        expect(failed.body.data.attemptCount).toBe(1);
+        expect(failed.body.data.maxAttempts).toBe(2);
+        expect(failed.body.data.errorCode).toBe('provider_failed');
+        expect(failed.body.data.errorMessage).toBe(
+          'person photoIds references a photo outside the selected set',
+        );
+        expect(failed.body.data.retryable).toBe(false);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    throw new Error('generation job with malformed person photo reference did not fail in time');
+  });
+
+  it('rejects malformed generation block entries on the generation job', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '2';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                title: '结构错误的结果',
+                summary: '正文数组包含无效元素。',
+                location: '台南',
+                date: '2026.10.13',
+                companionName: '自己',
+                coverPhotoId: 'photo-8',
+                posterPhotoIds: ['photo-8'],
+                blocks: [
+                  null,
+                  {
+                    id: 'provider-block-valid',
+                    type: 'text',
+                    content: '有效段落不能掩盖同一结果中的结构错误。',
+                    photoIds: ['photo-8'],
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-invalid-block-entry',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-invalid-block-entry',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-invalid-block-entry-round-1',
+      })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const failed = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.data.jobId}`)
+        .set('x-device-id', deviceA)
+        .expect(200);
+      if (failed.body.data.status === 'failed') {
+        expect(failed.body.data.attemptCount).toBe(1);
+        expect(failed.body.data.maxAttempts).toBe(2);
+        expect(failed.body.data.errorCode).toBe('provider_failed');
+        expect(failed.body.data.errorMessage).toBe('provider blocks contain invalid entries');
+        expect(failed.body.data.retryable).toBe(false);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    throw new Error('generation job with malformed block entries did not fail in time');
+  });
+
+  it('rejects provider results missing required diary fields on the generation job', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '2';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: '返回了摘要，但缺少必需的标题字段。',
+                location: '台南',
+                date: '2026.10.13',
+                companionName: '自己',
+                coverPhotoId: 'photo-8',
+                posterPhotoIds: ['photo-8'],
+                blocks: [{
+                  id: 'provider-block-valid',
+                  type: 'text',
+                  content: '有效正文不能替代缺失的日记字段。',
+                  photoIds: ['photo-8'],
+                }],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-missing-title',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-missing-title',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-missing-title-round-1',
+      })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const failed = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.data.jobId}`)
+        .set('x-device-id', deviceA)
+        .expect(200);
+      if (failed.body.data.status === 'failed') {
+        expect(failed.body.data.attemptCount).toBe(1);
+        expect(failed.body.data.maxAttempts).toBe(2);
+        expect(failed.body.data.errorCode).toBe('provider_failed');
+        expect(failed.body.data.errorMessage).toBe('provider result is missing title');
+        expect(failed.body.data.retryable).toBe(false);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    throw new Error('generation job with missing required provider title did not fail in time');
+  });
+
+  it('rejects empty generated block content on the generation job', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '2';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                title: '正文缺失的结果',
+                summary: '标题等字段齐全，但正文只有空白。',
+                location: '台南',
+                date: '2026.10.13',
+                companionName: '自己',
+                coverPhotoId: 'photo-8',
+                posterPhotoIds: ['photo-8'],
+                blocks: [{
+                  id: 'provider-block-empty-content',
+                  type: 'text',
+                  content: '   ',
+                  photoIds: ['photo-8'],
+                }],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-empty-block-content',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-empty-block-content',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-empty-block-content-round-1',
+      })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const failed = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.data.jobId}`)
+        .set('x-device-id', deviceA)
+        .expect(200);
+      if (failed.body.data.status === 'failed') {
+        expect(failed.body.data.attemptCount).toBe(1);
+        expect(failed.body.data.maxAttempts).toBe(2);
+        expect(failed.body.data.errorCode).toBe('provider_failed');
+        expect(failed.body.data.errorMessage).toBe('text block content is missing');
+        expect(failed.body.data.retryable).toBe(false);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    throw new Error('generation job with empty block content did not fail in time');
+  });
+
   it('records retryable timeout details on the generation job when the provider aborts', async () => {
     process.env.AI_PROVIDER = 'openai-compatible';
     process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
@@ -982,6 +1454,60 @@ describe('Backend foundation (e2e)', () => {
     }
 
     throw new Error('generation job with provider timeout did not fail in time');
+  });
+
+  it('records retryable provider network failure details on the generation job when the request cannot connect', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '1';
+    global.fetch = jest.fn().mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), {
+        cause: { code: 'ECONNREFUSED' },
+      }),
+    ) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-network-failed',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-network-failed',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-network-failed-round-1',
+      })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const failed = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.data.jobId}`)
+        .set('x-device-id', deviceA)
+        .expect(200);
+      if (failed.body.data.status === 'failed') {
+        expect(failed.body.data.attemptCount).toBe(1);
+        expect(failed.body.data.maxAttempts).toBe(1);
+        expect(failed.body.data.errorCode).toBe('provider_failed');
+        expect(failed.body.data.errorMessage).toBe('AI provider network request failed (ECONNREFUSED)');
+        expect(failed.body.data.retryable).toBe(true);
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    throw new Error('generation job with provider network failure did not fail in time');
   });
 
   it('records non-retryable provider failure details on the generation job', async () => {

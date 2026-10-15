@@ -3,9 +3,11 @@ import { mockDiaries } from '../../mocks/diaries';
 import { mockPhotos } from '../../mocks/photos';
 import { createTestStore } from '../../test-utils/create-test-store';
 import { createDeferred } from '../../test-utils/fakes/create-deferred';
+import { createAsyncFaultPlan } from '../../test-utils/fakes/create-async-fault-plan';
 import type { CoreDiaryRepository } from '../../repositories/core-diary-repository';
 import { createAppStore, createDefaultAppStoreDeps } from '../create-app-store';
 import type { DraftSnapshotStore } from '../adapters/types';
+import type { DiaryPhoto } from '../../types/diary';
 import { buildGeneratedDiaryFromResult, canGenerate, cloneDiary, getDiaryStatistics, getHistoryGroups, getPeopleForPhotos, projectDiaryForSharing, sanitizePhotoIds } from '../diary-domain';
 
 describe('domain/store regression', () => {
@@ -167,6 +169,44 @@ describe('domain/store regression', () => {
     expect(get().drafts[id].selectedPhotoIds.length).toBe(0);
     expect(get().startGeneration(id)).toBeUndefined();
     expect(sanitizePhotoIds(['photo-1', 'photo-1', 'missing'], mockPhotos)).toEqual(['photo-1']);
+  });
+
+  test('registered device photos stay isolated per store and can be added to material membership once', () => {
+    const { get, selectors } = createContext();
+    const devicePhoto: DiaryPhoto = {
+      id: 'device-photo-1',
+      title: '设备照片',
+      location: '苏州',
+      emoji: '🖼',
+      color: '#EFE3D5',
+      date: '2026.10.15',
+      uri: 'file:///device-photo-1.jpg',
+      localUri: 'file:///device-photo-1.jpg',
+      personIds: ['person-friend'],
+      faceRects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.4 }],
+      source: 'device',
+    };
+    const originalMockPhotoIds = mockPhotos.map(photo => photo.id);
+
+    get().registerPhotos([devicePhoto]);
+
+    expect(selectors.getPhotoById(devicePhoto.id)).toEqual(devicePhoto);
+    expect(selectors.photos.some(photo => photo.id === devicePhoto.id)).toBe(true);
+    expect(mockPhotos.map(photo => photo.id)).toEqual(originalMockPhotoIds);
+    devicePhoto.title = '外部对象已修改';
+    devicePhoto.faceRects![0].x = 0.9;
+    expect(selectors.getPhotoById(devicePhoto.id)?.title).toBe('设备照片');
+    expect(selectors.getPhotoById(devicePhoto.id)?.faceRects?.[0].x).toBe(0.1);
+
+    const secondStore = createContext();
+    expect(secondStore.selectors.getPhotoById(devicePhoto.id)).toBeUndefined();
+    expect(secondStore.get().materialPhotoIds).not.toContain(devicePhoto.id);
+
+    get().addMaterialPhoto(devicePhoto.id);
+    get().addMaterialPhoto(devicePhoto.id);
+    get().addMaterialPhoto('unregistered-device-photo');
+    expect(get().materialPhotoIds.filter(id => id === devicePhoto.id)).toEqual([devicePhoto.id]);
+    expect(get().materialPhotoIds).not.toContain('unregistered-device-photo');
   });
 
   test('E02 CASE-BAS-004-002 authorization survives a new creation and drafts preserve separate IDs', () => {
@@ -2529,6 +2569,89 @@ describe('domain/store regression', () => {
     expect(get().issueLog).toEqual([]);
   });
 
+  test('E15 CASE-BAS-004-003 injected write failure preserves data and a controlled retry saves once', async () => {
+    type SaveResult = Awaited<ReturnType<CoreDiaryRepository['saveDiary']>>;
+    const deferredRetry = createDeferred<SaveResult>();
+    const faultPlan = createAsyncFaultPlan<SaveResult>([
+      { type: 'reject', reason: new Error('simulated write failure') },
+      { type: 'deferred', deferred: deferredRetry },
+    ]);
+    const saveDiary = jest.fn((_input: Parameters<CoreDiaryRepository['saveDiary']>[0]) => faultPlan.next());
+    const getSaveResult = jest.fn<
+      ReturnType<CoreDiaryRepository['getSaveResult']>,
+      Parameters<CoreDiaryRepository['getSaveResult']>
+    >(async () => ({
+      ok: false as const,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      error: {
+        code: 'not_found' as const,
+        message: 'save result not found',
+        retryable: false,
+      },
+    }));
+    const repository = createRepository({ saveDiary, getSaveResult });
+    const deps = createDefaultAppStoreDeps({
+      now: () => 1_700_000_000_000,
+      createId: prefix => `${prefix}-bas004-fault`,
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+      diaries: mockDiaries,
+    });
+    const store = createAppStore(deps);
+    const get = () => store.getState();
+    const draftId = get().beginCreation();
+    get().setDraftPhotos(draftId, defaultSelectablePhotoIds());
+    const round = get().startGeneration(draftId)!;
+    get().finishGeneration(draftId, round);
+    const initialDiaries = JSON.stringify(get().diaries);
+    const initialDraftDiary = JSON.stringify(get().drafts[draftId].diary);
+    const idempotencyKey = `${draftId}-save-${round}`;
+
+    const failed = await get().submitDraft(draftId);
+
+    expect(failed).toEqual({
+      ok: false,
+      reason: 'save_failed',
+      message: 'simulated write failure',
+    });
+    expect(get().savingDraftIds).toEqual([]);
+    expect(get().drafts[draftId]).toBeTruthy();
+    expect(JSON.stringify(get().drafts[draftId].diary)).toBe(initialDraftDiary);
+    expect(JSON.stringify(get().diaries)).toBe(initialDiaries);
+    expect(getSaveResult).toHaveBeenCalledWith(idempotencyKey);
+    expect(faultPlan.callCount).toBe(1);
+    expect(faultPlan.remainingCount).toBe(1);
+
+    const retry = get().submitDraft(draftId);
+    expect(get().savingDraftIds).toContain(draftId);
+    expect(saveDiary).toHaveBeenLastCalledWith(expect.objectContaining({ idempotencyKey }));
+
+    deferredRetry.resolve({
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: {
+        diaryId: 'diary-bas004-fault-saved',
+        draftId,
+        savedVersion: round,
+        id: 'diary-bas004-fault-saved',
+      },
+    });
+
+    await expect(retry).resolves.toEqual({
+      ok: true,
+      diaryId: 'diary-bas004-fault-saved',
+      destination: 'complete',
+    });
+    expect(get().savingDraftIds).toEqual([]);
+    expect(get().diaries).toHaveLength(mockDiaries.length + 1);
+    expect(get().diaries.filter(diary => diary.id === 'diary-bas004-fault-saved')).toHaveLength(1);
+    expect(faultPlan.callCount).toBe(2);
+    expect(faultPlan.remainingCount).toBe(0);
+    expect(saveDiary.mock.calls.map(([input]) => input.idempotencyKey)).toEqual([idempotencyKey, idempotencyKey]);
+  });
+
   test('save logs version conflict instead of pretending success', async () => {
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
@@ -4087,6 +4210,79 @@ describe('domain/store regression', () => {
     saved = selectors.getDiaryById('diary-1')!;
     expect(saved.shareModes).toEqual(['wechat']);
     expect(saved.exportModes).toEqual(['save', 'pdf']);
+  });
+
+  test('SHR-005 confirmed delivery records once per operation id and keeps share/export history separated', () => {
+    const { get, selectors } = createContext();
+    const version = selectors.getDiaryById('diary-1')?.version ?? 0;
+
+    expect(get().confirmShareDelivery({
+      diaryId: 'diary-1',
+      mode: 'save',
+      version,
+      operationId: 'share-op-save-1',
+    })).toBe(true);
+    expect(get().confirmShareDelivery({
+      diaryId: 'diary-1',
+      mode: 'save',
+      version,
+      operationId: 'share-op-save-1',
+    })).toBe(true);
+    expect(get().confirmShareDelivery({
+      diaryId: 'diary-1',
+      mode: 'pdf',
+      version,
+      operationId: 'share-op-pdf-1',
+    })).toBe(true);
+    get().savePrivacy('diary-1', 'public-likes');
+    expect(get().confirmShareDelivery({
+      diaryId: 'diary-1',
+      mode: 'wechat',
+      version,
+      operationId: 'share-op-wechat-1',
+    })).toBe(true);
+
+    const saved = selectors.getDiaryById('diary-1')!;
+    expect(saved.shareModes).toEqual(['wechat']);
+    expect(saved.exportModes).toEqual(['save', 'pdf']);
+    expect(saved.exportedImage).toBe(true);
+    expect(saved.exportedPdf).toBe(true);
+  });
+
+  test('SHR-005 ignores stale or mismatched confirmed delivery callbacks', () => {
+    const { get, selectors, store } = createContext();
+    const version = selectors.getDiaryById('diary-1')?.version ?? 0;
+
+    expect(get().confirmShareDelivery({
+      diaryId: 'diary-1',
+      mode: 'save',
+      version: version + 1,
+      operationId: 'share-op-save-stale',
+    })).toBe(false);
+    store.setState(state => ({
+      diaries: state.diaries.map(item => item.id !== 'diary-1' ? item : {
+        ...item,
+        privacy: 'public-comments',
+      }),
+    }));
+    expect(get().confirmShareDelivery({
+      diaryId: 'diary-1',
+      mode: 'wechat',
+      version,
+      operationId: 'share-op-mismatch',
+    })).toBe(true);
+    expect(get().confirmShareDelivery({
+      diaryId: 'diary-2',
+      mode: 'wechat',
+      version,
+      operationId: 'share-op-mismatch',
+    })).toBe(false);
+
+    const diaryOne = selectors.getDiaryById('diary-1')!;
+    const diaryTwo = selectors.getDiaryById('diary-2')!;
+    expect(diaryOne.shareModes).toEqual(['wechat']);
+    expect(diaryTwo.shareModes).toEqual([]);
+    expect(diaryOne.exportModes ?? []).toEqual([]);
   });
 
   test('E15 CASE-BAS-004-002 history derives groups from current records, baseline is central, helper interactions are local', () => {

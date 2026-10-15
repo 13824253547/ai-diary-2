@@ -1,5 +1,36 @@
 import { DiaryGenerationProviderError, DiaryGenerationService } from './diary-generation.service';
 
+function buildValidProviderResult(overrides: Record<string, unknown> = {}) {
+  return {
+    title: '海风把旅程写成一页',
+    summary: '把沿海散步的片段整理成可继续编辑的结果。',
+    location: '台南',
+    date: '2026.10.13',
+    companionName: '自己',
+    coverPhotoId: 'photo-8',
+    posterPhotoIds: ['photo-8'],
+    blocks: [
+      {
+        id: 'provider-block-valid',
+        type: 'text',
+        content: '海风从傍晚一路吹到夜灯亮起。',
+        photoIds: ['photo-8'],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function mockOpenAiGenerationResult(result: unknown) {
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ message: { content: JSON.stringify(result) } }],
+    }),
+  }) as unknown as typeof fetch;
+}
+
 describe('DiaryGenerationService', () => {
   const service = new DiaryGenerationService();
   const originalEnv = { ...process.env };
@@ -211,6 +242,260 @@ describe('DiaryGenerationService', () => {
     } satisfies Partial<DiaryGenerationProviderError>);
   });
 
+  test.each([
+    [
+      'text block photoIds',
+      buildValidProviderResult({
+        blocks: [{ id: 'text-block', type: 'text', content: '正文', photoIds: ['photo-999'] }],
+      }),
+      'text block photoIds references a photo outside the selected set',
+    ],
+    [
+      'quote block photoIds',
+      buildValidProviderResult({
+        blocks: [{ id: 'quote-block', type: 'quote', content: '引言', photoIds: ['photo-999'] }],
+      }),
+      'quote block photoIds references a photo outside the selected set',
+    ],
+    [
+      'posterPhotoIds',
+      buildValidProviderResult({ posterPhotoIds: ['photo-999'] }),
+      'posterPhotoIds references a photo outside the selected set',
+    ],
+    [
+      'coverPhotoId',
+      buildValidProviderResult({ coverPhotoId: 'photo-999' }),
+      'coverPhotoId references a photo outside the selected set',
+    ],
+    [
+      'person photoIds',
+      buildValidProviderResult({
+        people: [{ id: 'person-1', name: '同行者', photoIds: ['photo-999'], avatarPhotoId: 'photo-8' }],
+      }),
+      'person photoIds references a photo outside the selected set',
+    ],
+    [
+      'person avatarPhotoId',
+      buildValidProviderResult({
+        people: [{ id: 'person-1', name: '同行者', photoIds: ['photo-8'], avatarPhotoId: 'photo-999' }],
+      }),
+      'person avatarPhotoId references a photo outside the selected set',
+    ],
+    [
+      'malformed person photoIds',
+      buildValidProviderResult({
+        people: [{ name: '同行者', photoIds: ['photo-999'], avatarPhotoId: 'photo-8' }],
+      }),
+      'person photoIds references a photo outside the selected set',
+    ],
+    [
+      'malformed person avatarPhotoId',
+      buildValidProviderResult({
+        people: [{ id: 'person-1', photoIds: ['photo-8'], avatarPhotoId: 'photo-999' }],
+      }),
+      'person avatarPhotoId references a photo outside the selected set',
+    ],
+  ] as Array<[string, Record<string, unknown>, string]>)(
+    'rejects out-of-set references in %s',
+    async (_field, payload, message) => {
+      process.env.AI_PROVIDER = 'openai-compatible';
+      process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+      process.env.AI_PROVIDER_MODEL = 'gpt-test';
+      process.env.AI_PROVIDER_API_KEY = 'test-key';
+      mockOpenAiGenerationResult(payload);
+
+      await expect(service.generate({
+        draftId: 'draft-provider-invalid-photo-reference',
+        draftVersion: 2,
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+      })).rejects.toMatchObject({
+        code: 'provider_failed',
+        retryable: false,
+        message,
+      } satisfies Partial<DiaryGenerationProviderError>);
+    },
+  );
+
+  test('rejects rewrite photo references outside the selected set', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ content: '改写后的内容', photoIds: ['photo-999'] }),
+            },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    await expect(service.rewriteBlock({
+      draftId: 'draft-rewrite-invalid-photo-reference',
+      blockId: 'block-1',
+      draftVersion: 2,
+      characterId: 'character-blue',
+      blockType: 'text',
+      content: '原始段落',
+      selectedPhotoIds: ['photo-8', 'photo-9'],
+      photoIds: ['photo-8'],
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: false,
+      message: 'rewrite photoIds references a photo outside the selected set',
+    } satisfies Partial<DiaryGenerationProviderError>);
+  });
+
+  test.each([null, 'not-a-block'])(
+    'rejects non-object generation block entries (%p)',
+    async entry => {
+      process.env.AI_PROVIDER = 'openai-compatible';
+      process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+      process.env.AI_PROVIDER_MODEL = 'gpt-test';
+      process.env.AI_PROVIDER_API_KEY = 'test-key';
+      mockOpenAiGenerationResult(buildValidProviderResult({
+        blocks: [
+          entry,
+          { id: 'valid-text', type: 'text', content: '合法正文', photoIds: ['photo-8'] },
+        ],
+      }));
+
+      await expect(service.generate({
+        draftId: 'draft-provider-invalid-block-entry',
+        draftVersion: 2,
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+      })).rejects.toMatchObject({
+        code: 'provider_failed',
+        retryable: false,
+        message: 'provider blocks contain invalid entries',
+      } satisfies Partial<DiaryGenerationProviderError>);
+    },
+  );
+
+  test.each([
+    [
+      'empty text content',
+      { id: 'empty-text', type: 'text', content: '   ', photoIds: ['photo-8'] },
+      'text block content is missing',
+    ],
+    [
+      'empty quote content',
+      { id: 'empty-quote', type: 'quote', content: '', photoIds: ['photo-8'] },
+      'quote block content is missing',
+    ],
+    [
+      'empty photo caption',
+      { id: 'empty-photo', type: 'photo', photoId: 'photo-8', caption: '  ' },
+      'photo block is missing required fields',
+    ],
+    [
+      'empty text title',
+      { id: 'empty-title', type: 'text', content: '正文', title: '' },
+      'provider result is missing text block title',
+    ],
+    [
+      'empty quote relation',
+      { id: 'empty-relation', type: 'quote', content: '引言', relatedBlockId: '' },
+      'provider result is missing quote block relatedBlockId',
+    ],
+    [
+      'empty photo reference',
+      { id: 'empty-photo-reference', type: 'text', content: '正文', photoIds: ['  '] },
+      'text block photoIds contains an invalid photo ID',
+    ],
+  ] as Array<[string, Record<string, unknown>, string]>)(
+    'rejects generation blocks with %s',
+    async (_field, block, message) => {
+      process.env.AI_PROVIDER = 'openai-compatible';
+      process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+      process.env.AI_PROVIDER_MODEL = 'gpt-test';
+      process.env.AI_PROVIDER_API_KEY = 'test-key';
+      mockOpenAiGenerationResult(buildValidProviderResult({ blocks: [block] }));
+
+      await expect(service.generate({
+        draftId: 'draft-provider-empty-block-field',
+        draftVersion: 2,
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+      })).rejects.toMatchObject({
+        code: 'provider_failed',
+        retryable: false,
+        message,
+      } satisfies Partial<DiaryGenerationProviderError>);
+    },
+  );
+
+  test.each([
+    ['id', { id: '   ', name: '同行者', photoIds: ['photo-8'], avatarPhotoId: 'photo-8' }],
+    ['name', { id: 'person-1', name: '  ', photoIds: ['photo-8'], avatarPhotoId: 'photo-8' }],
+  ] as Array<[string, Record<string, unknown>]>)(
+    'omits provider people candidates with an empty %s',
+    async (_field, person) => {
+      process.env.AI_PROVIDER = 'openai-compatible';
+      process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+      process.env.AI_PROVIDER_MODEL = 'gpt-test';
+      process.env.AI_PROVIDER_API_KEY = 'test-key';
+      mockOpenAiGenerationResult(buildValidProviderResult({ people: [person] }));
+
+      const result = await service.generate({
+        draftId: 'draft-provider-empty-person-field',
+        draftVersion: 2,
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+      });
+
+      expect(result.people).toBeUndefined();
+    },
+  );
+
+  test.each([
+    ['title', { title: '' }, 'provider result is missing title'],
+    ['summary', { summary: undefined }, 'provider result is missing summary'],
+    ['location', { location: null }, 'provider result is missing location'],
+    ['date', { date: 4 }, 'provider result is missing date'],
+    ['companionName', { companionName: '   ' }, 'provider result is missing companionName'],
+    ['coverPhotoId', { coverPhotoId: undefined }, 'provider result is missing coverPhotoId'],
+    ['posterPhotoIds', { posterPhotoIds: null }, 'posterPhotoIds must be an array'],
+    ['people', { people: { id: 'person-1' } }, 'provider people must be an array'],
+  ] as Array<[string, Record<string, unknown>, string]>)(
+    'rejects provider results with invalid required field %s',
+    async (_field, overrides, message) => {
+      process.env.AI_PROVIDER = 'openai-compatible';
+      process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+      process.env.AI_PROVIDER_MODEL = 'gpt-test';
+      process.env.AI_PROVIDER_API_KEY = 'test-key';
+      mockOpenAiGenerationResult(buildValidProviderResult(overrides));
+
+      await expect(service.generate({
+        draftId: 'draft-provider-missing-required-field',
+        draftVersion: 2,
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+      })).rejects.toMatchObject({
+        code: 'provider_failed',
+        retryable: false,
+        message,
+      } satisfies Partial<DiaryGenerationProviderError>);
+    },
+  );
+
   test('fails fast when openai-compatible provider credentials are incomplete', async () => {
     process.env.AI_PROVIDER = 'openai-compatible';
     process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
@@ -298,6 +583,121 @@ describe('DiaryGenerationService', () => {
       code: 'timeout',
       retryable: true,
       message: 'AI provider request timed out after 1ms',
+    } satisfies Partial<DiaryGenerationProviderError>);
+  });
+
+  test('uses the default response format and falls back for an invalid generation temperature', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_GENERATION_TEMPERATURE = '0.2invalid';
+    delete process.env.AI_PROVIDER_RESPONSE_FORMAT;
+    const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 400 });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(service.generate({
+      draftId: 'draft-provider-config-defaults',
+      draftVersion: 2,
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-4', 'photo-5', 'photo-6'],
+      privacy: 'private',
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: false,
+      message: 'AI provider request failed with status 400',
+    } satisfies Partial<DiaryGenerationProviderError>);
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(requestBody.temperature).toBe(0.7);
+    expect(requestBody.response_format).toEqual({ type: 'json_object' });
+  });
+
+  test('supports disabled response format and separate generation and rewrite temperatures', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_GENERATION_TEMPERATURE = '0.2';
+    process.env.AI_PROVIDER_REWRITE_TEMPERATURE = '1.3';
+    process.env.AI_PROVIDER_RESPONSE_FORMAT = 'off';
+    const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 400 });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(service.generate({
+      draftId: 'draft-provider-config-generation',
+      draftVersion: 2,
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-4', 'photo-5', 'photo-6'],
+      privacy: 'private',
+    })).rejects.toMatchObject({ message: 'AI provider request failed with status 400' });
+    await expect(service.rewriteBlock({
+      draftId: 'draft-provider-config-rewrite',
+      blockId: 'block-config',
+      draftVersion: 2,
+      characterId: 'character-blue',
+      blockType: 'text',
+      content: '海风把傍晚吹得很安静。',
+      selectedPhotoIds: ['photo-8', 'photo-9'],
+      photoIds: ['photo-8'],
+    })).rejects.toMatchObject({ message: 'AI provider request failed with status 400' });
+
+    const generationBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const rewriteBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(generationBody.temperature).toBe(0.2);
+    expect(rewriteBody.temperature).toBe(1.3);
+    expect(generationBody).not.toHaveProperty('response_format');
+    expect(rewriteBody).not.toHaveProperty('response_format');
+  });
+
+  test('rejects unsupported provider response formats before making a request', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_RESPONSE_FORMAT = 'json_schema';
+    const fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(service.generate({
+      draftId: 'draft-provider-config-unsupported',
+      draftVersion: 2,
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-4', 'photo-5', 'photo-6'],
+      privacy: 'private',
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: false,
+      message: 'unsupported AI provider response format: json_schema',
+    } satisfies Partial<DiaryGenerationProviderError>);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('marks retryable provider network failures as retryable provider errors', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    global.fetch = jest.fn().mockRejectedValue(
+      Object.assign(new TypeError('fetch failed'), {
+        cause: { code: 'ECONNRESET' },
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(service.generate({
+      draftId: 'draft-provider-network-error',
+      draftVersion: 2,
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-4', 'photo-5', 'photo-6'],
+      privacy: 'private',
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: true,
+      message: 'AI provider network request failed (ECONNRESET)',
     } satisfies Partial<DiaryGenerationProviderError>);
   });
 

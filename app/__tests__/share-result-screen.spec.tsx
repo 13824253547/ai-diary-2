@@ -292,4 +292,90 @@ describe('Share result screen projection', () => {
     expect(screen.queryByText(/这段不该出现在选段分享里/)).toBeNull();
     expect(screen.queryByText('anonymous:photo-2')).toBeNull();
   });
+
+  test('shows an empty state instead of falling back to another diary when diaryId is invalid', async () => {
+    mockParams.diaryId = 'missing-diary';
+
+    const screen = await render(<ShareResultScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('没有找到这篇日记')).toBeTruthy();
+    });
+    expect(screen.getByText('请从已保存的日记进入分享。')).toBeTruthy();
+    expect(screen.queryByText('分享预览')).toBeNull();
+    expect(screen.queryByText(/赤崁楼/)).toBeNull();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  test('closes preview back to the same share page without mutating share records', async () => {
+    updateDiary('diary-1', diary => ({
+      ...diary,
+      privacy: 'public-comments',
+      publicBlockIds: ['block-1'],
+      shareModes: [],
+      exportModes: [],
+      exportedImage: false,
+      exportedPdf: false,
+    }));
+
+    const before = useAppStore.getState().diaries.find(diary => diary.id === 'diary-1');
+    const screen = await render(<ShareResultScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('分享日记')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByText('预览'));
+
+    await waitFor(() => {
+      expect(screen.getByText('分享预览')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByLabelText('关闭预览'));
+
+    await waitFor(() => {
+      expect(screen.queryByText('分享预览')).toBeNull();
+    });
+    expect(screen.getByText('分享日记')).toBeTruthy();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    const after = useAppStore.getState().diaries.find(diary => diary.id === 'diary-1');
+    expect(after).toMatchObject({
+      shareModes: before?.shareModes ?? [],
+      exportModes: before?.exportModes ?? [],
+      exportedImage: before?.exportedImage ?? false,
+      exportedPdf: before?.exportedPdf ?? false,
+      publicBlockIds: before?.publicBlockIds,
+      privacy: before?.privacy,
+    });
+  });
+
+  test('switches to the new diary target without leaving stale content on screen', async () => {
+    updateDiary('diary-2', diary => ({
+      ...diary,
+      title: '上海夜色备忘',
+      summary: '武康路的晚风和路灯都换成了另一种节奏。',
+      location: '上海',
+      photoIds: ['photo-8', 'photo-9'],
+      posterPhotoIds: ['photo-8', 'photo-9'],
+      coverPhotoId: 'photo-8',
+    }));
+
+    mockParams.diaryId = 'diary-1';
+    const screen = await render(<ShareResultScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('台南慢游日记')).toBeTruthy();
+    });
+
+    await act(async () => {
+      mockParams.diaryId = 'diary-2';
+      screen.rerender(<ShareResultScreen />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('上海夜色备忘')).toBeTruthy();
+    });
+    expect(screen.queryByText('台南慢游日记')).toBeNull();
+    expect(screen.getByText('photo-8')).toBeTruthy();
+    expect(screen.queryByText('photo-2')).toBeNull();
+  });
 });
