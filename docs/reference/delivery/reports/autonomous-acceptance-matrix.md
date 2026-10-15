@@ -1,5 +1,7 @@
 # 自动推进验收矩阵
 
+2026-10-15 策略迁移说明：本矩阵仅记录真实验收证据，不作为开发工作量进度。当前采用 DEV/TEST 分轮，开发状态见 [development-progress](development-progress.md)，缺第三方能力可按 [开发策略](../development-strategy.md) 实现隔离 mock 业务，但不能据此把本表标为 passed。本轮未运行业务测试，已有结果保留。
+
 ## 当前汇总
 
 | 任务 | 当前状态 | 已通过 | 进行中 | 阻塞 / 未执行 |

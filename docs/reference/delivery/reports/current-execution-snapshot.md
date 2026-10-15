@@ -1,5 +1,11 @@
 # 当前执行快照
 
+## 当前阶段（2026-10-15）
+
+`DEV-1`：用户批准先完成可开发业务，缺第三方能力使用隔离 mock 或延期适配器，再集中测试、问题返工。详情见 [开发策略](../development-strategy.md)、[外部能力分类](../external-dependencies.md) 和 [开发台账](development-progress.md)。
+
+本轮执行的是文档/依赖扫描，未运行业务测试或数据库操作；下表保留既有 CASE 证据。中断前新增的 app store + HTTP repository 集成测试已存在于 `backend/test/app.e2e-spec.ts`，本轮只确认源码存在，未验证其运行结果；不得拿下面的历史 40/40 证明新增用例通过。集中 TEST 轮再核验，正式 UI/UX 未调整。
+
 | CASE ID | 验收 ID | 环境 | 结果 | 代码位置 | 证据 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
 | CASE-BAS-001-004 | T-BAS-001-A04 | 文档 + backend jest + runner | partial | `docs/reference/delivery/contracts/ai-quality-evaluation-v1.md` / `backend/src/common/diary-generation-evaluation.ts` / `backend/src/common/diary-generation-evaluation.spec.ts` / `backend/src/scripts/run-diary-generation-evaluation.ts` / `docs/reference/delivery/reports/cre-005-quality-baseline.md` | `npm --prefix backend run build` / `npm --prefix backend run test -- diary-generation.service.spec.ts diary-generation-evaluation.spec.ts` / `npm --prefix backend run eval:diary-generation` | 已为 `CRE-005` 建立固定夹具、自动结构校验、人工评分维度和可执行 runner，当前 `deterministic` provider 可稳定产出结构通过的基线报告；真实 provider 与正式质量阈值仍待 Q-002 / BAS-002 收口 |

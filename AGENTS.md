@@ -42,6 +42,13 @@ Prefer these local files first:
 - When local docs are missing, infer from local code before using outside context.
 - When creating new project guidance, store it under this repository instead of leaving it only in chat.
 
+## Delivery Workflow
+
+- Follow `docs/reference/delivery/development-strategy.md`: develop the full local business scope first, then run a consolidated test round, then fix the recorded defects in the next development round.
+- Missing external providers may use explicit, isolated mock adapters for development. Mock completion never proves real-provider or platform acceptance.
+- Track development separately in `docs/reference/delivery/reports/development-progress.md`; keep the existing acceptance matrix and evidence intact.
+- Do not repeatedly rerun unchanged CRE-002 or full test suites during development. Preserve UI/UX boundaries, product decision gates, data isolation and safe test-resource requirements.
+
 ## Documentation Placement
 
 - Local agent conventions: `.agents/`

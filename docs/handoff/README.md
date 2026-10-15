@@ -10,7 +10,9 @@ The current handoff document already exists at repository root:
 
 For now, treat that file as the active handoff source for this project.
 
-Real implementation and testing startup: [GPT-5.4 start prompts](gpt-5.4-start.md).
+Development-first goal prompt: [Current startup prompt](gpt-5.4-start.md). The filename is retained for compatibility; the prompt is model-independent.
+
+Execution policy and external-provider classification: [Development strategy](../reference/delivery/development-strategy.md), [External dependencies](../reference/delivery/external-dependencies.md), and [Development ledger](../reference/delivery/reports/development-progress.md).
 
 ## Going Forward
 
