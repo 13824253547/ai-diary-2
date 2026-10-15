@@ -46,7 +46,8 @@
     "test": "jest --runInBand",
     "test:domain": "jest --runInBand src/store/__tests__",
     "test:ui": "jest --runInBand src/components",
-    "test:contracts": "jest --runInBand src/contracts/__tests__"
+    "test:contracts": "jest --runInBand src/contracts/__tests__",
+    "test:client-secret-boundary": "node --test tools/verify-client-bundle-secrets.test.js"
   },
   "private": true
 }

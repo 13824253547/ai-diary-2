@@ -53,4 +53,4 @@ Prefer these local files first:
 
 - Project: `Orange Glow AI Diary`
 - Path: `/Users/hjd/Desktop/enter/code/aliyuncodeV2/AI-diary/orange-glow-ai-diary`
-- Current phase: iOS-first mock-only frontend prototype
+- Current phase: iOS-first application prototype with both mock and service-backed flows; local NestJS/Prisma/MySQL integration exists, while production backend/provider deployment remains unestablished.

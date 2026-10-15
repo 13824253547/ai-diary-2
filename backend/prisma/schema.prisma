@@ -18,6 +18,7 @@ model Diary {
   privacy   String
   photoIds  Json
   publicBlockIds Json?
+  contentSnapshot Json?
   version   Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

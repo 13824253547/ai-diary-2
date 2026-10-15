@@ -11,24 +11,27 @@ import { mockPhotos } from '../src/mocks/photos';
 import { useAppStore, appSelectors } from '../src/store/use-app-store';
 
 let passed = 0;
-function test(name: string, run: () => void) {
-  useAppStore.setState(useAppStore.getInitialState(), true);
-  run(); passed++; console.log(`✓ ${name}`);
+const cases: Array<{ name: string; run: () => void | Promise<void> }> = [];
+function test(name: string, run: () => void | Promise<void>) {
+  cases.push({ name, run });
 }
 const get = () => useAppStore.getState();
 function generateNew() {
   const draftId = get().beginCreation();
+  get().setDraftPhotos(draftId, mockPhotos.slice(0, 12).map(photo => photo.id));
   const round = get().startGeneration(draftId)!;
   get().finishGeneration(draftId, round);
   return draftId;
 }
 
-test('photo selection allows 0/2/3/12 and deduplicates invalid IDs', () => {
+test('new drafts start empty; photo selection allows 0/2/3/12 and deduplicates invalid IDs', () => {
   assert.equal(canGenerate([]), false);
   assert.equal(canGenerate(['a', 'b']), false);
   assert.equal(canGenerate(['a', 'b', 'c']), true);
   assert.equal(canGenerate(['a', 'a', 'b']), false);
   const id = get().beginCreation();
+  assert.equal(get().drafts[id].selectedPhotoIds.length, 0);
+  get().setDraftPhotos(id, mockPhotos.slice(0, 12).map(photo => photo.id));
   assert.equal(get().drafts[id].selectedPhotoIds.length, 12);
   for (const photoId of get().selectedPhotoIds) get().togglePhoto(photoId);
   assert.equal(get().drafts[id].selectedPhotoIds.length, 0);
@@ -43,8 +46,9 @@ test('authorization survives a new creation and drafts preserve separate IDs', (
   assert.equal(get().currentStep, 'album');
 });
 
-test('generation ignores paused and stale round callbacks, and finishes only once', () => {
+test('generation ignores paused and stale round callbacks, and finishes only once', async () => {
   const id = get().beginCreation();
+  get().setDraftPhotos(id, mockPhotos.slice(0, 3).map(photo => photo.id));
   const firstRound = get().startGeneration(id)!;
   assert.equal(get().startGeneration(id), firstRound);
   get().advanceDraftGeneration(id, firstRound, 60);
@@ -59,17 +63,18 @@ test('generation ignores paused and stale round callbacks, and finishes only onc
   const blocks = get().drafts[id].diary.blocks;
   get().finishGeneration(id, secondRound);
   assert.equal(get().drafts[id].diary.blocks, blocks);
-  get().setDraftPhotos(id, ['photo-1','photo-2','photo-3']);
+  get().setDraftPhotos(id, ['photo-4','photo-5','photo-6']);
   assert.equal(get().drafts[id].generation.status, 'idle');
-  assert.equal(get().saveDraft(id), undefined);
+  assert.equal(await get().saveDraft(id), undefined);
 });
 
-test('first and second creation save unique diaries idempotently without changing seeds', () => {
+test('first and second creation save unique diaries idempotently without changing seeds', async () => {
   const seed = JSON.stringify(get().diaries[0]);
   const count = get().diaries.length;
-  const first = generateNew(); const firstId = get().saveDraft(first);
-  assert.ok(firstId); assert.equal(get().saveDraft(first), firstId);
-  const second = generateNew(); const secondId = get().saveDraft(second);
+  const first = generateNew(); const firstId = await get().saveDraft(first);
+  assert.ok(firstId);
+  assert.equal(await get().saveDraft(first), firstId);
+  const second = generateNew(); const secondId = await get().saveDraft(second);
   assert.ok(secondId); assert.notEqual(secondId, firstId);
   assert.equal(get().diaries.length, count + 2);
   assert.equal(JSON.stringify(get().diaries.find(diary => diary.id === 'diary-1')), seed);
@@ -77,9 +82,9 @@ test('first and second creation save unique diaries idempotently without changin
   assert.ok(getHistoryGroups(get().diaries).some(group => group.diaryIds.includes(secondId!)));
 });
 
-test('editing and abandoning the second diary leaves both saved records untouched', () => {
-  const first = get().saveDraft(generateNew())!;
-  const second = get().saveDraft(generateNew())!;
+test('editing and abandoning the second diary leaves both saved records untouched', async () => {
+  const first = (await get().saveDraft(generateNew()))!;
+  const second = (await get().saveDraft(generateNew()))!;
   const firstBefore = JSON.stringify(appSelectors.getDiaryById(first));
   const secondBefore = JSON.stringify(appSelectors.getDiaryById(second));
   const edit = get().beginEdit(second)!;
@@ -93,7 +98,7 @@ test('editing and abandoning the second diary leaves both saved records untouche
   assert.equal(appSelectors.getDiaryById('missing'), undefined);
 });
 
-test('editing preserves diary ID, blocks stay editable, character selection does not overwrite text', () => {
+test('editing preserves diary ID, blocks stay editable, character selection does not overwrite text', async () => {
   const id = get().beginEdit('diary-1')!;
   const before = get().drafts[id].diary.blocks;
   get().setDraftCharacter(id, 'character-green');
@@ -101,14 +106,14 @@ test('editing preserves diary ID, blocks stay editable, character selection does
   get().updateDraftBlock(id, 'block-1', '我改写的第一段。');
   get().setDraftBlockPhotos(id, 'block-1', ['photo-5','photo-12']);
   const count = get().diaries.length;
-  assert.equal(get().saveDraft(id), 'diary-1');
+  assert.equal(await get().saveDraft(id), 'diary-1');
   assert.equal(get().diaries.length, count);
   assert.equal(get().diaries[0].summary, '我改写的第一段。');
   const block = get().diaries[0].blocks[0];
   assert.deepEqual('photoIds' in block && block.photoIds, ['photo-5','photo-12']);
 });
 
-test('person groups follow selected photos and empty names normalize on save', () => {
+test('person groups follow selected photos and empty names normalize on save', async () => {
   assert.equal(getPeopleForPhotos(['photo-1','photo-2','photo-3'], mockPhotos).length, 0);
   const id = generateNew();
   assert.equal(get().drafts[id].people.length, 2);
@@ -120,7 +125,7 @@ test('person groups follow selected photos and empty names normalize on save', (
   assert.match(JSON.stringify(get().drafts[id].diary.blocks), /小巷/);
   assert.equal(JSON.stringify(get().drafts[id].diary.blocks).includes('阿云巷'), false);
   get().setDraftPersonName(id, 'person-friend', '   ');
-  const saved = get().saveDraft(id)!;
+  const saved = (await get().saveDraft(id))!;
   assert.equal(appSelectors.getDiaryById(saved)?.people?.find(person => person.id === 'person-friend')?.name, '同行人');
 });
 
@@ -223,4 +228,13 @@ test('history derives groups from current records, baseline is central, helper i
   get().correctAnchor('anchor-1','更喜欢安静的海边'); assert.equal(get().correctedAnchors['anchor-1'],'更喜欢安静的海边');
   get().setFlowerUnlocked(true); assert.equal(get().flowerUnlocked, true);
 });
-console.log(`\n${passed} domain/store scenarios passed.`);
+export async function runCases(reverseOrder = false) {
+  const orderedCases = reverseOrder ? [...cases].reverse() : cases;
+  for (const entry of orderedCases) {
+    useAppStore.setState(useAppStore.getInitialState(), true);
+    await entry.run();
+    passed++;
+    console.log(`✓ ${entry.name}`);
+  }
+  console.log(`\n${passed} domain/store scenarios passed.`);
+}

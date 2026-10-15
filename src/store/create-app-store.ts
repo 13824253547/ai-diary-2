@@ -5,7 +5,7 @@ import { mockCharacters } from '../mocks/characters';
 import { mockDiaries, historyGroups } from '../mocks/diaries';
 import { mockPhotos } from '../mocks/photos';
 import { appConfig } from '../config/app-config';
-import type { GenerationJobContract, MemoriesQuery, RewriteBlockRequestContract } from '../contracts/core-diary-contract';
+import type { DiaryContentContract, GenerationJobContract, MemoriesQuery, RewriteBlockRequestContract } from '../contracts/core-diary-contract';
 import { createBackendCoreDiaryRepository } from './adapters/backend-core-diary-adapter';
 import type { AppStoreAdapters, PersistedDraftsSnapshot } from './adapters/types';
 import { shareOptions } from '../mocks/share-options';
@@ -108,7 +108,7 @@ export type AppStore = {
   finishGeneration: (draftId: string, round: number) => void;
   pauseGeneration: (draftId: string, round: number) => void;
   refreshDraftGeneration: (draftId: string, round: number) => Promise<void>;
-  saveDraft: (draftId: string) => string | undefined;
+  saveDraft: (draftId: string) => Promise<string | undefined>;
   submitDraft: (draftId: string) => Promise<
     | { ok: true; diaryId: string; destination: 'detail' | 'complete' }
     | { ok: false; reason: 'needs_regeneration' | 'source_missing' | 'version_conflict' | 'save_failed' | 'pending'; message: string }
@@ -134,7 +134,7 @@ export type AppStore = {
   advanceGeneration: () => void;
   completeGeneration: () => void;
   setCurrentDiaryId: (diaryId: string) => void;
-  updateDiaryText: (diaryId: string, content: string) => void;
+  updateDiaryText: (diaryId: string, content: string) => Promise<string | undefined>;
   setDiaryPrivacy: (diaryId: string, privacy: DiaryPrivacy) => void;
   markShared: (diaryId: string, mode: ShareMode) => void;
   logIssue: (message: string) => void;
@@ -304,6 +304,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     const pendingRewriteRequestIds = new Map<string, number>();
     const pendingRewriteFingerprints = new Map<string, string>();
     let nextRewriteRequestId = 1;
+    let draftSnapshotHydrationFailed = false;
     const applyPhotoPermissionStatus = (
       status: PhotoPermissionStatus,
       options?: { hydrated?: boolean; advanceToAlbum?: boolean },
@@ -338,43 +339,35 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     };
     const getConfirmedShareScope = (input: { diaryId: string; mode: ShareMode; version: number }) => `${input.diaryId}::${input.version}::${input.mode}`;
 
-    const buildMemoryDiaryItem = (input: { id: string; title: string; summary: string; location: string; date: string; privacy: DiaryPrivacy; photoIds: string[]; version: number }) => {
+    const buildMemoryDiaryItem = (input: { id: string; title: string; summary: string; location: string; date: string; privacy: DiaryPrivacy; photoIds: string[]; version: number; contentSnapshot?: DiaryContentContract }) => {
       const existing = get().diaries.find(item => item.id === input.id);
+      const content = input.contentSnapshot;
       const photos = get().photos;
-      const coverPhotoId = input.photoIds[0] ?? existing?.coverPhotoId ?? photos[0]?.id ?? '';
-      const firstPhotoIds = input.photoIds.slice(0, 3);
+      const coverPhotoId = content?.coverPhotoId ?? input.photoIds[0] ?? existing?.coverPhotoId ?? photos[0]?.id ?? '';
       return normalizeDiaryPhotos({
         id: input.id,
-        type: existing?.type ?? 'travel',
+        type: content?.type ?? existing?.type ?? 'travel',
         status: 'ready',
         title: input.title,
-        subtitle: existing?.subtitle ?? '后端同步回忆',
+        subtitle: content?.subtitle ?? existing?.subtitle ?? '后端同步回忆',
         location: input.location,
         date: input.date,
         summary: input.summary,
-        helperMessage: existing?.helperMessage ?? '',
-        characterId: existing?.characterId ?? resolved.characters[0]?.id ?? 'character-blue',
-        companionName: existing?.companionName ?? '自己',
+        helperMessage: content?.helperMessage ?? existing?.helperMessage ?? '',
+        characterId: content?.characterId ?? existing?.characterId ?? resolved.characters[0]?.id ?? 'character-blue',
+        companionName: content?.companionName ?? existing?.companionName ?? '自己',
         privacy: input.privacy,
         photoIds: input.photoIds,
         version: input.version,
         coverPhotoId,
-        blocks: existing?.blocks.length ? cloneDiary(existing).blocks : [
-          {
-            id: `${input.id}-summary`,
-            type: 'text',
-            title: '这段回忆',
-            content: input.summary,
-            photoIds: firstPhotoIds,
-          },
-        ],
+        blocks: content?.blocks ?? [],
         exportedImage: existing?.exportedImage ?? false,
         exportedPdf: existing?.exportedPdf ?? false,
         shareModes: existing?.shareModes ?? [],
         exportModes: existing?.exportModes ?? [],
         createdInSession: existing?.createdInSession ?? false,
-        people: existing?.people,
-        posterPhotoIds: existing?.posterPhotoIds,
+        people: content?.people ?? existing?.people,
+        posterPhotoIds: content?.posterPhotoIds ?? existing?.posterPhotoIds,
         publicBlockIds: existing?.publicBlockIds,
       }, input.photoIds);
     };
@@ -626,48 +619,6 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       }
     };
 
-    const syncDiaryToRemote = async (draft: DiaryDraft, diary: DiaryItem) => {
-      const repository = resolved.adapters.diaryRepository;
-      if (!repository) return;
-      const idempotencyKey = `${draft.id}-save-${draft.generation.round}`;
-      try {
-        const result = await repository.saveDiary({
-          id: diary.id,
-          draftId: draft.id,
-          sourceDiaryId: draft.sourceDiaryId,
-          sourceDiaryVersion: draft.sourceDiaryId ? draft.diary.version : undefined,
-          idempotencyKey,
-          title: diary.title,
-          summary: diary.summary,
-          location: diary.location,
-          date: diary.date,
-          privacy: diary.privacy,
-          photoIds: diary.photoIds,
-          publicBlockIds: diary.publicBlockIds,
-          version: draft.generation.round,
-        });
-        if (!result.ok) {
-          if (result.error.code === 'version_conflict') {
-            get().logIssue('日记保存失败：原日记已有新版本，请重新进入编辑后再处理。');
-            return;
-          }
-          if (result.error.code === 'not_found') {
-            get().logIssue('日记保存失败：原日记已不存在，请返回回忆列表确认后再处理。');
-            return;
-          }
-          get().logIssue(`日记保存失败：${result.error.message}`);
-        }
-      } catch (error) {
-        try {
-          const recovered = await repository.getSaveResult(idempotencyKey);
-          if (recovered.ok) return;
-        } catch (recoveryError) {
-          void recoveryError;
-        }
-        get().logIssue(`日记保存失败：${error instanceof Error ? error.message : 'unknown error'}`);
-      }
-    };
-
     const syncRewriteToRemote = async (input: RewriteBlockRequestContract & { requestId: number }) => {
       const repository = resolved.adapters.diaryRepository;
       const key = rewriteRequestKey(input.draftId, input.blockId);
@@ -791,15 +742,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       };
     };
 
-      const persistDraftSnapshot = async () => {
+    const persistDraftSnapshot = async () => {
       const snapshotStore = resolved.adapters.draftSnapshotStore;
-      if (!snapshotStore) return;
+      if (!snapshotStore || !get().hydratedDrafts || draftSnapshotHydrationFailed) return;
 
-        const persistedDrafts: Record<string, DiaryDraft> = Object.fromEntries(
+      const persistedDrafts: Record<string, DiaryDraft> = Object.fromEntries(
         Object.entries(get().drafts).filter(([draftId, draft]) => !draft.savedDiaryId && !pendingDiscardDraftIds.has(draftId)),
       );
-        const currentActiveDraftId = get().activeDraftId;
-        const activeDraftId = currentActiveDraftId && persistedDrafts[currentActiveDraftId] ? currentActiveDraftId : undefined;
+      const currentActiveDraftId = get().activeDraftId;
+      const activeDraftId = currentActiveDraftId && persistedDrafts[currentActiveDraftId] ? currentActiveDraftId : undefined;
 
       if (Object.keys(persistedDrafts).length === 0) {
         await snapshotStore.clear();
@@ -1052,7 +1003,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const draft = get().drafts[id];
         if (!draft || draft.savedDiaryId || !canGenerate(draft.selectedPhotoIds)) return undefined;
         if (draft.generation.status === 'running') return draft.generation.round;
-        const round = draft.generation.round + 1;
+        const unresolvedCreate = draft.generation.status === 'failed'
+          && draft.generation.remoteJobId === undefined
+          && draft.generation.remoteStage === 'failed';
+        const round = unresolvedCreate ? draft.generation.round : draft.generation.round + 1;
         mutateDraft(id, current => ({
           ...current,
           diary: { ...current.diary, status: 'generating' },
@@ -1174,29 +1128,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           get().logIssue(`生成任务同步失败：${error instanceof Error ? error.message : 'unknown error'}`);
         }
       },
-      saveDraft: id => {
-        const draft = get().drafts[id];
-        if (!draft) return undefined;
-        if (draft.savedDiaryId) return draft.savedDiaryId;
-        if (!draft.sourceDiaryId && (draft.generation.status !== 'complete' || !canGenerate(draft.selectedPhotoIds))) return undefined;
-        if (draft.sourceDiaryId && !get().diaries.some(diary => diary.id === draft.sourceDiaryId)) return undefined;
-        const photos = get().photos;
-        const diaryId = draft.sourceDiaryId ?? resolved.createId('diary');
-        const people = draft.people.map(person => ({ ...person, name: person.name.trim() || (person.id === 'person-self' ? '我' : '同行人') }));
-        const diary = cloneDiary(normalizeDiaryPhotos({ ...draft.diary, id: diaryId, status: 'ready', people, version: draft.generation.round }, sanitizePhotoIds(draft.selectedPhotoIds, photos)));
-        set(state => ({
-          diaries: draft.sourceDiaryId ? state.diaries.map(item => item.id === diaryId ? diary : item) : [diary, ...state.diaries],
-          memoriesSourceItems: draft.sourceDiaryId
-            ? state.memoriesSourceItems.map(item => item.id === diaryId ? diary : item)
-            : [diary, ...state.memoriesSourceItems],
-          currentDiaryId: diaryId,
-          currentStep: 'detail',
-          activeDraftId: state.activeDraftId === id ? undefined : state.activeDraftId,
-          drafts: { ...state.drafts, [id]: { ...draft, diary, dirty: false, savedDiaryId: diaryId } },
-        }));
-        void persistDraftSnapshot();
-        void syncDiaryToRemote(draft, diary);
-        return diaryId;
+      saveDraft: async id => {
+        const result = await get().submitDraft(id);
+        return result.ok ? result.diaryId : undefined;
       },
       submitDraft: async id => {
         const draft = get().drafts[id];
@@ -1238,6 +1172,8 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
 
         const repository = resolved.adapters.diaryRepository;
         const targetDiaryId = draft.sourceDiaryId ?? resolved.createId('diary');
+        const sourceDiaryVersion = draft.sourceDiaryId ? (draft.diary.version ?? 0) : undefined;
+        const savedVersion = sourceDiaryVersion !== undefined ? sourceDiaryVersion + 1 : draft.generation.round;
         const photos = get().photos;
         const people = draft.people.map(person => ({ ...person, name: person.name.trim() || (person.id === 'person-self' ? '我' : '同行人') }));
         const normalizedDiary = cloneDiary(normalizeDiaryPhotos({
@@ -1245,7 +1181,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           id: targetDiaryId,
           status: 'ready',
           people,
-          version: draft.generation.round,
+          version: savedVersion,
         }, sanitizePhotoIds(draft.selectedPhotoIds, photos)));
         const destination: 'detail' | 'complete' = draft.sourceDiaryId ? 'detail' : 'complete';
         const finishLocalSave = (savedDiaryId: string, savedVersion: number) => {
@@ -1282,7 +1218,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         };
 
         if (!repository) {
-          return finishLocalSave(targetDiaryId, draft.generation.round);
+          return finishLocalSave(targetDiaryId, savedVersion);
         }
 
         set(state => ({ savingDraftIds: [...new Set([...state.savingDraftIds, id])] }));
@@ -1292,7 +1228,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             id: targetDiaryId,
             draftId: draft.id,
             sourceDiaryId: draft.sourceDiaryId,
-            sourceDiaryVersion: draft.sourceDiaryId ? draft.diary.version : undefined,
+            sourceDiaryVersion,
             idempotencyKey,
             title: normalizedDiary.title,
             summary: normalizedDiary.summary,
@@ -1300,7 +1236,18 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             date: normalizedDiary.date,
             privacy: normalizedDiary.privacy,
             photoIds: normalizedDiary.photoIds,
-            version: draft.generation.round,
+            version: savedVersion,
+            contentSnapshot: {
+              type: normalizedDiary.type,
+              subtitle: normalizedDiary.subtitle,
+              helperMessage: normalizedDiary.helperMessage,
+              characterId: normalizedDiary.characterId,
+              companionName: normalizedDiary.companionName,
+              coverPhotoId: normalizedDiary.coverPhotoId,
+              blocks: normalizedDiary.blocks,
+              posterPhotoIds: normalizedDiary.posterPhotoIds,
+              people: normalizedDiary.people,
+            },
           });
           if (result.ok) {
             return finishLocalSave(result.data.id ?? result.data.diaryId, result.data.savedVersion);
@@ -1320,6 +1267,16 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               reason: 'source_missing',
               message: '原日记已不存在，请返回回忆列表确认后再处理。',
             };
+          }
+          if (result.error.retryable && (result.error.code === 'timeout' || result.error.code === 'provider_failed')) {
+            try {
+              const recovered = await repository.getSaveResult(idempotencyKey);
+              if (recovered.ok) {
+                return finishLocalSave(recovered.data.id ?? recovered.data.diaryId, recovered.data.savedVersion);
+              }
+            } catch {
+              // Keep the working draft; the same idempotency key remains available for a later retry.
+            }
           }
           get().logIssue(`日记保存失败：${result.error.message}`);
           return {
@@ -1529,12 +1486,12 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         if (round !== undefined) get().finishGeneration(id, round);
       },
       setCurrentDiaryId: currentDiaryId => { if (get().diaries.some(diary => diary.id === currentDiaryId)) set({ currentDiaryId }); },
-      updateDiaryText: (diaryId, content) => {
+      updateDiaryText: async (diaryId, content) => {
         const id = get().beginEdit(diaryId);
-        if (!id) return;
+        if (!id) return undefined;
         const block = get().drafts[id].diary.blocks.find(item => item.type === 'text');
         if (block) get().updateDraftBlock(id, block.id, content);
-        get().saveDraft(id);
+        return get().saveDraft(id);
       },
       setDiaryPrivacy: (id, privacy) => { get().savePrivacy(id, privacy); },
       markShared: (id, mode) => {
@@ -1582,53 +1539,72 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           return;
         }
 
-        const rawSnapshot = await snapshotStore.load();
-        if (!isRecord(rawSnapshot) || rawSnapshot.version !== DRAFT_SNAPSHOT_VERSION || !isRecord(rawSnapshot.drafts)) {
-          if (rawSnapshot !== undefined) {
-            await snapshotStore.clear();
-            get().logIssue('本地草稿快照已损坏，已跳过无效恢复数据。');
+        try {
+          const rawSnapshot = await snapshotStore.load();
+          if (
+            isRecord(rawSnapshot)
+            && typeof rawSnapshot.version === 'number'
+            && Number.isInteger(rawSnapshot.version)
+            && rawSnapshot.version !== DRAFT_SNAPSHOT_VERSION
+          ) {
+            draftSnapshotHydrationFailed = true;
+            set({ hydratedDrafts: true });
+            get().logIssue(`本地草稿快照版本 ${rawSnapshot.version} 暂不支持；已保留原数据，未清理或覆盖。`);
+            return;
           }
+          if (!isRecord(rawSnapshot) || rawSnapshot.version !== DRAFT_SNAPSHOT_VERSION || !isRecord(rawSnapshot.drafts)) {
+            if (rawSnapshot !== undefined) {
+              await snapshotStore.clear();
+              get().logIssue('本地草稿快照已损坏，已跳过无效恢复数据。');
+            }
+            set({ hydratedDrafts: true });
+            if (Object.keys(get().drafts).length > 0) await persistDraftSnapshot();
+            return;
+          }
+
+          const photos = get().photos;
+          const restoredEntries = Object.entries(rawSnapshot.drafts)
+            .map(([draftId, value]) => [draftId, restoreDraftFromSnapshot(value, photos)] as const);
+          const restoredDrafts = Object.fromEntries(
+            restoredEntries.filter((entry): entry is [string, DiaryDraft] => Boolean(entry[1]) && !entry[1]?.savedDiaryId),
+          );
+          const droppedCount = restoredEntries.length - Object.keys(restoredDrafts).length;
+          const activeDraftId = typeof rawSnapshot.activeDraftId === 'string' && restoredDrafts[rawSnapshot.activeDraftId]
+            ? rawSnapshot.activeDraftId
+            : undefined;
+          const activeDraft = activeDraftId ? restoredDrafts[activeDraftId] : undefined;
+
+          if (Object.keys(restoredDrafts).length === 0) {
+            await snapshotStore.clear();
+            if (droppedCount > 0) get().logIssue('本地草稿快照包含无效记录，已清理损坏草稿。');
+            set({ hydratedDrafts: true });
+            if (Object.keys(get().drafts).length > 0) await persistDraftSnapshot();
+            return;
+          }
+
+          set(state => ({
+            hydratedDrafts: true,
+            drafts: { ...state.drafts, ...restoredDrafts },
+            activeDraftId: state.activeDraftId ?? activeDraftId,
+            selectedPhotoIds: activeDraft?.selectedPhotoIds ?? state.selectedPhotoIds,
+            selectedCharacterId: activeDraft?.diary.characterId ?? state.selectedCharacterId,
+            selectedType: activeDraft?.diary.type ?? state.selectedType,
+            companionName: activeDraft?.diary.companionName ?? state.companionName,
+            currentStep: activeDraft
+              ? (activeDraft.generation.status === 'running' ? 'generating' : 'edit')
+              : state.currentStep,
+          }));
+
+          if (droppedCount > 0) get().logIssue('本地草稿快照中的损坏记录已被隔离，其他有效草稿已恢复。');
+          await persistDraftSnapshot();
+          Object.values(restoredDrafts).forEach(draft => {
+            void syncDraftToRemote(draft);
+          });
+        } catch (error) {
+          draftSnapshotHydrationFailed = true;
           set({ hydratedDrafts: true });
-          return;
+          get().logIssue(`本地草稿恢复失败：${error instanceof Error ? error.message : 'unknown error'}`);
         }
-
-        const photos = get().photos;
-        const restoredEntries = Object.entries(rawSnapshot.drafts)
-          .map(([draftId, value]) => [draftId, restoreDraftFromSnapshot(value, photos)] as const);
-        const restoredDrafts = Object.fromEntries(
-          restoredEntries.filter((entry): entry is [string, DiaryDraft] => Boolean(entry[1]) && !entry[1]?.savedDiaryId),
-        );
-        const droppedCount = restoredEntries.length - Object.keys(restoredDrafts).length;
-        const activeDraftId = typeof rawSnapshot.activeDraftId === 'string' && restoredDrafts[rawSnapshot.activeDraftId]
-          ? rawSnapshot.activeDraftId
-          : undefined;
-        const activeDraft = activeDraftId ? restoredDrafts[activeDraftId] : undefined;
-
-        if (Object.keys(restoredDrafts).length === 0) {
-          await snapshotStore.clear();
-          if (droppedCount > 0) get().logIssue('本地草稿快照包含无效记录，已清理损坏草稿。');
-          set({ hydratedDrafts: true });
-          return;
-        }
-
-        set(state => ({
-          hydratedDrafts: true,
-          drafts: { ...state.drafts, ...restoredDrafts },
-          activeDraftId: state.activeDraftId ?? activeDraftId,
-          selectedPhotoIds: activeDraft?.selectedPhotoIds ?? state.selectedPhotoIds,
-          selectedCharacterId: activeDraft?.diary.characterId ?? state.selectedCharacterId,
-          selectedType: activeDraft?.diary.type ?? state.selectedType,
-          companionName: activeDraft?.diary.companionName ?? state.companionName,
-          currentStep: activeDraft
-            ? (activeDraft.generation.status === 'running' ? 'generating' : 'edit')
-            : state.currentStep,
-        }));
-
-        if (droppedCount > 0) get().logIssue('本地草稿快照中的损坏记录已被隔离，其他有效草稿已恢复。');
-        await persistDraftSnapshot();
-        Object.values(restoredDrafts).forEach(draft => {
-          void syncDraftToRemote(draft);
-        });
       },
       hydrateMemories: async () => {
         if (get().hydratedMemories) return;
@@ -1655,6 +1631,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             privacy: item.privacy,
             photoIds: item.photoIds,
             version: item.version,
+            contentSnapshot: item.contentSnapshot,
           }));
           set(state => {
             const merged = [...state.diaries];
@@ -1877,6 +1854,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             privacy: item.privacy,
             photoIds: item.photoIds,
             version: item.version,
+            contentSnapshot: item.contentSnapshot,
           }));
           set({
             memoriesSourceItems: query.month || query.day || query.keyword ? get().memoriesSourceItems : items,

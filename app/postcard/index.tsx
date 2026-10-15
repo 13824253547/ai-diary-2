@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../src/components/layout/screen';
@@ -9,7 +9,8 @@ import { Button } from '../../src/components/common/button';
 import { supportStyles as u, IconAction } from '../../src/components/common/support-ui';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
-import { mockPhotos } from '../../src/mocks/photos';
+import { useAppStore } from '../../src/store/use-app-store';
+import type { DiaryPhoto } from '../../src/types/diary';
 
 const postcards = [
   { image: art.santorini, label: '圣托里尼', stamp: 'SANTORINI\n20 AUG\n2026\nGREECE' },
@@ -19,22 +20,29 @@ const postcards = [
 ];
 const decorations = ['stickerHappy', 'mascotCamera', 'stickerCool', 'stickerCry', 'stickerLove', 'stampKyoto', 'stampKamakura', 'stamp'];
 
+function getPhotoImageSource(photo: DiaryPhoto): ImageSourcePropType | undefined {
+  if (photo.localUri || photo.uri) return { uri: photo.localUri ?? photo.uri };
+  return photo.image;
+}
+
 export default function PostcardScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ photo?: string; photoId?: string; decoration?: string }>();
   const initial = Number(params.photo ?? 0);
   const [index, setIndex] = useState(Number.isInteger(initial) && initial >= 0 && initial < postcards.length ? initial : 0);
-  const [materialPhoto, setMaterialPhoto] = useState(mockPhotos.find(p => p.id === params.photoId));
+  const registeredPhoto = useAppStore(state => state.photos.find(photo => photo.id === params.photoId));
+  const [showMaterialPhoto, setShowMaterialPhoto] = useState(Boolean(params.photoId));
+  const materialPhoto = showMaterialPhoto ? registeredPhoto : undefined;
   const [generated, setGenerated] = useState(false);
   const [share, setShare] = useState(false);
   const card = postcards[index];
-  const image = materialPhoto?.image ?? card.image;
+  const image = materialPhoto ? getPhotoImageSource(materialPhoto) : card.image;
   const decoration = params.decoration && decorations.includes(params.decoration) ? art[params.decoration as keyof typeof art] : art.mascot;
   const make = () => { setGenerated(true); };
   const shareDemo = (platform: string) => { setShare(false); Alert.alert(platform, '明信片预览已准备好。'); };
   return <Screen header={<TopBar title="明信片" centered onBackPress={() => router.back()} trailing={<IconAction name="images-outline" label="选择素材" onPress={() => router.push('/library')} />} />}>
-    <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View style={s.card}><Image source={image} style={s.image} /><View style={s.stamp}><Text style={s.stampText}>{materialPhoto ? `${materialPhoto.location}\n${materialPhoto.date}` : card.stamp}</Text></View><Text style={s.words}>把浪漫的瞬间，{`\n`}寄给未来的自己</Text><Image source={decoration} resizeMode="contain" style={s.mascot} /></View></View>
-    <View style={s.switchRow}>{postcards.map((p, i) => <Pressable key={p.label} accessibilityLabel={`选择${p.label}明信片`} accessibilityState={{ selected: i === index && !materialPhoto }} onPress={() => { setIndex(i); setMaterialPhoto(undefined); setGenerated(false); }} style={[s.thumb, i === index && !materialPhoto && s.thumbSelected]}><Image source={p.image} style={s.thumbImage} /></Pressable>)}</View>
+    <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View style={s.card}><Image testID="postcard-photo" source={image} style={s.image} /><View style={s.stamp}><Text style={s.stampText}>{materialPhoto ? `${materialPhoto.location}\n${materialPhoto.date}` : card.stamp}</Text></View><Text style={s.words}>把浪漫的瞬间，{`\n`}寄给未来的自己</Text><Image testID="postcard-decoration" source={decoration} resizeMode="contain" style={s.mascot} /></View></View>
+    <View style={s.switchRow}>{postcards.map((p, i) => <Pressable key={p.label} accessibilityLabel={`选择${p.label}明信片`} accessibilityState={{ selected: i === index && !materialPhoto }} onPress={() => { setIndex(i); setShowMaterialPhoto(false); setGenerated(false); }} style={[s.thumb, i === index && !materialPhoto && s.thumbSelected]}><Image source={p.image} style={s.thumbImage} /></Pressable>)}</View>
     <Button label={generated ? '明信片已生成 ✓' : '✦ 生成明信片'} onPress={make} />
     <Pressable accessibilityRole="button" onPress={() => { make(); setShare(true); }}><Text style={s.share}>分享给好友</Text></Pressable>
     <BottomSheet visible={share} onClose={() => setShare(false)} title="分享这张明信片" sheetStyle={s.sheet}>

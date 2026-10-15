@@ -1,6 +1,6 @@
-import { Body, ConflictException, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post } from '@nestjs/common';
 import { resolveDeviceId } from '../../common/device-identity';
-import { MemoryStoreService, PermissionDeniedError, SaveDiaryError } from '../../common/memory-store.service';
+import { MemoryStoreService, PermissionDeniedError, SaveDiaryError, type DiaryContentSnapshotRecord } from '../../common/memory-store.service';
 
 type SaveDiaryBody = {
   id?: string;
@@ -15,6 +15,7 @@ type SaveDiaryBody = {
   privacy: string;
   photoIds: string[];
   publicBlockIds?: string[];
+  contentSnapshot: DiaryContentSnapshotRecord;
   version: number;
 };
 
@@ -29,22 +30,25 @@ export class DiariesController {
       return {
         ok: true,
         data: {
-          diaryId: saved.id,
+          diaryId: saved.diaryId,
           draftId: saved.draftId,
-          savedVersion: saved.version,
-          id: saved.id,
+          savedVersion: saved.savedVersion,
+          id: saved.diaryId,
         },
       };
     } catch (error) {
       if (error instanceof SaveDiaryError) {
-        throw new ConflictException({
+        const payload = {
           ok: false,
           error: {
             code: error.code,
             message: error.message,
             retryable: false,
           },
-        });
+        };
+        if (error.code === 'not_found') throw new NotFoundException(payload);
+        if (error.code === 'invalid_input') throw new BadRequestException(payload);
+        throw new ConflictException(payload);
       }
       if (error instanceof PermissionDeniedError) {
         throw new ForbiddenException({

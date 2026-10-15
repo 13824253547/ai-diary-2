@@ -23,7 +23,26 @@ export type DiaryRecord = {
   privacy: string;
   photoIds: string[];
   publicBlockIds?: string[];
+  contentSnapshot?: DiaryContentSnapshotRecord;
   version: number;
+};
+
+export type DiaryContentSnapshotRecord = {
+  type: string;
+  subtitle: string;
+  helperMessage: string;
+  characterId: string;
+  companionName: string;
+  coverPhotoId: string;
+  blocks: unknown[];
+  posterPhotoIds?: string[];
+  people?: unknown[];
+};
+
+export type SaveDiaryCommandResult = {
+  diaryId: string;
+  draftId: string;
+  savedVersion: number;
 };
 
 type SaveErrorCode = 'not_found' | 'version_conflict' | 'invalid_input';
@@ -42,6 +61,7 @@ const SUPPORTED_CHARACTER_IDS = [
   'character-blue-2',
 ] as const;
 const AVAILABLE_CHARACTER_IDS = ['character-blue', 'character-green', 'character-brown'] as const;
+const SUPPORTED_DIARY_PRIVACY_SETTINGS = ['private', 'anonymous', 'public-likes', 'public-comments'] as const;
 
 function isSupportedDiaryType(value: string) {
   return SUPPORTED_DIARY_TYPES.includes(value as typeof SUPPORTED_DIARY_TYPES[number]);
@@ -99,6 +119,98 @@ export class RewriteDraftError extends Error {
   ) {
     super(message);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function assertDiaryContentSnapshot(
+  value: unknown,
+  photoIds: string[],
+): asserts value is DiaryContentSnapshotRecord {
+  const invalid = (): never => {
+    throw new SaveDiaryError('invalid_input', 'diary content snapshot is invalid');
+  };
+  if (!Array.isArray(photoIds)
+    || photoIds.length === 0
+    || new Set(photoIds).size !== photoIds.length
+    || !photoIds.every(isNonEmptyString)) invalid();
+  if (!isRecord(value)) invalid();
+  const snapshot = value as Record<string, unknown>;
+  if (!isNonEmptyString(snapshot.type)
+    || !isSupportedDiaryType(snapshot.type)
+    || typeof snapshot.subtitle !== 'string'
+    || typeof snapshot.helperMessage !== 'string'
+    || !isNonEmptyString(snapshot.characterId)
+    || !isSupportedCharacterId(snapshot.characterId)
+    || !isNonEmptyString(snapshot.companionName)
+    || !isNonEmptyString(snapshot.coverPhotoId)) invalid();
+  const rawBlocks = snapshot.blocks;
+  if (!Array.isArray(rawBlocks) || rawBlocks.length === 0) invalid();
+  const blocks = rawBlocks as unknown[];
+  const rawPosterPhotoIds = snapshot.posterPhotoIds;
+  if (rawPosterPhotoIds !== undefined && !Array.isArray(rawPosterPhotoIds)) invalid();
+  const rawPeople = snapshot.people;
+  if (rawPeople !== undefined && !Array.isArray(rawPeople)) invalid();
+
+  const allowedPhotos = new Set(photoIds);
+  const isAllowedPhoto = (photoId: unknown): photoId is string =>
+    isNonEmptyString(photoId) && allowedPhotos.has(photoId);
+  const blockIds = new Set<string>();
+  const paragraphIds = new Set<string>();
+  for (const block of blocks) {
+    if (!isRecord(block)) invalid();
+    const contentBlock = block as Record<string, unknown>;
+    if (!isNonEmptyString(contentBlock.id) || blockIds.has(contentBlock.id)) invalid();
+    const blockId = contentBlock.id as string;
+    blockIds.add(blockId);
+    if (contentBlock.type === 'text' || contentBlock.type === 'quote') {
+      if (!isNonEmptyString(contentBlock.content)) invalid();
+      if (contentBlock.type === 'text' && contentBlock.title !== undefined && !isNonEmptyString(contentBlock.title)) invalid();
+      const blockPhotoIds = contentBlock.photoIds;
+      if (blockPhotoIds !== undefined) {
+        if (!Array.isArray(blockPhotoIds)) invalid();
+        if (!(blockPhotoIds as unknown[]).every(isAllowedPhoto)) invalid();
+      }
+      if (contentBlock.relatedBlockId !== undefined && !isNonEmptyString(contentBlock.relatedBlockId)) invalid();
+      paragraphIds.add(blockId);
+      continue;
+    }
+    if (contentBlock.type === 'photo') {
+      if (!isAllowedPhoto(contentBlock.photoId)
+        || !isNonEmptyString(contentBlock.caption)
+        || (contentBlock.relatedBlockId !== undefined && !isNonEmptyString(contentBlock.relatedBlockId))) invalid();
+      continue;
+    }
+    invalid();
+  }
+
+  for (const block of blocks) {
+    if (isRecord(block) && block.relatedBlockId !== undefined && !paragraphIds.has(String(block.relatedBlockId))) invalid();
+  }
+  if (!allowedPhotos.has(snapshot.coverPhotoId as string)) invalid();
+  if (rawPosterPhotoIds !== undefined
+    && !(rawPosterPhotoIds as unknown[]).every(photoId => isNonEmptyString(photoId) && allowedPhotos.has(photoId))) invalid();
+  if (rawPeople !== undefined) {
+    for (const person of rawPeople as unknown[]) {
+      if (!isRecord(person)
+        || !isNonEmptyString(person.id)
+        || !isNonEmptyString(person.name)
+        || !isNonEmptyString(person.avatarPhotoId)
+        || !Array.isArray(person.photoIds)
+        || !person.photoIds.length
+        || !(person.photoIds as unknown[]).every(photoId => isNonEmptyString(photoId) && allowedPhotos.has(photoId))
+        || !person.photoIds.includes(person.avatarPhotoId)
+        || (person.aliases !== undefined
+          && (!Array.isArray(person.aliases) || !(person.aliases as unknown[]).every(isNonEmptyString)))) invalid();
+    }
+  }
+  if (paragraphIds.size === 0) invalid();
 }
 
 export type GenerationJobRecord = {
@@ -239,6 +351,7 @@ export class MemoryStoreService {
             privacy: input.privacy,
             photoIds: input.photoIds as Prisma.InputJsonValue,
             publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
+            ...(input.contentSnapshot === undefined ? {} : { contentSnapshot: input.contentSnapshot as Prisma.InputJsonValue }),
             version: input.version,
           },
           update: {
@@ -250,6 +363,7 @@ export class MemoryStoreService {
             privacy: input.privacy,
             photoIds: input.photoIds as Prisma.InputJsonValue,
             publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
+            ...(input.contentSnapshot === undefined ? {} : { contentSnapshot: input.contentSnapshot as Prisma.InputJsonValue }),
             version: input.version,
           },
         })
@@ -264,6 +378,7 @@ export class MemoryStoreService {
             privacy: input.privacy,
             photoIds: input.photoIds as Prisma.InputJsonValue,
             publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
+            ...(input.contentSnapshot === undefined ? {} : { contentSnapshot: input.contentSnapshot as Prisma.InputJsonValue }),
             version: input.version,
           },
         });
@@ -276,7 +391,9 @@ export class MemoryStoreService {
     sourceDiaryId?: string;
     sourceDiaryVersion?: number;
     idempotencyKey: string;
-  }, ownerDeviceId: string) {
+    contentSnapshot: DiaryContentSnapshotRecord;
+  }, ownerDeviceId: string): Promise<SaveDiaryCommandResult> {
+    const sourceDiaryVersion = input.sourceDiaryVersion;
     const existingCommand = await this.prisma.saveCommand.findUnique({
       where: {
         ownerDeviceId_idempotencyKey: {
@@ -287,10 +404,22 @@ export class MemoryStoreService {
     });
     if (existingCommand) {
       const existingDiary = await this.getDiary(existingCommand.diaryId, ownerDeviceId);
-      if (existingDiary) return existingDiary;
+      if (existingDiary) {
+        return {
+          diaryId: existingCommand.diaryId,
+          draftId: existingCommand.draftId,
+          savedVersion: existingCommand.savedVersion,
+        };
+      }
     }
 
     if (input.sourceDiaryId) {
+      if (sourceDiaryVersion === undefined) {
+        throw new SaveDiaryError('invalid_input', 'source diary version is required');
+      }
+      if (input.id && input.id !== input.sourceDiaryId) {
+        throw new SaveDiaryError('invalid_input', 'diary id must match source diary id');
+      }
       const sourceDiary = await this.prisma.diary.findUnique({
         where: { id: input.sourceDiaryId },
       });
@@ -300,7 +429,7 @@ export class MemoryStoreService {
       if (sourceDiary.ownerDeviceId !== ownerDeviceId) {
         throw new PermissionDeniedError('source diary does not belong to current device');
       }
-      if (input.sourceDiaryVersion !== undefined && sourceDiary.version !== input.sourceDiaryVersion) {
+      if (sourceDiary.version !== sourceDiaryVersion) {
         throw new SaveDiaryError('version_conflict', 'source diary version conflict');
       }
     }
@@ -312,40 +441,68 @@ export class MemoryStoreService {
       if (existingDiary && existingDiary.ownerDeviceId !== ownerDeviceId) {
         throw new PermissionDeniedError('diary does not belong to current device');
       }
+      if (existingDiary && !input.sourceDiaryId) {
+        throw new SaveDiaryError('invalid_input', 'source diary is required to update an existing diary');
+      }
     }
 
+    assertDiaryContentSnapshot(input.contentSnapshot, input.photoIds);
     const date = this.normalizeDateInput(input.date);
-    const diary = await this.prisma.$transaction(async prisma => {
-      const savedDiary = input.id
-        ? await prisma.diary.upsert({
-            where: { id: input.id },
-            create: {
-              id: input.id,
+    try {
+      const result = await this.prisma.$transaction(async prisma => {
+        let savedDiary: Awaited<ReturnType<typeof prisma.diary.create>>;
+        if (input.sourceDiaryId) {
+          const expectedVersion = sourceDiaryVersion as number;
+          const update = await prisma.diary.updateMany({
+            where: {
+              id: input.sourceDiaryId,
               ownerDeviceId,
-              draftId: input.draftId,
-              title: input.title,
-              summary: input.summary,
-              location: input.location,
-              date,
-              privacy: input.privacy,
-              photoIds: input.photoIds as Prisma.InputJsonValue,
-              publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
-              version: input.version,
+              version: expectedVersion,
             },
-            update: {
-              draftId: input.draftId,
-              title: input.title,
-              summary: input.summary,
-              location: input.location,
-              date,
-              privacy: input.privacy,
-              photoIds: input.photoIds as Prisma.InputJsonValue,
-              publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
-              version: input.version,
-            },
-          })
-        : await prisma.diary.create({
             data: {
+              draftId: input.draftId,
+              title: input.title,
+              summary: input.summary,
+              location: input.location,
+              date,
+              privacy: input.privacy,
+              photoIds: input.photoIds as Prisma.InputJsonValue,
+              publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
+              ...(input.contentSnapshot === undefined ? {} : { contentSnapshot: input.contentSnapshot as Prisma.InputJsonValue }),
+              version: expectedVersion + 1,
+            },
+          });
+          if (update.count !== 1) {
+            const racedCommand = await prisma.saveCommand.findUnique({
+              where: {
+                ownerDeviceId_idempotencyKey: {
+                  ownerDeviceId,
+                  idempotencyKey: input.idempotencyKey,
+                },
+              },
+            });
+            if (racedCommand) {
+              const racedDiary = await prisma.diary.findUnique({ where: { id: racedCommand.diaryId } });
+              if (racedDiary?.ownerDeviceId === ownerDeviceId) {
+                return {
+                  diaryId: racedCommand.diaryId,
+                  draftId: racedCommand.draftId,
+                  savedVersion: racedCommand.savedVersion,
+                };
+              }
+            }
+            const currentSource = await prisma.diary.findUnique({ where: { id: input.sourceDiaryId } });
+            if (!currentSource) throw new SaveDiaryError('not_found', 'source diary not found');
+            if (currentSource.ownerDeviceId !== ownerDeviceId) {
+              throw new PermissionDeniedError('source diary does not belong to current device');
+            }
+            throw new SaveDiaryError('version_conflict', 'source diary version conflict');
+          }
+          savedDiary = await prisma.diary.findUniqueOrThrow({ where: { id: input.sourceDiaryId } });
+        } else {
+          savedDiary = await prisma.diary.create({
+            data: {
+              ...(input.id ? { id: input.id } : {}),
               ownerDeviceId,
               draftId: input.draftId,
               title: input.title,
@@ -355,26 +512,55 @@ export class MemoryStoreService {
               privacy: input.privacy,
               photoIds: input.photoIds as Prisma.InputJsonValue,
               publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
+              ...(input.contentSnapshot === undefined ? {} : { contentSnapshot: input.contentSnapshot as Prisma.InputJsonValue }),
               version: input.version,
             },
           });
+        }
 
-      await prisma.saveCommand.create({
-        data: {
-          ownerDeviceId,
-          idempotencyKey: input.idempotencyKey,
-          draftId: input.draftId,
-          sourceDiaryId: input.sourceDiaryId,
-          sourceDiaryVersion: input.sourceDiaryVersion,
+        await prisma.saveCommand.create({
+          data: {
+            ownerDeviceId,
+            idempotencyKey: input.idempotencyKey,
+            draftId: input.draftId,
+            sourceDiaryId: input.sourceDiaryId,
+            sourceDiaryVersion: input.sourceDiaryVersion,
+            diaryId: savedDiary.id,
+            savedVersion: savedDiary.version,
+          },
+        });
+
+        return {
           diaryId: savedDiary.id,
-          savedVersion: input.version,
-        },
+          draftId: input.draftId,
+          savedVersion: savedDiary.version,
+        };
       });
 
-      return savedDiary;
-    });
-
-    return this.mapDiaryRecord(diary);
+      return result;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const racedCommand = await this.prisma.saveCommand.findUnique({
+          where: {
+            ownerDeviceId_idempotencyKey: {
+              ownerDeviceId,
+              idempotencyKey: input.idempotencyKey,
+            },
+          },
+        });
+        if (racedCommand) {
+          const racedDiary = await this.getDiary(racedCommand.diaryId, ownerDeviceId);
+          if (racedDiary) {
+            return {
+              diaryId: racedCommand.diaryId,
+              draftId: racedCommand.draftId,
+              savedVersion: racedCommand.savedVersion,
+            };
+          }
+        }
+      }
+      throw error;
+    }
   }
 
   async getSaveResult(idempotencyKey: string, ownerDeviceId: string) {
@@ -420,13 +606,34 @@ export class MemoryStoreService {
     if (diary.ownerDeviceId !== ownerDeviceId) {
       throw new PermissionDeniedError('diary does not belong to current device');
     }
-    const publicBlockIds = input.privacy === 'private'
-      ? undefined
-      : input.publicBlockIds === undefined
-        ? undefined
-        : [...new Set(input.publicBlockIds.filter(item => typeof item === 'string' && item.trim().length > 0))];
-    if (input.privacy !== 'private' && publicBlockIds !== undefined && publicBlockIds.length === 0) {
-      throw new SaveDiaryError('invalid_input', 'public block ids are required for non-private visibility');
+    if (!SUPPORTED_DIARY_PRIVACY_SETTINGS.includes(input.privacy as typeof SUPPORTED_DIARY_PRIVACY_SETTINGS[number])) {
+      throw new SaveDiaryError('invalid_input', 'unsupported diary privacy setting');
+    }
+
+    let publicBlockIds: string[] | undefined;
+    if (input.privacy !== 'private') {
+      if (!Array.isArray(input.publicBlockIds)) {
+        throw new SaveDiaryError('invalid_input', 'public block ids are required for non-private visibility');
+      }
+      publicBlockIds = [...new Set(input.publicBlockIds
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item.trim())
+        .filter(Boolean))];
+      if (publicBlockIds.length === 0) {
+        throw new SaveDiaryError('invalid_input', 'public block ids are required for non-private visibility');
+      }
+      const blocks = (diary.contentSnapshot as { blocks?: unknown[] } | null)?.blocks;
+      if (!Array.isArray(blocks)) {
+        throw new SaveDiaryError('invalid_input', 'diary content blocks are unavailable');
+      }
+      const publicParagraphIds = new Set(blocks
+        .filter((block): block is Record<string, unknown> =>
+          isRecord(block) && (block.type === 'text' || block.type === 'quote') && isNonEmptyString(block.id),
+        )
+        .map(block => block.id as string));
+      if (publicBlockIds.some(blockId => !publicParagraphIds.has(blockId))) {
+        throw new SaveDiaryError('invalid_input', 'public block ids must reference diary text or quote blocks');
+      }
     }
     const updated = await this.prisma.diary.update({
       where: { id: input.diaryId },
@@ -604,6 +811,7 @@ export class MemoryStoreService {
     privacy: string;
     photoIds: Prisma.JsonValue;
     publicBlockIds: Prisma.JsonValue | null;
+    contentSnapshot: Prisma.JsonValue | null;
     version: number;
   }) {
     return {
@@ -616,6 +824,11 @@ export class MemoryStoreService {
       privacy: diary.privacy,
       photoIds: this.readStringArray(diary.photoIds),
       publicBlockIds: diary.publicBlockIds === null ? undefined : this.readStringArray(diary.publicBlockIds),
+      contentSnapshot: diary.contentSnapshot !== null
+        && typeof diary.contentSnapshot === 'object'
+        && !Array.isArray(diary.contentSnapshot)
+        ? diary.contentSnapshot as unknown as DiaryContentSnapshotRecord
+        : undefined,
       version: diary.version,
     } satisfies DiaryRecord;
   }

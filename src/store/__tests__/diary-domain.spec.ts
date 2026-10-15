@@ -370,7 +370,7 @@ describe('domain/store regression', () => {
     expect(lastSyncedCharacterId).toBe('character-green');
   });
 
-  test('E03 CASE-BAS-004-003 generation ignores paused and stale round callbacks, and finishes only once', () => {
+  test('E03 CASE-BAS-004-003 generation ignores paused and stale round callbacks, and finishes only once', async () => {
     const { get } = createContext();
     const id = get().beginCreation();
     get().setDraftPhotos(id, defaultSelectablePhotoIds());
@@ -391,7 +391,7 @@ describe('domain/store regression', () => {
     expect(get().drafts[id].diary.blocks).toBe(blocks);
     get().setDraftPhotos(id, ['photo-4', 'photo-5', 'photo-6']);
     expect(get().drafts[id].generation.status).toBe('idle');
-    expect(get().saveDraft(id)).toBeUndefined();
+    expect(await get().saveDraft(id)).toBeUndefined();
   });
 
   test('duplicate generation starts reuse the same remote job creation request', async () => {
@@ -494,6 +494,7 @@ describe('domain/store regression', () => {
     });
 
     let store = createAppStore(deps);
+    await store.getState().hydrateDrafts();
     const draftId = store.getState().beginCreation();
     store.getState().setDraftPhotos(draftId, defaultSelectablePhotoIds());
     const round = store.getState().startGeneration(draftId)!;
@@ -516,9 +517,113 @@ describe('domain/store regression', () => {
     expect(store.getState().selectedCharacterId).toBe(store.getState().drafts[draftId]?.diary.characterId);
     expect(store.getState().selectedPhotoIds).toEqual(store.getState().drafts[draftId]?.selectedPhotoIds);
 
-    expect(store.getState().saveDraft(draftId)).toBeTruthy();
+    expect(await store.getState().saveDraft(draftId)).toBeTruthy();
     await flushAsyncWork();
     expect(snapshotStore.getSnapshot()).toBeUndefined();
+  });
+
+  test('draft changes during startup hydration do not overwrite prior snapshots', async () => {
+    const snapshotStore = createSnapshotStore();
+    let id = 0;
+    const deps = createDefaultAppStoreDeps({
+      createId: prefix => `${prefix}-startup-${++id}`,
+      adapters: {
+        draftSnapshotStore: snapshotStore.store,
+      },
+    });
+    const seedStore = createAppStore(deps);
+    await seedStore.getState().hydrateDrafts();
+    const persistedDraftId = seedStore.getState().beginCreation();
+    await flushAsyncWork();
+    const snapshotBeforeStartup = snapshotStore.getSnapshot();
+    expect(snapshotBeforeStartup).toBeTruthy();
+
+    const store = createAppStore(deps);
+    const activeDraftId = store.getState().beginCreation();
+    store.getState().setDraftPhotos(activeDraftId, defaultSelectablePhotoIds());
+    await flushAsyncWork();
+    expect(snapshotStore.getSnapshot()).toEqual(snapshotBeforeStartup);
+
+    await store.getState().hydrateDrafts();
+
+    expect(store.getState().drafts[persistedDraftId]).toBeTruthy();
+    expect(store.getState().drafts[activeDraftId]).toBeTruthy();
+    const finalSnapshot = snapshotStore.getSnapshot() as { drafts: Record<string, unknown> };
+    expect(Object.keys(finalSnapshot.drafts).sort()).toEqual([persistedDraftId, activeDraftId].sort());
+  });
+
+  test('drafts created before an empty snapshot hydrates are persisted after hydration', async () => {
+    const snapshotStore = createSnapshotStore();
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: {
+        draftSnapshotStore: snapshotStore.store,
+      },
+    }));
+    const draftId = store.getState().beginCreation();
+    store.getState().setDraftPhotos(draftId, defaultSelectablePhotoIds());
+    await flushAsyncWork();
+    expect(snapshotStore.getSnapshot()).toBeUndefined();
+
+    await store.getState().hydrateDrafts();
+
+    const snapshot = snapshotStore.getSnapshot() as { drafts: Record<string, unknown> };
+    expect(snapshot.drafts[draftId]).toBeTruthy();
+  });
+
+  test('draft snapshot read failure does not block memories repository hydration', async () => {
+    const snapshotStore: DraftSnapshotStore = {
+      load: jest.fn().mockRejectedValue(new Error('snapshot storage unavailable')),
+      save: jest.fn(),
+      clear: jest.fn(),
+    };
+    const repository = createRepository({
+      listMemories: async () => ({
+        ok: true,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        data: {
+          items: [{
+            id: 'remote-diary-after-snapshot-error',
+            title: '远端已有回忆',
+            summary: '快照读取失败不应中断回忆同步。',
+            location: '台南',
+            date: '2026.10.15',
+            privacy: 'private',
+            photoIds: ['photo-1', 'photo-2', 'photo-3'],
+            version: 1,
+          }],
+          page: 1,
+          pageSize: 100,
+          total: 1,
+        },
+      }),
+    });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      diaries: [],
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+        draftSnapshotStore: snapshotStore,
+      },
+    }));
+    const get = () => store.getState();
+
+    await expect(get().hydrateDrafts()).resolves.toBeUndefined();
+    expect(get().hydratedDrafts).toBe(true);
+    expect(get().diaries).toEqual([]);
+    expect(snapshotStore.clear).not.toHaveBeenCalled();
+    expect(snapshotStore.save).not.toHaveBeenCalled();
+    expect(get().issueLog.some(message => message.includes('本地草稿恢复失败'))).toBe(true);
+
+    await get().hydrateMemories();
+
+    expect(get().hydratedMemories).toBe(true);
+    expect(get().memoriesSourceItems.map(diary => diary.id)).toEqual(['remote-diary-after-snapshot-error']);
+    expect(get().diaries.map(diary => diary.id)).toEqual(['remote-diary-after-snapshot-error']);
+
+    expect(get().beginEdit('remote-diary-after-snapshot-error')).toBeTruthy();
+    await flushAsyncWork();
+    expect(snapshotStore.clear).not.toHaveBeenCalled();
+    expect(snapshotStore.save).not.toHaveBeenCalled();
   });
 
   test('invalid local draft snapshots isolate broken records and keep valid drafts recoverable', async () => {
@@ -532,6 +637,7 @@ describe('domain/store regression', () => {
     });
 
     const seedStore = createAppStore(deps);
+    await seedStore.getState().hydrateDrafts();
     const validDraftId = seedStore.getState().beginCreation();
     seedStore.getState().setDraftPhotos(validDraftId, defaultSelectablePhotoIds());
     const round = seedStore.getState().startGeneration(validDraftId)!;
@@ -558,6 +664,52 @@ describe('domain/store regression', () => {
     expect(restoredStore.getState().drafts[validDraftId]).toBeTruthy();
     expect(restoredStore.getState().drafts.broken).toBeUndefined();
     expect(restoredStore.getState().issueLog.some(message => message.includes('损坏记录'))).toBe(true);
+  });
+
+  test('unsupported local draft snapshot versions are preserved and not overwritten', async () => {
+    const futureSnapshot = {
+      version: 2,
+      activeDraftId: 'draft-from-newer-app',
+      drafts: {
+        'draft-from-newer-app': {
+          futureField: { content: 'must remain untouched by this older app' },
+        },
+      },
+      futureMetadata: ['keep', 'all', 'unknown', 'fields'],
+    };
+    let persistedSnapshot: unknown = JSON.parse(JSON.stringify(futureSnapshot));
+    const load = jest.fn(async () => persistedSnapshot === undefined
+      ? undefined
+      : JSON.parse(JSON.stringify(persistedSnapshot)) as unknown);
+    const save = jest.fn(async (next: Parameters<DraftSnapshotStore['save']>[0]) => {
+      persistedSnapshot = JSON.parse(JSON.stringify(next));
+    });
+    const clear = jest.fn(async () => {
+      persistedSnapshot = undefined;
+    });
+    const snapshotStore: DraftSnapshotStore = { load, save, clear };
+    const store = createAppStore(createDefaultAppStoreDeps({
+      createId: prefix => `${prefix}-unsupported-version`,
+      adapters: {
+        draftSnapshotStore: snapshotStore,
+      },
+    }));
+
+    await store.getState().hydrateDrafts();
+
+    expect(store.getState().hydratedDrafts).toBe(true);
+    expect(store.getState().issueLog.some(message => message.includes('版本 2 暂不支持'))).toBe(true);
+    expect(clear).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+
+    const draftId = store.getState().beginCreation();
+    await flushAsyncWork();
+
+    expect(store.getState().drafts[draftId]).toBeTruthy();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(clear).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(persistedSnapshot).toEqual(futureSnapshot);
   });
 
   test('remote generation polling stores job snapshots and completes only after backend success', async () => {
@@ -1073,6 +1225,9 @@ describe('domain/store regression', () => {
 
   test('stale generation job creation is cancelled when the active round is paused before job id returns', async () => {
     const deferredJob = createDeferred<Awaited<ReturnType<NonNullable<CoreDiaryRepository['createGenerationJob']>>>>();
+    const generationFaultPlan = createAsyncFaultPlan<Awaited<ReturnType<NonNullable<CoreDiaryRepository['createGenerationJob']>>>>([
+      { type: 'deferred', deferred: deferredJob },
+    ]);
     const cancelGenerationJob = jest.fn().mockResolvedValue({
       ok: true,
       version: CORE_DIARY_CONTRACT_VERSION,
@@ -1089,7 +1244,7 @@ describe('domain/store regression', () => {
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
-      createGenerationJob: () => deferredJob.promise,
+      createGenerationJob: () => generationFaultPlan.next(),
       cancelGenerationJob,
       getGenerationJob: async () => ({
         ok: true,
@@ -1165,6 +1320,8 @@ describe('domain/store regression', () => {
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(cancelGenerationJob).toHaveBeenCalledWith('job-pause-late');
+    expect(generationFaultPlan.callCount).toBe(1);
+    expect(generationFaultPlan.remainingCount).toBe(0);
     expect(get().drafts[draftId].generation.status).toBe('idle');
     expect(get().drafts[draftId].generation.remoteJobId).toBeUndefined();
     expect(get().drafts[draftId].generation.round).toBe(round + 1);
@@ -1245,7 +1402,7 @@ describe('domain/store regression', () => {
 
     expect(get().drafts[draftId].generation.status).toBe('failed');
     expect(get().drafts[draftId].generation.errorMessage).toBe('生成超时，请稍后重试。');
-    expect(get().saveDraft(draftId)).toBeUndefined();
+    expect(await get().saveDraft(draftId)).toBeUndefined();
   });
 
   test('failed generation snapshot keeps backend error message and retry metadata semantics', async () => {
@@ -1334,7 +1491,7 @@ describe('domain/store regression', () => {
 
     expect(get().drafts[draftId].generation.status).toBe('failed');
     expect(get().drafts[draftId].generation.errorMessage).toBe('AI provider request failed with status 400');
-    expect(get().saveDraft(draftId)).toBeUndefined();
+    expect(await get().saveDraft(draftId)).toBeUndefined();
   });
 
   test('generation job creation failure becomes visible failed state instead of spinning forever', async () => {
@@ -1629,6 +1786,66 @@ describe('domain/store regression', () => {
     expect(get().drafts[draftId].generation.status).toBe('failed');
     expect(get().drafts[draftId].generation.errorMessage).toBe('生成超时，请稍后重试。');
     expect(get().issueLog.at(-1)).toBe('生成任务创建失败：AI provider request timed out after 1000ms');
+  });
+
+  test('generation start retry reuses the idempotency key when the create response was unresolved', async () => {
+    const idempotencyKeys: string[] = [];
+    const repository = createRepository({
+      createGenerationJob: async input => {
+        idempotencyKeys.push(input.idempotencyKey);
+        if (idempotencyKeys.length === 1) {
+          return {
+            ok: false,
+            version: CORE_DIARY_CONTRACT_VERSION,
+            error: {
+              code: 'timeout',
+              message: 'Request timed out',
+              retryable: true,
+            },
+          };
+        }
+        return {
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: {
+            jobId: `${input.draftId}-job`,
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'running',
+            stage: 'analyzing-photos',
+            progressPercent: 10,
+          },
+        };
+      },
+    });
+    const { store } = createTestStore({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    });
+    const get = () => store.getState();
+    const draftId = get().beginCreation();
+    get().setDraftPhotos(draftId, defaultSelectablePhotoIds());
+
+    const firstRound = get().startGeneration(draftId);
+    await flushAsyncWork();
+    expect(get().drafts[draftId].generation.status).toBe('failed');
+
+    const retriedRound = get().startGeneration(draftId);
+    await flushAsyncWork();
+
+    expect(retriedRound).toBe(firstRound);
+    expect(idempotencyKeys).toEqual([
+      `${draftId}-round-${firstRound}`,
+      `${draftId}-round-${firstRound}`,
+    ]);
+    expect(get().drafts[draftId].generation).toMatchObject({
+      round: firstRound,
+      status: 'running',
+      remoteJobId: `${draftId}-job`,
+    });
   });
 
   test('generation start network exception becomes a visible failed state with the precise startup network warning', async () => {
@@ -2289,6 +2506,92 @@ describe('domain/store regression', () => {
     expect(get().memoriesTotal).toBe(0);
   });
 
+  test('remote memories hydration restores saved diary blocks from the content snapshot', async () => {
+    const contentSnapshot = {
+      type: 'travel' as const,
+      subtitle: '海边散步',
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: 'photo-1',
+      posterPhotoIds: ['photo-1', 'photo-2'],
+      blocks: [
+        { id: 'saved-block-1', type: 'text' as const, title: '沿海慢行', content: '沿着海边慢慢走。', photoIds: ['photo-1'] },
+        { id: 'saved-photo-1', type: 'photo' as const, photoId: 'photo-1', caption: '午后的海风', relatedBlockId: 'saved-block-1' },
+      ],
+      people: [],
+    };
+    const repository = createRepository({
+      listMemories: async () => ({
+        ok: true,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        data: {
+          items: [{
+            id: 'diary-real-content',
+            title: '厦门海边',
+            summary: '沿着海边慢慢走。',
+            location: '厦门',
+            date: '2026.10.15',
+            privacy: 'private',
+            photoIds: ['photo-1', 'photo-2', 'photo-3'],
+            version: 1,
+            contentSnapshot,
+          }],
+          page: 1,
+          pageSize: 100,
+          total: 1,
+        },
+      }),
+    });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+
+    await store.getState().hydrateMemories();
+
+    const restoredDiary = store.getState().diaries.find(item => item.id === 'diary-real-content');
+    expect(restoredDiary?.blocks).toEqual(contentSnapshot.blocks);
+    expect(restoredDiary?.subtitle).toBe('海边散步');
+    expect(restoredDiary?.coverPhotoId).toBe('photo-1');
+  });
+
+  test('metadata-only legacy memories do not synthesize diary body blocks', async () => {
+    const repository = createRepository({
+      listMemories: async () => ({
+        ok: true,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        data: {
+          items: [{
+            id: mockDiaries[0].id,
+            title: '历史回忆',
+            summary: '仅有摘要元数据。',
+            location: '厦门',
+            date: '2026.10.15',
+            privacy: 'private',
+            photoIds: ['photo-1', 'photo-2', 'photo-3'],
+            version: 1,
+          }],
+          page: 1,
+          pageSize: 100,
+          total: 1,
+        },
+      }),
+    });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+
+    await store.getState().hydrateMemories();
+
+    expect(store.getState().diaries.find(item => item.id === mockDiaries[0].id)?.blocks).toEqual([]);
+  });
+
   test('memories filters persist and retry uses the same query after failure', async () => {
     const listMemories = jest.fn()
       .mockRejectedValueOnce(new Error('network down'))
@@ -2485,7 +2788,7 @@ describe('domain/store regression', () => {
     const round = get().startGeneration(draftId)!;
     get().finishGeneration(draftId, round);
 
-    const savedDiaryId = get().saveDraft(draftId)!;
+    const savedDiaryId = (await get().saveDraft(draftId))!;
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(get().memoriesSourceItems.map(item => item.id)).toContain(savedDiaryId);
@@ -2562,11 +2865,58 @@ describe('domain/store regression', () => {
     const round = get().startGeneration(draftId)!;
     get().finishGeneration(draftId, round);
 
-    get().saveDraft(draftId);
-    await new Promise(resolve => setTimeout(resolve, 0));
+    await get().saveDraft(draftId);
 
     expect(getSaveResult).toHaveBeenCalledWith(`${draftId}-save-${round}`);
     expect(get().issueLog).toEqual([]);
+  });
+
+  test('submitDraft reconciles a retryable timeout before reporting save failure', async () => {
+    const getSaveResult = jest.fn().mockResolvedValue({
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: {
+        diaryId: 'diary-timeout-recovered',
+        draftId: 'draft-timeout-recovered',
+        savedVersion: 1,
+        id: 'diary-timeout-recovered',
+      },
+    });
+    const saveDiary = jest.fn().mockResolvedValue({
+      ok: false,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      error: {
+        code: 'timeout',
+        message: '请求超时，请稍后重试。',
+        retryable: true,
+      },
+    });
+    const repository = createRepository({ saveDiary, getSaveResult });
+    const { store } = createTestStore({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    });
+    const get = () => store.getState();
+    const draftId = get().beginCreation();
+    get().setDraftPhotos(draftId, defaultSelectablePhotoIds());
+    const round = get().startGeneration(draftId)!;
+    await flushAsyncWork();
+    get().finishGeneration(draftId, round);
+
+    const result = await get().submitDraft(draftId);
+
+    expect(result).toEqual({
+      ok: true,
+      diaryId: 'diary-timeout-recovered',
+      destination: 'complete',
+    });
+    expect(saveDiary).toHaveBeenCalledTimes(1);
+    expect(getSaveResult).toHaveBeenCalledWith(`${draftId}-save-${round}`);
+    expect(get().diaries.filter(diary => diary.id === 'diary-timeout-recovered')).toHaveLength(1);
+    expect(get().drafts[draftId]?.savedDiaryId).toBe('diary-timeout-recovered');
+    expect(get().savingDraftIds).toEqual([]);
   });
 
   test('E15 CASE-BAS-004-003 injected write failure preserves data and a controlled retry saves once', async () => {
@@ -2725,10 +3075,13 @@ describe('domain/store regression', () => {
     const get = () => store.getState();
     const draftId = get().beginEdit('diary-1')!;
 
-    get().saveDraft(draftId);
-    await new Promise(resolve => setTimeout(resolve, 0));
+    const originalDiary = JSON.stringify(get().diaries.find(diary => diary.id === 'diary-1'));
+    await get().saveDraft(draftId);
 
     expect(get().issueLog.at(-1)).toBe('日记保存失败：原日记已有新版本，请重新进入编辑后再处理。');
+    expect(JSON.stringify(get().diaries.find(diary => diary.id === 'diary-1'))).toBe(originalDiary);
+    expect(get().drafts[draftId]?.savedDiaryId).toBeUndefined();
+    expect(get().savingDraftIds).toEqual([]);
   });
 
   test('submitDraft keeps saved diary untouched when edit save hits version conflict', async () => {
@@ -2820,6 +3173,7 @@ describe('domain/store regression', () => {
   });
 
   test('submitDraft waits for remote save success before updating local diary', async () => {
+    const submittedInputs: Parameters<CoreDiaryRepository['saveDiary']>[0][] = [];
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
@@ -2850,16 +3204,19 @@ describe('domain/store regression', () => {
           result: buildRemoteGenerationResult('draft-test-7'),
         },
       }),
-      saveDiary: async input => ({
-        ok: true,
-        version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
-          diaryId: input.id ?? 'diary-test-7',
-          draftId: input.draftId,
-          savedVersion: input.version,
-          id: input.id ?? 'diary-test-7',
-        },
-      }),
+      saveDiary: async input => {
+        submittedInputs.push(input);
+        return {
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: {
+            diaryId: input.id ?? 'diary-test-7',
+            draftId: input.draftId,
+            savedVersion: input.version,
+            id: input.id ?? 'diary-test-7',
+          },
+        };
+      },
       getSaveResult: async () => ({
         ok: false,
         version: CORE_DIARY_CONTRACT_VERSION,
@@ -2904,7 +3261,51 @@ describe('domain/store regression', () => {
     });
     expect(get().drafts[draftId].savedDiaryId).toBe(result.ok ? result.diaryId : undefined);
     expect(get().diaries.some(diary => diary.id === (result.ok ? result.diaryId : ''))).toBe(true);
+    expect(submittedInputs).toHaveLength(1);
+    expect(submittedInputs[0].contentSnapshot.blocks).toEqual(get().drafts[draftId].diary.blocks);
     expect(get().savingDraftIds).toEqual([]);
+  });
+
+  test('saveDraft waits for submitDraft remote confirmation before committing locally', async () => {
+    type SaveResult = Awaited<ReturnType<CoreDiaryRepository['saveDiary']>>;
+    const deferredSave = createDeferred<SaveResult>();
+    const repository = createRepository({
+      saveDiary: () => deferredSave.promise,
+    });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      createId: prefix => `${prefix}-save-draft-boundary`,
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+    const get = () => store.getState();
+    const draftId = get().beginCreation();
+    get().setDraftPhotos(draftId, defaultSelectablePhotoIds());
+    const round = get().startGeneration(draftId)!;
+    get().finishGeneration(draftId, round);
+    const diaryCount = get().diaries.length;
+
+    const savePromise = get().saveDraft(draftId);
+    expect(get().savingDraftIds).toContain(draftId);
+    expect(get().diaries).toHaveLength(diaryCount);
+    expect(get().drafts[draftId].savedDiaryId).toBeUndefined();
+
+    deferredSave.resolve({
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: {
+        diaryId: 'diary-save-draft-boundary',
+        draftId,
+        savedVersion: round,
+        id: 'diary-save-draft-boundary',
+      },
+    });
+
+    await expect(savePromise).resolves.toBe('diary-save-draft-boundary');
+    expect(get().savingDraftIds).toEqual([]);
+    expect(get().diaries).toHaveLength(diaryCount + 1);
+    expect(get().drafts[draftId].savedDiaryId).toBe('diary-save-draft-boundary');
   });
 
   test('submitDraft rejects a running generation draft without mutating saved diaries or dropping the draft', async () => {
@@ -3159,17 +3560,17 @@ describe('domain/store regression', () => {
     expect(get().issueLog.at(-1)).toBe('日记保存失败：network down');
   });
 
-  test('E04 CASE-BAS-004-002 first and second creation save unique diaries idempotently without changing seeds', () => {
+  test('E04 CASE-BAS-004-002 first and second creation save unique diaries idempotently without changing seeds', async () => {
     const { get, generateNew } = createContext();
     const seed = JSON.stringify(get().diaries[0]);
     const count = get().diaries.length;
     const first = generateNew();
-    const firstId = get().saveDraft(first);
+    const firstId = await get().saveDraft(first);
     expect(firstId).toBeTruthy();
-    expect(get().saveDraft(first)).toBe(firstId);
+    expect(await get().saveDraft(first)).toBe(firstId);
 
     const second = generateNew();
-    const secondId = get().saveDraft(second);
+    const secondId = await get().saveDraft(second);
     expect(secondId).toBeTruthy();
     expect(secondId).not.toBe(firstId);
     expect(get().diaries.length).toBe(count + 2);
@@ -3178,10 +3579,10 @@ describe('domain/store regression', () => {
     expect(getHistoryGroups(get().diaries).some(group => group.diaryIds.includes(secondId!))).toBe(true);
   });
 
-  test('E05 CASE-BAS-004-002 editing and abandoning the second diary leaves both saved records untouched', () => {
+  test('E05 CASE-BAS-004-002 editing and abandoning the second diary leaves both saved records untouched', async () => {
     const { get, selectors, generateNew } = createContext();
-    const first = get().saveDraft(generateNew())!;
-    const second = get().saveDraft(generateNew())!;
+    const first = (await get().saveDraft(generateNew()))!;
+    const second = (await get().saveDraft(generateNew()))!;
     const firstBefore = JSON.stringify(selectors.getDiaryById(first));
     const secondBefore = JSON.stringify(selectors.getDiaryById(second));
     const edit = get().beginEdit(second)!;
@@ -3233,8 +3634,75 @@ describe('domain/store regression', () => {
     expect(selectors.getDiaryById('diary-1')).toEqual(originalDiary);
   });
 
+  test('MAT-002 material photo references are included in the existing diary save request', async () => {
+    const saveDiary = jest.fn(createRepository().saveDiary);
+    const repository = createRepository({ saveDiary });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+    const get = () => store.getState();
+    const source = get().diaries.find(diary => diary.id === 'diary-1');
+    const other = get().diaries.find(diary => diary.id === 'diary-2');
+    if (!source || !other) throw new Error('missing diary fixtures');
+    const sourceVersion = source.version ?? 0;
+    const materialPhoto: DiaryPhoto = {
+      id: 'device-photo-mat-002',
+      title: '素材照片 P4',
+      location: '苏州',
+      emoji: 'P4',
+      color: '#EFE3D5',
+      date: '2026.10.15',
+      uri: 'file:///device/device-photo-mat-002.jpg',
+      localUri: 'file:///device/device-photo-mat-002.jpg',
+      width: 100,
+      height: 120,
+      source: 'device',
+    };
+    get().registerPhotos([materialPhoto]);
+    const draftId = get().beginEdit(source.id)!;
+    const textBlock = get().drafts[draftId].diary.blocks.find(block => block.type === 'text');
+    if (!textBlock || textBlock.type !== 'text') throw new Error('missing source text block');
+    get().setDraftBlockPhotos(draftId, textBlock.id, [...(textBlock.photoIds ?? []), materialPhoto.id]);
+
+    const requestResult = await get().submitDraft(draftId);
+    const updatedSource = get().diaries.find(diary => diary.id === source.id);
+    const updatedTextBlock = updatedSource?.blocks.find(block => block.id === textBlock.id);
+
+    expect(requestResult).toEqual({
+      ok: true,
+      diaryId: source.id,
+      destination: 'detail',
+    });
+    expect(saveDiary).toHaveBeenCalledTimes(1);
+    expect(saveDiary).toHaveBeenCalledWith(expect.objectContaining({
+      id: source.id,
+      sourceDiaryId: source.id,
+      sourceDiaryVersion: sourceVersion,
+      version: sourceVersion + 1,
+      photoIds: expect.arrayContaining([...source.photoIds, materialPhoto.id]),
+      contentSnapshot: expect.objectContaining({
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            id: textBlock.id,
+            photoIds: expect.arrayContaining([materialPhoto.id]),
+          }),
+        ]),
+      }),
+    }));
+    expect(updatedSource?.id).toBe(source.id);
+    expect(updatedSource?.version).toBe(sourceVersion + 1);
+    expect(updatedSource?.photoIds).toContain(materialPhoto.id);
+    expect(updatedTextBlock && 'photoIds' in updatedTextBlock ? updatedTextBlock.photoIds : undefined).toContain(materialPhoto.id);
+    expect(get().diaries.find(diary => diary.id === other.id)).toEqual(other);
+    expect(get().diaries.filter(diary => diary.id === source.id)).toHaveLength(1);
+  });
+
   test('DIA-002 discard then submit keeps the same saved diary and restores the snapshot correctly', async () => {
-    const repository = createRepository();
+    const saveDiary = jest.fn(createRepository().saveDiary);
+    const repository = createRepository({ saveDiary });
     const deps = createDefaultAppStoreDeps({
       adapters: {
         diaryRepository: repository,
@@ -3246,6 +3714,7 @@ describe('domain/store regression', () => {
     const beforeDiaries = get().diaries;
     const beforeCount = beforeDiaries.length;
     const beforeDiary = beforeDiaries.find(diary => diary.id === 'diary-1');
+    const sourceVersion = beforeDiary?.version ?? 0;
 
     const firstDraftId = get().beginEdit('diary-1')!;
     const firstTextBlock = get().drafts[firstDraftId].diary.blocks.find(block => block.type === 'text')!;
@@ -3279,7 +3748,13 @@ describe('domain/store regression', () => {
     expect(afterDiaries.filter(diary => diary.id === 'diary-1')).toHaveLength(1);
     expect(savedDiary?.title).toBe('第二次编辑后正式保存');
     expect(savedDiary?.summary).toBe('第二次编辑后正式保存的正文');
+    expect(savedDiary?.version).toBe(sourceVersion + 1);
     expect(savedTextBlock && 'content' in savedTextBlock ? savedTextBlock.content : '').toBe('第二次编辑后正式保存的正文');
+    expect(saveDiary).toHaveBeenCalledWith(expect.objectContaining({
+      sourceDiaryId: 'diary-1',
+      sourceDiaryVersion: sourceVersion,
+      version: sourceVersion + 1,
+    }));
   });
 
   test('discarding an edit draft ignores a delayed rewrite result and keeps the saved diary unchanged', async () => {
@@ -3492,7 +3967,7 @@ describe('domain/store regression', () => {
   test('saved drafts ignore later edits and rewrites, and repeated save keeps the first saved diary unchanged', async () => {
     const { get, selectors } = createContext();
     const draftId = get().beginEdit('diary-1')!;
-    const savedDiaryId = get().saveDraft(draftId)!;
+    const savedDiaryId = (await get().saveDraft(draftId))!;
     const savedBefore = selectors.getDiaryById(savedDiaryId);
     const savedBlock = savedBefore?.blocks.find(item => item.type === 'text');
 
@@ -3504,7 +3979,7 @@ describe('domain/store regression', () => {
     get().rewriteDraftBlock(draftId, savedBlock!.id);
     await Promise.resolve();
 
-    expect(get().saveDraft(draftId)).toBe(savedDiaryId);
+    expect(await get().saveDraft(draftId)).toBe(savedDiaryId);
     expect(selectors.getDiaryById(savedDiaryId)).toEqual(savedBefore);
     expect(get().drafts[draftId]?.savedDiaryId).toBe(savedDiaryId);
     expect(get().drafts[draftId]?.diary).toEqual(savedBefore);
@@ -3703,7 +4178,7 @@ describe('domain/store regression', () => {
     expect(get().drafts[draftId]).toBeUndefined();
   });
 
-  test('E06 CASE-BAS-004-002 editing preserves diary ID, blocks stay editable, character selection does not overwrite text', () => {
+  test('E06 CASE-BAS-004-002 editing preserves diary ID, blocks stay editable, character selection does not overwrite text', async () => {
     const { get } = createContext();
     const id = get().beginEdit('diary-1')!;
     const before = get().drafts[id].diary.blocks;
@@ -3712,14 +4187,14 @@ describe('domain/store regression', () => {
     get().updateDraftBlock(id, 'block-1', '我改写的第一段。');
     get().setDraftBlockPhotos(id, 'block-1', ['photo-5', 'photo-12']);
     const count = get().diaries.length;
-    expect(get().saveDraft(id)).toBe('diary-1');
+    expect(await get().saveDraft(id)).toBe('diary-1');
     expect(get().diaries.length).toBe(count);
     expect(get().diaries[0].summary).toBe('我改写的第一段。');
     const block = get().diaries[0].blocks[0];
     expect('photoIds' in block && block.photoIds).toEqual(['photo-5', 'photo-12']);
   });
 
-  test('E07 CASE-BAS-004-002 person groups follow selected photos and empty names normalize on save', () => {
+  test('E07 CASE-BAS-004-002 person groups follow selected photos and empty names normalize on save', async () => {
     const { get, selectors, generateNew } = createContext();
     expect(getPeopleForPhotos(['photo-1', 'photo-2', 'photo-3'], mockPhotos).length).toBe(0);
     const id = generateNew();
@@ -3729,7 +4204,7 @@ describe('domain/store regression', () => {
     expect(JSON.stringify(get().drafts[id].diary.blocks)).toMatch(/小巷/);
     expect(JSON.stringify(get().drafts[id].diary.blocks).includes('阿云巷')).toBe(false);
     get().setDraftPersonName(id, 'person-friend', '   ');
-    const saved = get().saveDraft(id)!;
+    const saved = (await get().saveDraft(id))!;
     expect(selectors.getDiaryById(saved)?.people?.find(person => person.id === 'person-friend')?.name).toBe('同行人');
   });
 
@@ -3781,6 +4256,7 @@ describe('domain/store regression', () => {
     });
     const store = createAppStore(deps);
     const get = () => store.getState();
+    await get().hydrateDrafts();
 
     const id = get().beginCreation();
     get().setDraftPhotos(id, ['photo-11', 'photo-12', 'photo-1']);
@@ -3858,7 +4334,7 @@ describe('domain/store regression', () => {
     expect(selectors.getDiaryById('diary-1')).toEqual(original);
   });
 
-  test('DIA-003 saving a replaced photo collection persists the latest normalized references without duplicating the diary', () => {
+  test('DIA-003 saving a replaced photo collection persists the latest normalized references without duplicating the diary', async () => {
     const { get, selectors } = createContext();
     const beforeCount = get().diaries.length;
     const id = get().beginEdit('diary-1')!;
@@ -3866,7 +4342,7 @@ describe('domain/store regression', () => {
     get().setDraftPhotos(id, ['photo-2', 'photo-3', 'photo-4']);
     get().setDraftBlockPhotos(id, 'block-5', ['photo-4']);
 
-    const savedId = get().saveDraft(id);
+    const savedId = await get().saveDraft(id);
     const saved = selectors.getDiaryById('diary-1')!;
     const block = saved.blocks.find(item => item.id === 'block-5');
 
@@ -3936,7 +4412,7 @@ describe('domain/store regression', () => {
     expect(selectors.getDiaryById('diary-1')).toEqual(originalDiary);
   });
 
-  test('DIA-004 saving a replaced character updates the same diary id without duplicating the entry', () => {
+  test('DIA-004 saving a replaced character updates the same diary id without duplicating the entry', async () => {
     const { get, selectors } = createContext();
     const beforeCount = get().diaries.length;
     const draftId = get().beginEdit('diary-1')!;
@@ -3950,7 +4426,7 @@ describe('domain/store regression', () => {
     get().updateDraftBlock(draftId, textBlock.id, '保存后仍保留的正文内容');
     get().setDraftCharacter(draftId, 'character-brown', { preserveContent: true });
 
-    const savedId = get().saveDraft(draftId);
+    const savedId = await get().saveDraft(draftId);
     const saved = selectors.getDiaryById('diary-1')!;
     const savedTextBlock = saved.blocks.find(block => block.id === textBlock.id);
 

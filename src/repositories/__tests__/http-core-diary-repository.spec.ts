@@ -573,6 +573,17 @@ describe('HttpCoreDiaryRepository', () => {
       date: '2026.02.03',
       privacy: 'private',
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: {
+        type: 'travel',
+        subtitle: '测试副标题',
+        helperMessage: '',
+        characterId: 'character-blue',
+        companionName: '自己',
+        coverPhotoId: 'photo-1',
+        blocks: [{ id: 'block-1', type: 'text', content: '测试正文。', photoIds: ['photo-1'] }],
+        posterPhotoIds: ['photo-1', 'photo-2'],
+        people: [],
+      },
       version: 2,
     });
     expect(saved.ok).toBe(true);
@@ -615,6 +626,17 @@ describe('HttpCoreDiaryRepository', () => {
       date: '2026.02.03',
       privacy: 'private',
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: {
+        type: 'travel',
+        subtitle: '测试副标题',
+        helperMessage: '',
+        characterId: 'character-blue',
+        companionName: '自己',
+        coverPhotoId: 'photo-1',
+        blocks: [{ id: 'block-1', type: 'text', content: '测试正文。', photoIds: ['photo-1'] }],
+        posterPhotoIds: ['photo-1', 'photo-2'],
+        people: [],
+      },
       version: 2,
     });
     expect(result.ok).toBe(false);
@@ -687,5 +709,122 @@ describe('HttpCoreDiaryRepository', () => {
       expect(result.error.code).toBe('invalid_input');
       expect(result.error.message).toBe('public block ids are required for non-private visibility');
     }
+  });
+
+  test('serializes the persisted diary content snapshot with a save request', async () => {
+    const contentSnapshot = {
+      type: 'travel' as const,
+      subtitle: '台南慢行',
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: 'photo-1',
+      posterPhotoIds: ['photo-1', 'photo-2'],
+      blocks: [
+        { id: 'block-1', type: 'text' as const, title: '街巷', content: '沿着老街慢慢走。', photoIds: ['photo-1'] },
+        { id: 'photo-block-1', type: 'photo' as const, photoId: 'photo-1', caption: '巷口', relatedBlockId: 'block-1' },
+      ],
+      people: [],
+    };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        data: { id: 'diary-1', diaryId: 'diary-1', draftId: 'draft-1', savedVersion: 1 },
+      }),
+    });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    await repository.saveDiary({
+      id: 'diary-1',
+      draftId: 'draft-1',
+      idempotencyKey: 'draft-1-save-1',
+      title: '台南日记',
+      summary: '沿着老街慢慢走。',
+      location: '台南',
+      date: '2026.10.15',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot,
+      version: 1,
+    });
+
+    const [, requestOptions] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(JSON.parse(requestOptions.body)).toEqual(expect.objectContaining({ contentSnapshot }));
+  });
+
+  test('maps a persisted diary content snapshot into the full diary result', async () => {
+    const contentSnapshot = {
+      type: 'travel' as const,
+      subtitle: '台南慢行',
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: 'photo-1',
+      posterPhotoIds: ['photo-1', 'photo-2'],
+      blocks: [
+        { id: 'block-1', type: 'text' as const, title: '街巷', content: '沿着老街慢慢走。', photoIds: ['photo-1'] },
+      ],
+      people: [],
+    };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        data: {
+          id: 'diary-1',
+          draftId: 'draft-1',
+          title: '台南日记',
+          summary: '沿着老街慢慢走。',
+          location: '台南',
+          date: '2026.10.15',
+          privacy: 'private',
+          photoIds: ['photo-1', 'photo-2', 'photo-3'],
+          version: 1,
+          contentSnapshot,
+        },
+      }),
+    });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    const result = await repository.getDiary('diary-1');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.blocks).toEqual(contentSnapshot.blocks);
+      expect(result.data.coverPhotoId).toBe('photo-1');
+      expect(result.data.subtitle).toBe('台南慢行');
+    }
+  });
+
+  test('rejects a diary response that omits its content snapshot', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        data: {
+          id: 'diary-1',
+          title: '台南日记',
+          summary: '沿着老街慢慢走。',
+          location: '台南',
+          date: '2026.10.15',
+          privacy: 'private',
+          photoIds: ['photo-1', 'photo-2', 'photo-3'],
+          version: 1,
+        },
+      }),
+    });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    const result = await repository.getDiary('diary-1');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('provider_failed');
   });
 });

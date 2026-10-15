@@ -118,7 +118,15 @@
 }
 ```
 
-### 3.5 MemoriesQuery
+### 3.5 Saved diary content snapshot
+
+`POST /diaries/save` includes a required `contentSnapshot` alongside the save metadata. It preserves the detail fields needed after a process restart: `type`, `subtitle`, `helperMessage`, `characterId`, `companionName`, `coverPhotoId`, `blocks`, and optional `posterPhotoIds` / `people`.
+
+Each block is a text, quote, or photo block. Block IDs must be unique; text/quote/photo references, cover, poster, and person photo references must point to the request's `photoIds`. A non-private visibility update may select only persisted text or quote block IDs. Missing or malformed snapshots and out-of-scope references return `invalid_input`; they must not create or update a diary.
+
+`GET /diaries/:id` and `GET /memories` return the persisted `contentSnapshot`. Older metadata-only records are not expanded into synthetic body blocks; they require a content migration/backfill before full detail reading.
+
+### 3.6 MemoriesQuery
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -159,6 +167,7 @@
 | code | 说明 |
 | --- | --- |
 | `permission_denied` | 无权限访问资源 |
+| `device_identity_required` | 缺少有效的 `x-device-id` 请求头 |
 | `timeout` | 请求超时 |
 | `cancelled` | 请求被主动取消 |
 | `not_found` | 目标不存在 |

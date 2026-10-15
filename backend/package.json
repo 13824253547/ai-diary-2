@@ -8,9 +8,12 @@
     "build": "tsc -p tsconfig.json",
     "prisma:generate": "DATABASE_URL=\"mysql://root:root@127.0.0.1:33306/ai_diary\" prisma generate",
     "db:push": "DATABASE_URL=\"mysql://root:root@127.0.0.1:33306/ai_diary\" prisma db push --skip-generate",
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:baseline": "ts-node scripts/baseline-prisma-migrations.ts",
+    "test:migrations": "sh scripts/verify-prisma-migrations.sh",
     "eval:diary-generation": "ts-node src/scripts/run-diary-generation-evaluation.ts",
     "test": "DATABASE_URL=\"mysql://root:root@127.0.0.1:33306/ai_diary\" REDIS_URL=\"redis://127.0.0.1:36379\" jest --runInBand",
-    "test:e2e": "DATABASE_URL=\"mysql://root:root@127.0.0.1:33306/ai_diary\" REDIS_URL=\"redis://127.0.0.1:36379\" jest --runInBand --config test/jest-e2e.json"
+    "test:e2e": "ts-node src/scripts/run-e2e-tests.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.6",

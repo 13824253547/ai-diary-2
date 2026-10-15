@@ -1,4 +1,5 @@
 import { createShareExportFileService } from '../share-export-file-service';
+import { createAsyncFaultPlan } from '../../test-utils/fakes/create-async-fault-plan';
 import type { DiaryItem, DiaryPhoto } from '../../types/diary';
 import type { PreparedShareAsset } from '../share-asset-preparation';
 
@@ -145,5 +146,38 @@ describe('share export file service', () => {
     expect(pdfText).toContain('<53F0535761626E3865E58BB0> Tj');
     expect(pdfText).toContain('<533F540D65E58BB0FF0C4EBA72695DF2906E6321> Tj');
     expect(pdfText).toContain('<5DF251C6590756FE72470020003100205F20> Tj');
+  });
+
+  test('returns delivery_failed when the output file writer fails', async () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-export-write-failure-'));
+    const writeFault = createAsyncFaultPlan<void>([
+      { type: 'reject', reason: new Error('simulated disk full') },
+    ]);
+    const writeFile = jest.fn(() => writeFault.next());
+    const service = createShareExportFileService({
+      getOutputDirectory: () => `file://${tempRoot}/`,
+      writeFile,
+    });
+
+    try {
+      await expect(service.exportFile({
+        diary: createDiary(),
+        mode: 'pdf',
+        assets: [],
+        operationId: 'share-op-write-failure',
+      })).resolves.toEqual({
+        ok: false,
+        reason: 'delivery_failed',
+        message: '导出文件生成失败：simulated disk full',
+      });
+      expect(writeFile).toHaveBeenCalledTimes(1);
+      expect(writeFault.callCount).toBe(1);
+      expect(writeFault.remainingCount).toBe(0);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 });

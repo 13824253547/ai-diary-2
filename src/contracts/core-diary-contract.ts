@@ -1,10 +1,11 @@
-import type { DiaryPrivacy, DiaryType } from '../types/diary';
+import type { DiaryItem, DiaryPrivacy, DiaryType } from '../types/diary';
 import { isDiaryType } from '../types/diary-capabilities';
 
 export const CORE_DIARY_CONTRACT_VERSION = 'core-diary-v1';
 
 export type ContractErrorCode =
   | 'permission_denied'
+  | 'device_identity_required'
   | 'timeout'
   | 'cancelled'
   | 'not_found'
@@ -55,6 +56,7 @@ export type DiaryContract = {
   photoIds: string[];
   publicBlockIds?: string[];
   version: number;
+  contentSnapshot?: DiaryContentContract;
 };
 
 export type GenerationBlockContract =
@@ -67,6 +69,37 @@ export type GenerationPersonContract = {
   name: string;
   photoIds: string[];
   avatarPhotoId: string;
+  aliases?: string[];
+};
+
+export type DiaryContentContract = Pick<
+  DiaryItem,
+  | 'type'
+  | 'subtitle'
+  | 'helperMessage'
+  | 'characterId'
+  | 'companionName'
+  | 'coverPhotoId'
+  | 'blocks'
+  | 'people'
+  | 'posterPhotoIds'
+>;
+
+export type SaveDiaryRequestContract = {
+  id?: string;
+  draftId: string;
+  sourceDiaryId?: string;
+  sourceDiaryVersion?: number;
+  idempotencyKey: string;
+  title: string;
+  summary: string;
+  location: string;
+  date: string;
+  privacy: DiaryPrivacy;
+  photoIds: string[];
+  publicBlockIds?: string[];
+  contentSnapshot: DiaryContentContract;
+  version: number;
 };
 
 export type GenerationResultContract = {
@@ -235,7 +268,8 @@ function isGenerationPersonContract(value: unknown): value is GenerationPersonCo
   return isNonEmptyString(value.id)
     && isNonEmptyString(value.name)
     && isStringArray(value.photoIds)
-    && isNonEmptyString(value.avatarPhotoId);
+    && isNonEmptyString(value.avatarPhotoId)
+    && (value.aliases === undefined || isStringArray(value.aliases));
 }
 
 export function isGenerationResultContract(value: unknown): value is GenerationResultContract {
@@ -255,6 +289,20 @@ export function isGenerationResultContract(value: unknown): value is GenerationR
     return false;
   }
   return value.people === undefined || (Array.isArray(value.people) && value.people.every(isGenerationPersonContract));
+}
+
+export function isDiaryContentContract(value: unknown): value is DiaryContentContract {
+  if (!isRecord(value)) return false;
+  return isDiaryType(value.type)
+    && typeof value.subtitle === 'string'
+    && typeof value.helperMessage === 'string'
+    && isNonEmptyString(value.characterId)
+    && isNonEmptyString(value.companionName)
+    && typeof value.coverPhotoId === 'string'
+    && Array.isArray(value.blocks)
+    && value.blocks.every(isGenerationBlockContract)
+    && (value.posterPhotoIds === undefined || isStringArray(value.posterPhotoIds))
+    && (value.people === undefined || (Array.isArray(value.people) && value.people.every(isGenerationPersonContract)));
 }
 
 export function isRewriteBlockResultContract(value: unknown): value is RewriteBlockResultContract {

@@ -415,5 +415,108 @@
 - `MAT-001` 当前仍无真实素材导入页面接线；本轮在不改变正式页面行为的前提下修复 store 资产目录隔离：`registerPhotos(...)` 不再原地修改外部/全局照片数组，目录作为每个 store 的状态独立更新；新照片对象及 `personIds/faceRects` 会复制到当前 store；selector 与 `addMaterialPhoto(...)` 读取当前 store 注册资产。
 - `src/store/__tests__/diary-domain.spec.ts` 新增回归：非 mock 设备照片注册后可被所属 store 解析并进入素材成员集合，重复添加只留一项，未注册 ID 被忽略，调用方后续修改输入对象不会反向污染 store，第二个 store 与全局 mock 照片均不受影响。该证据只覆盖内存资产注册，不宣称真实导入完成。
 - 已验证：定向 domain 用例通过、`npm run test:domain`（3 个 suite / 87 项通过）、`npx jest --runInBand app/__tests__/album-select-screen.spec.tsx app/__tests__/edit-screen.spec.tsx src/components/diary/__tests__/photo.spec.tsx src/components/diary/__tests__/diary-paper.spec.tsx app/__tests__/saved-diary-screens.spec.tsx`（5 个 suite / 55 项通过）、`npm run typecheck` 通过。真实导入、URI 持久化、素材页预览和跨模块设备资产读取仍待后续推进。
-- `BAS-004-A03` 新增 `src/test-utils/fakes/create-async-fault-plan.ts`，可按脚本注入 resolve、reject、deferred 三种异步结果，并显式报错于脚本耗尽。`src/store/__tests__/diary-domain.spec.ts` 新增 `E15 CASE-BAS-004-003`：首次保存写入失败后，草稿和已保存列表快照不变、saving 状态清理；同幂等键重试延迟成功后只新增一篇作品。该增量只覆盖保存写失败/重试路径，A03 整体仍进行中。
+- `BAS-004-A03` 新增 `src/test-utils/fakes/create-async-fault-plan.ts`，可按脚本注入 resolve、reject、deferred 三种异步结果，并显式报错于脚本耗尽。`src/store/__tests__/diary-domain.spec.ts` 新增 `E15 CASE-BAS-004-003`：首次保存写入失败后，草稿和已保存列表快照不变、saving 状态清理；同幂等键重试延迟成功后只新增一篇作品。该条记录初次只覆盖保存路径，后续 fault matrix 见下方收口记录。
 - 已验证：`npx jest --runInBand src/test-utils/fakes/create-async-fault-plan.spec.ts`（3 项通过）、`npm run test:domain`（3 个 suite / 88 项通过）、`npm run typecheck` 通过。
+- `BAS-004-A03` / `CRE-002-A05` 撤权故障补证：`src/services/__tests__/photo-library.spec.ts` 用共享 fault plan 注入逐张 `getAssetInfoAsync` 中途 `E_NO_PERMISSIONS`，验证撤权后的照片进入 `invalidIds`；与 `app/__tests__/album-select-screen.spec.tsx` 既有失效照片门禁用例合并核对，确认不足三张时不写回草稿、不导航。验证命令：`npx jest --runInBand src/services/__tests__/photo-library.spec.ts`（1 项）、`npx jest --runInBand app/__tests__/album-select-screen.spec.tsx`（13 项）、`npm run typecheck` 均通过；这不是实机撤权证据，CRE-002 仍因模拟器原生异常保持 partial。
+- `BAS-004-A03` / `SHR-005-A05` 文件写失败补证：`share-export-file-service` 接入可替换的 writer 依赖，`createAsyncFaultPlan(...)` 注入磁盘写入异常后返回 `delivery_failed`；真实交付编排层验证不会调用 `onConfirmed(...)`，日记导出历史保持不变。验证：`npx jest --runInBand src/services/__tests__/share-export-file-service.spec.ts`（3 项）、`npx jest --runInBand src/services/__tests__/share-delivery-orchestrator.spec.ts`（5 项）、`npm run typecheck` 通过。当前仅为确定性 writer 故障，iOS 文件权限/系统出口与真实渠道仍待补。
+- `CASE-BAS-004-003` 最终收口为 passed：除保存失败、照片撤权与文件 writer 拒绝外，E03 迟到/乱序生成结果不会复活旧轮次，暂停后才返回的远端 `jobId` 会立即取消；这几类故障均断言了草稿、日记、导航/确认或远端任务状态，不只检查 mock 调用。验证：`npm run test:domain`（3 suites / 88 项）、fault plan 单测 3 项、photo/export/orchestrator 服务套件 9 项、相册页面 13 项及 `npm run typecheck` 通过。真实 iOS 撤权和系统文件出口继续由 CRE-002 / SHR-005 独立追踪，不再作为该确定性 CASE 的未完成项。
+- `DIA-005-A07` 并发版本保护补强：后端保存事务现按设备、作品 ID 和来源版本执行条件更新，旧版本并发提交只有一个可以成功；编辑后的作品版本按来源版本递增，保存命令记录实际保存版本。store 本地保存、远端提交及恢复路径使用同一版本值；同一编辑命令的并发重试会归并到同一保存结果。
+- 验证：定向 backend e2e 覆盖并发旧版本冲突、同键并发重试、编辑版本递增、顺序重试和陈旧版本拒绝（5 项通过）；完整 backend e2e（35 项）、backend build、`npm run typecheck`、`npm run test:domain`（88 项）、编辑/详情页面套件（37 项）通过。Q-001/Q-008 的 CASE-DIA-005-010 仍待决策，未据此关闭。
+- `DIA-005-A05` 幂等响应稳定性补强：旧保存命令在作品后续编辑后重放，之前会错误返回当前作品版本和后续草稿 ID；保存接口现统一返回 `SaveCommand` 持久化的原始 `draftId/savedVersion`，与查询保存结果接口一致。新增 MySQL e2e 先保存、再编辑、最后重放旧键，验证旧命令仍返回版本 1、作品详情保持版本 2。
+- 最新验证：`npm --prefix backend run test:e2e`（36 项）、`npm --prefix backend run build`、`npm run typecheck`、`npm run test:domain`（88 项）、编辑/详情页面回归（37 项）通过；CRE-002 相册页面与照片服务回归 14 项通过。`CASE-DIA-005-010` 及 provider/日期/iOS 环境 blocker 仍保持未决。
+- DIA-005 的同步 `saveDraft` 本地写旁路已移除；兼容 action 改为等待 `submitDraft` 的远端确认或幂等追认，错误时不会预先更新已保存作品。`updateDiaryText` 也等待相同保存结果。新增 deferred domain 回归验证仓库响应前本地作品与 `savedDiaryId` 不变，失败路径保持草稿与原作品。
+- BAS-004 旧领域 runner 已支持异步 CASE 顺序执行、每例前重置 store，并能反向运行；更新 E01 旧夹具，断言新草稿初始无选图、显式选 12 张后验证选择/取消。`node tools/run-domain-tests.js` 与 `DIARY_DOMAIN_TEST_ORDER=reverse node tools/run-domain-tests.js` 均 15/15 通过。
+- 最新复验：`npm run typecheck`、`npm run test:domain`（92 项）、定向 `saveDraft` 远端确认/失败/响应丢失测试通过。DIA-005 的 Q-001/Q-008 与 CRE-005/DIA-006 的外部或待决规则未变。
+- 全量前端回归：`npm test`（35 suites / 283 项）通过；编辑/详情相关的 React Native 测试仍输出已有 `act()` 环境告警，但无失败。旧领域 runner 正常与反向顺序各 15/15 通过。
+- BAS-003-A03 启动失败隔离：`hydrateDrafts()` 遇到本地快照 load/clear/rewrite 错误现会记录问题并结束 hydration，不清空/覆写快照或中断后续 `hydrateMemories()`；恢复完成前新建草稿不覆盖磁盘旧快照，恢复完成后合并写回。定向快照 CASE 6 项、`npm run test:domain`（92 项）、`npm test`（35 suites / 283 项）及 typecheck 通过。A03 整体验收仍为 in progress：当前 `hybrid-dev` 默认 store 含 mock diaries，尚无正式空身份与显式演示数据隔离边界，未改变首页/统计 UI。
+- BAS-002-A03 设备身份入口隔离：`backend/src/common/device-identity.ts` 现拒绝缺失、空字符串和空白 `x-device-id`，统一返回不可重试 `device_identity_required`，不再把无身份请求归到共享 `device-anonymous`。新增 resolver 单测及后端 e2e：先以旧共享 ID 创建草稿，再确认省略或发送空白身份头都无法列出该草稿，也不能从 `/api/identity/me` 获得默认身份。验证：身份单测 4/4、完整 `npm --prefix backend run test:e2e` 37/37、backend build、`npm run typecheck` 通过。公开投影、完整对象权限矩阵及 Q-012 正式身份边界仍未收口，BAS-002-A03 保持 partial。
+- SHR-001/SHR-002 后端选段输入 fail-closed：`MemoryStoreService.updateDiaryVisibility(...)` 现限制四种合法隐私范围；非私密范围缺少 `publicBlockIds`、列表为空或清洗后为空均返回 `invalid_input`，无效隐私值也会拒绝；跨设备改范围返回 `permission_denied`。随 `DIA-005` 正文快照持久化完成后，sharing e2e 也验证选段 ID 必须匹配持久化文本/引用块，未知及图片 block ID 被拒绝。完整内容投影尚未接入后端公开读取 API。
+- DIA-005/BAS-003 保存正文快照：保存 API 现在必须提交完整 `contentSnapshot`，Prisma `Diary` 将正文/引用/图片块、角色/人物、封面和海报引用与元数据原子持久化；详情与回忆列表真实读回同一快照，前端 store 不再把摘要合成占位正文，metadata-only 历史记录保持空 blocks，详情合同拒绝缺失/畸形快照。服务端校验 block 唯一性、关联目标及所有照片引用均属于作品 `photoIds`；SHR 范围更新按持久快照只允许文本/引用 block，拒绝未知 ID 与图片 block。验证：完整 Jest 35 suites / 288 项，domain 94 项，backend unit 4 suites / 50 项，backend e2e 38 项，CRE-002 定向 14 项，typecheck、backend build、Prisma generate/db push 通过。历史 metadata-only 作品迁移、真实公开内容读取接口仍未完成。
+- 2026-10-15 补充 BAS-003-A04：新增真实 MySQL 事务失败回滚 CASE。e2e 让 `Diary.create` 在事务内执行后，注入后续 `SaveCommand.create` 异常；验证作品与保存命令均未留下、保存结果查无记录、原草稿保留，再移除注入用相同幂等键重试并只产生一篇完整作品。注入只在测试回调中生效，不增加正式服务 failpoint。验证：`npm --prefix backend run test:e2e`（39/39）、`npm --prefix backend run build` 通过；`CASE-BAS-003-004` 从 partial 收口为 passed。BAS-003 整体仍进行中。
+- 2026-10-15 补充 BAS-003-A05 快照版本降级保护：`hydrateDrafts()` 发现合法整数但当前不支持的 snapshot version 时保留原数据、不清理，并禁用本次运行的后续快照写入；新增版本 2 回归验证恢复阶段和后续创建草稿都不会覆盖原快照。验证：定向 store CASE 1 项、`npm run test:domain`（3 suites / 95 项）、完整 `npm test`（35 suites / 289 项）和 `npm run typecheck` 通过。此保护不等同于旧格式迁移，CASE-BAS-003-005 继续 partial。
+- 2026-10-15 补充 BAS-003-A05 Prisma migration：新增 `20261015000000_initial_schema` 四表基线和 `20261015001000_diary_content_snapshot` nullable column migration，增加 `migrate:deploy` 与隔离验证脚本。`npm --prefix backend run test:migrations` 使用两个临时 MySQL schema，验证全新部署全部 migration；同时从不含正文列的旧 schema 预置 legacy 日记、标记已应用基线后升级，确认 ID/title/summary 保留、新列为 NULL 且最终 schema 无 drift。验证库在脚本退出时清理；现有 `ai_diary` 未被触碰。baseline adoption、legacy 正文回填和数据库损坏恢复仍待完成，A05 保持 partial。
+- 2026-10-15 补充 BAS-003-A05 baseline adoption tooling：新增 `backend/scripts/baseline-prisma-migrations.ts` 与 `migrate:baseline` 命令，要求显式 `--confirm-current-schema-is-final`；先核验 datamodel 无 drift、history 是已知连续前缀，之后只通过 `migrate resolve` 写 migration metadata。migration verifier 另外覆盖：旧 schema 有 drift 时命令拒绝且不创建 `_prisma_migrations`；当前 schema 完全匹配时两条 migration 被标记、`migrate status` up-to-date、既有日记保持不变。`npm --prefix backend run test:migrations` 通过。工具未在现有 `ai_diary` 上执行，仍需备份和审阅后由操作方明确调用。
+- 2026-10-15 补充 baseline guard 回归：临时库验证无 `--confirm-current-schema-is-final` 时拒绝且不写 migration history；已有一个成功 migration 的合法连续前缀可安全续记剩余迁移；未知/失败/断裂 history 由工具拒绝。`npm --prefix backend run test:migrations` 全部路径通过，现有 `ai_diary` 未执行 baseline。
+- baseline adoption final regression：`npm --prefix backend run test:migrations` 重新通过三条路径：clean deployment、旧 schema drift 拒绝且不写 migration history、完整当前 schema 经显式确认后 baseline 并保留日记数据。CRE-002 定向回归 14/14、backend e2e 39/39、backend unit 50/50 和 backend build 通过；baseline 工具仍未在现有 `ai_diary` 执行。
+- 2026-10-15 本地数据库 baseline 实际接入：只读 `prisma migrate diff --exit-code` 确认 `ai_diary` 无 drift，并确认没有既有 `_prisma_migrations` 后，使用带 `--confirm-current-schema-is-final` 的 `migrate:baseline` 登记两条 migration。执行前后 `Diary` 行数均为 2；复查 `migrate status` 为 up-to-date，schema diff 仍无差异。该操作只写 migration metadata；生产或其他数据库未触碰。此前“未应用当前库”的记录描述的是执行前状态。
+
+## 2026-10-15 BAS-004-A01 隔离集成验收
+
+- 审计发现旧 `backend` `test:e2e` npm script 把 `DATABASE_URL` 固定到开发库 `ai_diary`，而 `backend/test/app.e2e-spec.ts` 的 `beforeEach` 会删除 `GenerationJob`、`SaveCommand`、`Diary` 与 `Draft`。本轮没有在开发库运行该危险脚本。
+- 新增 `backend/src/scripts/run-e2e-tests.ts` 与安全守卫单测；`test:e2e` 现在必须显式提供 `E2E_DATABASE_URL`，只接受本机 MySQL 的 `ai_diary_test_*` / `ai_diary_e2e_*` schema。缺少隔离 URL 时返回退出码 2，不连接数据库；一次性故意失败断言通过该入口返回退出码 1，探针运行后已移除。
+- 在新建的 `ai_diary_e2e_20261015_agent01` 临时 schema 上部署两条 Prisma migrations，并以 `E2E_DATABASE_URL=<isolated-local-url> npm --prefix backend run test:e2e` 执行完整 backend e2e（39/39）。随后删除该临时 schema；复查确认该 schema 已不存在，原开发库 `ai_diary.Diary` 仍有 2 条记录。
+- 验证：`npm --prefix backend run test -- run-e2e-tests.spec.ts`（3/3）、`npm --prefix backend run build`、`E2E_DATABASE_URL` 缺失时安全拒绝（exit 2）、隔离 backend e2e（39/39）、故意失败断言探针（exit 1）、`npm test`（35 suites / 289 项）与 `npm run typecheck` 通过。BAS-004-A01 与 CASE-BAS-004-001 已收口；CRE-002 的 iOS 原生权限环境异常仍由其业务 CASE 独立跟踪。
+
+## 2026-10-15 BAS-002-A04 与 DIA-005 transport failure 收口
+
+- `src/services/api-client.ts` 新增统一 JSON transport：默认超时 15 秒，可在 client 或单次请求覆盖；超时计时覆盖 header 解析、fetch 与 JSON body 读取；支持 `AbortSignal`，并把 timeout、主动 cancelled、网络失败与畸形 JSON 区分为契约错误。`HttpCoreDiaryRepository` 的所有 fetch 路径现统一经过该入口，保留 `x-device-id`，不自动重放写请求。
+- 不确定的 generation job 建单结果没有 `jobId` 时，现有手动重试会复用同一个 generation round/idempotency key；已知 job 终态失败仍走原有新轮次。DIA-005 保存请求若 repository 返回 retryable timeout/provider failure，store 会按首次幂等键查询 `SaveCommand` 结果；已提交时追认同一作品，无结果时保留草稿且不自动重发。
+- 新增服务/repository 回归：API 超时、响应体读取超时、AbortSignal cancel、network error 与 malformed JSON；domain 回归覆盖建单同键恢复和“saveDiary 返回 timeout 但 getSaveResult 已有记录”的追认路径。定向 API/repository tests 3 suites / 30 项通过，建单/保存恢复 domain CASE 2 项通过。
+- 验证：`npm test -- --silent`（37 suites / 298 项）、`npm run typecheck`、`npm --prefix backend run build`、isolated MySQL backend e2e（39/39）通过；临时 schema 清理后开发库 `Diary` 仍为 2 行。未调用真实 AI provider，未改正式 UI/UX。
+- 当前进度按 coverage 有效总数 225 与验收矩阵明确 passed 项重算：89/225 = 39.555...%，四舍五入为 **39.6%**（2026-10-15；partial/blocked/pending 均不计）。BAS-002-A04 从进行中转为通过；A02/A03/A05 与 DIA-005 的 Q-001/Q-008 仍未闭环。
+- 同步修正初始基线说明：README/coverage 中“245 条 CASE 未执行”和 BAS-001/BAS-004 初始状态注明为 2026-10-13 的登记快照，当前状态指向验收矩阵/执行快照；execution-context 现反映仓库已有本地 NestJS/Prisma/MySQL 与部分真实服务链路，生产后端/provider/平台集成仍未交付。AGENTS 中的项目阶段说明也更新为 mock 与 service-backed flows 并存。
+- BAS-002-A02 客户端密钥边界部分实证：新增 `tools/verify-client-bundle-secrets.js` / `tools/verify-client-bundle-secrets.test.js` 与 `npm run test:client-secret-boundary`（3/3）；一次性非真实 `AI_PROVIDER_API_KEY` canary 执行 Expo iOS export（JS bundle 4.4 MB），扫描器检查 102 个导出文件无匹配。`backend/.env` 不存在；未调用 provider，真实后端凭据调用、请求/响应与日志检查仍待用户提供隔离测试凭据/环境，A02 未计通过。
+
+## 2026-10-15 MAT-001-A02 搜索验收
+
+- `app/library/index.tsx` 的素材列表现按 store 注册的照片目录解析 `materialPhotoIds`，缩略图/预览图片源兼容本地 URI；既有样例照片仍使用打包资源，正式页面布局与交互未改变。
+- 新增 `app/__tests__/library-screen-search.spec.tsx`，注册三个非 mock `source: 'device'` 照片 fixture，验证标题片段命中 P1、地点片段返回 P1/P3、无匹配显示空态，以及清除查询后恢复 P1/P2/P3。
+- 验证：`npx jest --runInBand app/__tests__/library-screen-search.spec.tsx`（1/1）与 `npm run typecheck` 通过。矩阵通过数从 89 增至 90；coverage 分母仍为 225，当前为 90/225 = 40.0%。
+- 测试使用 store 注册的 `file://` 资产 fixture，不访问真实 iOS 媒体库；真实设备导入、权限矩阵、URI 可读性/留存和跨模块读取继续按独立 CASE 阻塞/跳过，不以本次搜索回归代替。
+- MAT-001-A05 consumer 接线增量：素材页、日记 `Photo` 组件和明信片页现均从 store 注册的照片目录解析非 mock 设备照片；明信片素材参数不再限定 `mockPhotos` ID，图片源可使用本地 URI，切换到预设明信片的现有交互保持不变。
+- 三处 consumer 回归使用同一个 `file://` URI 形式的非 mock 设备照片 fixture，验证素材列表、日记图片组件和明信片页都解析到该 URI；这是 store/catalog 消费证据，不是媒体库导入或实际文件可读性验证，CASE-MAT-001-006 继续 partial。
+- 增量验证：`npx jest --runInBand app/__tests__/library-screen-search.spec.tsx app/__tests__/postcard-screen-assets.spec.tsx src/components/diary/__tests__/photo.spec.tsx`（3 suites / 8 tests）、完整 `npm test -- --silent`（39 suites / 302 tests）及 `npm run typecheck` 均通过。
+
+## 2026-10-15 MAT-001-A03 预览状态部分验收
+
+- 素材页确定性页面回归新增：注册照片的预览 image source 保持同一 file URI；关闭预览后返回素材列表；“未生成日记”标记只根据当前已保存日记的 `photoIds` 判断，并在 store 引用更新后同步变化。
+- `npx jest --runInBand app/__tests__/library-screen-search.spec.tsx`（2/2）、`npm test -- --silent`（39 suites / 302 tests）与 `npm run typecheck` 通过。fixture 未读取真实设备文件，也未执行真实保存提交或设备导入；CASE-MAT-001-003 仍为 partial，相关真实资源验证列为阻塞后跳过。
+
+## 2026-10-15 MAT-003 装饰预览和关闭验收
+
+- 新增 `app/__tests__/library-screen-decorations.spec.tsx`，逐项验证五种贴纸和三种城市印章的预览名称/资源映射一致，关闭预览返回素材页且不改日记、草稿、素材成员、照片选择或导航状态。A01、A03 可按当前页面证据通过。
+- 额外验证京都印章以稳定 ID `stampKyoto` 传入 `/postcard`；`app/postcard` 页面回归进一步验证卡片预览读取 `art.stampKyoto`。真实生成结果资产仍未产生，A02 部分执行；当前 PCD-001 `make()` 只更新 boolean 状态。
+- Q-015/Q-009 决定前不推断未知装饰的回退/错误语义；A04 和 CASE-MAT-003-005 记录为阻塞并跳过。
+- 验证：`npx jest --runInBand app/__tests__/library-screen-decorations.spec.tsx app/__tests__/postcard-screen-assets.spec.tsx`（2 suites / 11 tests）、完整 `npm test -- --silent`（40 suites / 312 tests）和 `npm run typecheck` 均通过；MAT-003-A01/A03 计入通过后，验收总数为 92/225 = 40.9%。
+
+## 2026-10-15 MAT-004 可独立验收分支
+
+- 新增 `app/__tests__/library-screen-inspiration.spec.tsx`，逐张验证灵感卡问题对应，空/空白/换行回答不能提交，提交尝试不改消息、日记或路由；带未提交回答关闭弹层不发送消息、不改作品，MAT-004-A01/A04 通过。
+- 有效输入仍由当前 `sendChat(...)` 本地关键词回复处理，不是 PET-001 真实服务；真实回复、请求/消息关联、失败恢复和迟到响应 CASE-MAT-004-002～005 已记录 blocker 并跳过，未用本地结果冒充真实聊天。
+- 增量验证：`npx jest --runInBand app/__tests__/library-screen-inspiration.spec.tsx`（1 suite / 4 tests）、完整 `npm test -- --silent`（41 suites / 316 tests）与 `npm run typecheck` 均通过。MAT-004-A01/A04 纳入通过后为 94/225 = 41.8%。
+
+## 2026-10-15 PCD-001 真实渲染 blocker 审计
+
+- `app/postcard/index.tsx` 的 `make()` 仅将 `generated` 设为 `true`，没有生成文件、可读 URI 或版本绑定结果；CASE-PCD-001-003/004/005 未运行。
+- 执行依赖解析检查发现只有 `jimp-compact` 可用；`react-native-view-shot`、`react-native-svg`、`sharp`、`canvas`、`@napi-rs/canvas`、`expo-image-manipulator` 均未安装。现有分享 PNG renderer 将文字画成结构骨架，不能替代明信片原布局和中文寄语的真实卡片图片。
+- 真实生成需增加/采用原生视图捕获能力，并让当前生成按钮等到图片可读后再显示成功、在失败时返回可见错误；这将改变现有成功时序/失败反馈，不能在 UI/UX 冻结约束下擅自接线。用户已明确要求先跳过，故 PCD-001 A03/A04/A05 保持阻塞并暂停；本轮不增加依赖、不改变按钮反馈，后续仅在用户重新指定获批渲染方案或调整边界后恢复。
+
+## 2026-10-15 MAT-002-A01/A03 验收证据补齐
+
+- `app/__tests__/library-screen-material-apply.spec.tsx` 验证已注册的非 mock P4 通过素材预览应用到 D1 时，会创建/复用 D1 编辑草稿，将照片加入首个文本块与整篇集合并导航到同一草稿；重复应用会复用原 `draftId` 且不重复引用。草稿创建时已保存 D1/D2 保持不变。
+- CASE-MAT-002-001/003 对应 `T-MAT-002-A01/A03`，验收矩阵已列为 passed；矩阵的通过项数量只计这两个明确通过的验收，不将本轮全量测试重复计数。
+- 验证：定向 Jest（1 suite / 2 tests）、`npm test -- --silent`（42 suites / 318 tests）、`npm run typecheck`、`git diff --check` 均于 2026-10-15 通过。最终全量前端回归未运行数据库 e2e，也未调用真实媒体库或外部服务。
+- fixture 使用 store 注册的 `file://` URI，仅证明目录消费者及草稿引用行为，不证明真实设备文件可读。真实导入/读取仍由 MAT-001/CRE-002 覆盖。A02 保存/放弃与持久化回读未运行：当前 `E2E_DATABASE_URL` 未配置，backend e2e `beforeEach` 会执行 `store.reset()`，不得对默认开发库 `ai_diary` 执行；需准备 disposable local e2e schema。A04 受 Q-015、A05/007 的错误与返回语义受 Q-015/Q-009 阻塞。依据 coverage 有效总数 225 与验收矩阵明确 passed 列动态重算：96/225 = 42.666...%，四舍五入为 **42.7%**（2026-10-15）；partial、blocked、pending 均不计。
+
+## 2026-10-15 MAT-002-A05 无效输入副作用保护
+
+- 审计 `app/library/index.tsx` 发现：原 `applyPhoto(...)` 在确认素材仍注册、目标日记仍存在且包含文本块之前调用 `beginEdit(...)`；无正文目标或预览后素材目录变化会产生编辑草稿，再因后续检查失败而静默退出。
+- 新增 `app/__tests__/library-screen-material-apply.spec.tsx` 两个回归：无文本块目标、P4 预览后从 store 照片目录移除。两条用例在修复前均失败，并观察到新草稿已创建；修复后断言未建草稿、D1/D2 未变、未添加引用且未导航。`applyPhoto(...)` 现在先从当前 store 核验照片仍注册及目标仍含文本块，再调用 `beginEdit(...)`。
+- 该修复不增加 UI/提示，不改变正常流程。测试只证明 store 目录登记状态，不证明设备文件真实可读、真实 `expo-media-library` 读取失败、目标无日记入口或返回/反馈语义，因此 `T-MAT-002-A05` 仅为部分执行，不计通过。
+- 验证：定向 MAT-002（1 suite / 4 tests）、完整 `npm test -- --silent`（42 suites / 320 tests）、`npm run typecheck`、`git diff --check` 均通过；CRE-002 `app/__tests__/album-select-screen.spec.tsx` + `src/services/__tests__/photo-library.spec.ts`（2 suites / 14 tests）通过。页面故障用例按预期输出 `console.warn`，无失败断言。未运行数据库 e2e、未调用外部服务或真实媒体库。
+- 验收矩阵明确 passed 项仍为 96；按 coverage 有效验收总数 225 重算为 **96/225 = 42.7%**（2026-10-15）。A05 是 partial，CRE-002 的真实 iOS `E_NO_PERMISSIONS` 仍阻塞，均不计入通过项。
+
+## 2026-10-15 MAT-002-A02 分层保存与放弃证据
+
+- 新增前端状态 CASE：素材 P4 应用到 D1 编辑草稿后执行 `discardDraft(...)`，草稿被移除且已保存 D1/D2 快照保持不变；该用例验证客户端放弃不发保存，不声称后端有草稿删除 API（当前 controller 未提供此接口）。
+- 新增 `backend/test/app.e2e-spec.ts` 持久化 CASE：在全新 MySQL schema 创建 D1/D2，经 `/api/diaries/save` 将 `photo-4` 追加至 D1 的整篇照片集和正文快照，验证保存结果仍为原 D1 ID、版本递增为 2、D2 不变、回忆列表仍为 2 篇且 D1 只出现一次。
+- 环境与清理：新建 `ai_diary_e2e_20261015_mat002`，仅部署当前两条 Prisma migrations；执行新增定向 e2e（1 passed / 39 skipped）后查询临时 D1 行数为 2 并删除 schema，确认 schema 已不存在；开发库未作为测试目标，清理后只读计数为 2。照片 ID 是后端 fixture，不代表真实媒体资源。
+- 验证：`npx jest --runInBand app/__tests__/library-screen-material-apply.spec.tsx`（1 suite / 5 tests）、`npm --prefix backend run build`、隔离 backend e2e（1 passed / 39 skipped）、`npm test -- --silent`（42 suites / 321 tests）、`npm run typecheck` 均通过。A02 仍为 partial：尚未使用 CRE-002/MAT-001 导入的真实 P4 完成素材页到 repository/backend 的完整链路。
+- 矩阵通过项仍是 96；依据 coverage 的 225 项重算为 **96/225 = 42.7%**（2026-10-15）。A02/A05 均未计入通过数。
+
+## 2026-10-15 MAT-002-A02 store 请求载荷补充
+
+- `src/store/__tests__/diary-domain.spec.ts` 新增 MAT-002 专属 repository-boundary 回归：用 store 注册的非 mock device P4 应用到 D1 草稿后提交，断言 `saveDiary` 收到原 `diaryId/sourceDiaryId/sourceDiaryVersion`，整篇 `photoIds` 与对应正文 block 的 `photoIds` 都包含 P4；store 收到 adapter 结果后沿用同一 D1、版本递增，D2 不变且没有第二条 D1。
+- 定向验证：`npm run test:domain -- --testNamePattern='MAT-002 material photo references are included in the existing diary save request'`（1 passed / 97 skipped）。随后完整 `npm test -- --silent` 为 42 suites / 322 tests，通过 `npm run typecheck`。此 test 的 adapter 用于断言请求载荷，返回值不作为真实保存验收；MySQL 持久化仍由上一条 isolated e2e 单独证明。
+- 通过项数量没有变化，仍为 **96/225 = 42.7%**；MAT-002-A02 仍 partial，等待真实设备 P4 及真实 repository/backend 连线后才能继续完整闭环。
+- 2026-10-15 full backend regression：以全新 `ai_diary_e2e_20261015_full02` 部署两条 migrations，执行 `E2E_DATABASE_URL=<disposable local schema> npm run test:e2e`，40/40 通过（含 MAT-002 保存案例、DIA-005 保存/版本保护及 CRE-005 provider 故障 CASE）。e2e 按测试 setup 在该库执行 `store.reset()`；运行后临时 schema 已删除并确认不存在，开发库没有作为目标；开发库当前只读 `Diary` 行数为 2。此回归不增加验收通过数，也不解除真实 provider、决策或设备照片 blocker。

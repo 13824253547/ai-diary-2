@@ -51,6 +51,30 @@ describe('Diary photo', () => {
     expect(screen.getByLabelText('图片暂时不可用')).toBeTruthy();
   });
 
+  test('reads a registered non-mock device photo through the shared photo catalog', async () => {
+    useAppStore.getState().registerPhotos([
+      {
+        id: 'device-photo-p1',
+        title: '河岸傍晚',
+        location: '苏州',
+        emoji: '📷',
+        color: '#EFE3D5',
+        date: '2026.10.15',
+        uri: 'file:///device/device-p1.jpg',
+        localUri: 'file:///device/device-p1.jpg',
+        width: 100,
+        height: 120,
+        source: 'device',
+      },
+    ]);
+
+    const screen = await render(<Photo id="device-photo-p1" style={{ width: 120, height: 90 }} />);
+
+    expect(screen.getByTestId('diary-photo-device-photo-p1').props.source).toEqual({
+      uri: 'file:///device/device-p1.jpg',
+    });
+  });
+
   test('keeps diary text visible when an inline photo becomes unreadable', async () => {
     registerPhoto('photo-inline-broken');
     const seedDiary = useAppStore.getState().diaries[0];

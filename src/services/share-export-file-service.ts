@@ -26,6 +26,7 @@ type ShareExportFileInput = {
 
 type ShareExportFileDeps = {
   getOutputDirectory?: () => string | undefined;
+  writeFile?: (uri: string, buffer: Buffer | Uint8Array) => Promise<void>;
 };
 
 const EXPORT_DIRECTORY = 'share-exports';
@@ -198,7 +199,11 @@ function buildSimplePdf(lines: string[]) {
   return Buffer.from(pdf, 'utf8');
 }
 
-async function renderShareImageFile(input: ShareExportFileInput, outputUri: string) {
+async function renderShareImageFile(
+  input: ShareExportFileInput,
+  outputUri: string,
+  writeFile: (uri: string, buffer: Buffer | Uint8Array) => Promise<void>,
+) {
   const Jimp = require('jimp-compact');
   const createBlock = (width: number, height: number, color: number) => new Jimp(width, height, color);
   const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -307,16 +312,21 @@ async function renderShareImageFile(input: ShareExportFileInput, outputUri: stri
   await drawRect(canvas, PAGE_PADDING, totalHeight - 18, Math.min(PAGE_INNER_WIDTH, 220 + String(input.diary.version ?? 0).length * 20), 6, IMAGE_TEXT_SOFT);
 
   const buffer = await canvas.getBufferAsync(Jimp.MIME_PNG);
-  await writeBufferFile(outputUri, buffer);
+  await writeFile(outputUri, buffer);
 }
 
-async function renderSharePdfFile(input: ShareExportFileInput, outputUri: string) {
+async function renderSharePdfFile(
+  input: ShareExportFileInput,
+  outputUri: string,
+  writeFile: (uri: string, buffer: Buffer | Uint8Array) => Promise<void>,
+) {
   const lines = buildPdfLines(input.diary, input.assets);
-  await writeBufferFile(outputUri, buildSimplePdf(lines));
+  await writeFile(outputUri, buildSimplePdf(lines));
 }
 
 export function createShareExportFileService(deps: ShareExportFileDeps = {}) {
   const getOutputDirectory = deps.getOutputDirectory ?? getDefaultOutputDirectory;
+  const writeFile = deps.writeFile ?? writeBufferFile;
 
   return {
     async exportFile(input: ShareExportFileInput): Promise<ShareExportFileResult> {
@@ -335,9 +345,9 @@ export function createShareExportFileService(deps: ShareExportFileDeps = {}) {
       try {
         await ensureDirectory(baseDir);
         if (input.mode === 'pdf') {
-          await renderSharePdfFile(input, fileUri);
+          await renderSharePdfFile(input, fileUri, writeFile);
         } else {
-          await renderShareImageFile(input, fileUri);
+          await renderShareImageFile(input, fileUri, writeFile);
         }
         return { ok: true, fileUri };
       } catch (error) {

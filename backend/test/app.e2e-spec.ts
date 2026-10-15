@@ -1,16 +1,61 @@
+jest.mock('../../src/services/photo-permission', () => ({
+  getPhotoPermissionStatus: jest.fn(),
+}));
+
+jest.mock('../../src/services/draft-snapshot-storage', () => ({
+  createLocalDraftSnapshotStore: jest.fn(),
+}));
+
+jest.mock('../../src/store/adapters/backend-core-diary-adapter', () => ({
+  createBackendCoreDiaryRepository: jest.fn(),
+}));
+
+jest.mock('../../src/mocks/photos', () => ({ mockPhotos: [] }));
+jest.mock('../../src/mocks/diaries', () => ({ mockDiaries: [], historyGroups: [] }));
+jest.mock('../../src/mocks/characters', () => ({ mockCharacters: [] }));
+jest.mock('../../src/mocks/companions', () => ({ companionCandidates: [] }));
+jest.mock('../../src/mocks/creation', () => ({ diaryTypeOptions: [], generationPhases: [] }));
+jest.mock('../../src/mocks/share-options', () => ({ shareOptions: [] }));
+
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { MemoryStoreService } from '../src/common/memory-store.service';
+import { MemoryStoreService, type DiaryContentSnapshotRecord } from '../src/common/memory-store.service';
+import { PrismaService } from '../src/common/prisma.service';
+import { ApiClient } from '../../src/services/api-client';
+import { HttpCoreDiaryRepository } from '../../src/repositories/http-core-diary-repository';
+import { createAppStore, createDefaultAppStoreDeps } from '../../src/store/create-app-store';
+import type { DiaryItem, DiaryPhoto } from '../../src/types/diary';
 
 describe('Backend foundation (e2e)', () => {
   let app: INestApplication;
   let store: MemoryStoreService;
+  let prisma: PrismaService;
   const deviceA = 'device-a';
   const deviceB = 'device-b';
   const originalEnv = { ...process.env };
   const originalFetch = global.fetch;
+
+  function createDiaryContentSnapshot(title: string, photoIds: string[]): DiaryContentSnapshotRecord {
+    return {
+      type: 'travel',
+      subtitle: title,
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: photoIds[0] ?? '',
+      posterPhotoIds: photoIds.slice(0, 2),
+      blocks: [{
+        id: 'block-1',
+        type: 'text',
+        title,
+        content: title,
+        photoIds: photoIds.slice(0, 2),
+      }],
+      people: [],
+    };
+  }
 
   async function waitForGenerationCompletion(server: ReturnType<INestApplication['getHttpServer']>, jobId: string, deviceId: string) {
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -36,6 +81,7 @@ describe('Backend foundation (e2e)', () => {
 
     app = moduleRef.createNestApplication();
     store = moduleRef.get(MemoryStoreService);
+    prisma = moduleRef.get(PrismaService);
     app.setGlobalPrefix('api');
     await app.init();
   });
@@ -61,7 +107,55 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
+  it('rejects missing device identity instead of reading the shared anonymous namespace', async () => {
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', 'device-anonymous')
+      .send({
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const missingIdentityDrafts = await request(app.getHttpServer())
+      .get('/api/drafts')
+      .expect(400);
+
+    expect(missingIdentityDrafts.body.error.code).toBe('device_identity_required');
+
+    const missingIdentityResponse = await request(app.getHttpServer())
+      .get('/api/identity/me')
+      .expect(400);
+
+    expect(missingIdentityResponse.body.error.code).toBe('device_identity_required');
+
+    const blankIdentityDrafts = await request(app.getHttpServer())
+      .get('/api/drafts')
+      .set('x-device-id', '   ')
+      .expect(400);
+
+    expect(blankIdentityDrafts.body.error.code).toBe('device_identity_required');
+  });
+
   it('supports draft create/save/memories flow', async () => {
+    const contentSnapshot = {
+      type: 'travel',
+      subtitle: '海边散步',
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: 'photo-1',
+      posterPhotoIds: ['photo-1', 'photo-2'],
+      blocks: [
+        { id: 'block-1', type: 'text', title: '沿海慢行', content: '沿着厦门海边散步。', photoIds: ['photo-1'] },
+        { id: 'quote-1', type: 'quote', content: '把时间留给海风。', relatedBlockId: 'block-1' },
+        { id: 'photo-block-1', type: 'photo', photoId: 'photo-1', caption: '海边的午后', relatedBlockId: 'block-1' },
+      ],
+      people: [],
+    };
     const draft = await request(app.getHttpServer())
       .post('/api/drafts')
       .set('x-device-id', deviceA)
@@ -86,6 +180,7 @@ describe('Backend foundation (e2e)', () => {
         date: '2026-10-13',
         privacy: 'private',
         photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot,
         version: 1,
       })
       .expect(201);
@@ -98,6 +193,7 @@ describe('Backend foundation (e2e)', () => {
         expect(body.data.id).toBe(saved.body.data.diaryId);
         expect(body.data.privacy).toBe('private');
         expect(body.data.publicBlockIds).toBeUndefined();
+        expect(body.data.contentSnapshot).toEqual(contentSnapshot);
       });
 
     await request(app.getHttpServer())
@@ -108,6 +204,7 @@ describe('Backend foundation (e2e)', () => {
         expect(body.data.total).toBe(1);
         expect(body.data.items[0].id).toBe(saved.body.data.id);
         expect(body.data.items[0].location).toBe('厦门海边');
+        expect(body.data.items[0].contentSnapshot.blocks).toEqual(contentSnapshot.blocks);
       });
 
     await request(app.getHttpServer())
@@ -117,6 +214,178 @@ describe('Backend foundation (e2e)', () => {
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
         expect(body.data.items[0].title).toBe('测试日记');
+      });
+  });
+
+  it('rejects saves that omit a valid content snapshot', async () => {
+    const draft = await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: draft.body.data.id,
+        idempotencyKey: 'missing-content-snapshot',
+        title: '缺少正文的日记',
+        summary: '不应被假保存',
+        location: '厦门',
+        date: '2026-10-15',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        version: 1,
+      })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('invalid_input');
+      });
+
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: draft.body.data.id,
+        idempotencyKey: 'invalid-content-photo-reference',
+        title: '越界照片正文',
+        summary: '引用不属于日记的照片',
+        location: '厦门',
+        date: '2026-10-15',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: {
+          ...createDiaryContentSnapshot('越界照片正文', ['photo-1', 'photo-2', 'photo-3']),
+          blocks: [{
+            id: 'block-1',
+            type: 'text',
+            content: '不应引用未选择的照片。',
+            photoIds: ['photo-outside-selection'],
+          }],
+        },
+        version: 1,
+      })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('invalid_input');
+      });
+
+    await request(app.getHttpServer())
+      .get('/api/memories')
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.total).toBe(0);
+      });
+  });
+
+  it('rolls back a diary when its save command write fails and retries atomically', async () => {
+    const idempotencyKey = 'transaction-failure-retry';
+    const draft = await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+    const saveInput = {
+      draftId: draft.body.data.id,
+      idempotencyKey,
+      title: '事务回滚后重试',
+      summary: '保留可重试草稿',
+      location: '厦门',
+      date: '2026-10-15',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: createDiaryContentSnapshot('事务回滚后重试', ['photo-1', 'photo-2', 'photo-3']),
+      version: 1,
+    };
+
+    const mutablePrisma = prisma as unknown as {
+      $transaction: (...args: any[]) => Promise<unknown>;
+    };
+    const originalTransaction = mutablePrisma.$transaction;
+    let failureInjected = false;
+    mutablePrisma.$transaction = (callback: (transaction: any) => Promise<unknown>, options?: unknown) => originalTransaction.call(
+      prisma,
+      (transaction: any) => callback(new Proxy(transaction, {
+        get(target, property, receiver) {
+          const delegate = Reflect.get(target, property, receiver);
+          if (property !== 'saveCommand' || !delegate) return delegate;
+          return new Proxy(delegate, {
+            get(delegateTarget, method, delegateReceiver) {
+              if (method === 'create') {
+                return async () => {
+                  failureInjected = true;
+                  throw new Error('injected save command write failure');
+                };
+              }
+              const value = Reflect.get(delegateTarget, method, delegateReceiver);
+              return typeof value === 'function' ? value.bind(delegateTarget) : value;
+            },
+          });
+        },
+      })),
+      options,
+    );
+    try {
+      await request(app.getHttpServer())
+        .post('/api/diaries/save')
+        .set('x-device-id', deviceA)
+        .send(saveInput)
+        .expect(500);
+      expect(failureInjected).toBe(true);
+
+      await request(app.getHttpServer())
+        .get('/api/memories')
+        .set('x-device-id', deviceA)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.data.total).toBe(0);
+        });
+
+      await request(app.getHttpServer())
+        .get(`/api/diaries/save-results/${idempotencyKey}`)
+        .set('x-device-id', deviceA)
+        .expect(404);
+
+      await request(app.getHttpServer())
+        .get(`/api/drafts/${draft.body.data.id}`)
+        .set('x-device-id', deviceA)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.data.id).toBe(draft.body.data.id);
+          expect(body.data.selectedPhotoIds).toEqual(saveInput.photoIds);
+        });
+    } finally {
+      mutablePrisma.$transaction = originalTransaction;
+    }
+
+    const retry = await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send(saveInput)
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get('/api/memories')
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.total).toBe(1);
+        expect(body.data.items[0].id).toBe(retry.body.data.diaryId);
+        expect(body.data.items[0].contentSnapshot.blocks).toEqual(saveInput.contentSnapshot.blocks);
       });
   });
 
@@ -145,6 +414,7 @@ describe('Backend foundation (e2e)', () => {
         date: '2026-10-12',
         privacy: 'private',
         photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot('幂等测试日记', ['photo-1', 'photo-2', 'photo-3']),
         version: 1,
       })
       .expect(201);
@@ -170,11 +440,89 @@ describe('Backend foundation (e2e)', () => {
         date: '2026-10-12',
         privacy: 'private',
         photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot('幂等测试日记', ['photo-1', 'photo-2', 'photo-3']),
         version: 1,
       })
       .expect(201)
       .expect(({ body }) => {
         expect(body.data.diaryId).toBe(first.body.data.diaryId);
+      });
+  });
+
+  it('returns the original save result after the diary has a later edit', async () => {
+    const draft = await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+    const originalSave = {
+      draftId: draft.body.data.id,
+      idempotencyKey: `${draft.body.data.id}-save-1`,
+      title: '首次保存',
+      summary: '初始内容',
+      location: '泉州',
+      date: '2026-10-12',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: createDiaryContentSnapshot('首次保存', ['photo-1', 'photo-2', 'photo-3']),
+      version: 1,
+    };
+    const first = await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send(originalSave)
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({
+        id: first.body.data.diaryId,
+        draftId: 'later-edit-draft',
+        sourceDiaryId: first.body.data.diaryId,
+        sourceDiaryVersion: 1,
+        idempotencyKey: 'later-edit-save',
+        title: '后续编辑',
+        summary: '更新后的内容',
+        location: '厦门',
+        date: '2026-10-13',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot('后续编辑', ['photo-1', 'photo-2', 'photo-3']),
+        version: 1,
+      })
+      .expect(201);
+
+    const replay = await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send(originalSave)
+      .expect(201);
+    const result = await request(app.getHttpServer())
+      .get(`/api/diaries/save-results/${originalSave.idempotencyKey}`)
+      .set('x-device-id', deviceA)
+      .expect(200);
+
+    expect(replay.body.data).toEqual({
+      diaryId: first.body.data.diaryId,
+      draftId: originalSave.draftId,
+      savedVersion: 1,
+      id: first.body.data.diaryId,
+    });
+    expect(replay.body.data).toEqual(result.body.data);
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${first.body.data.diaryId}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.title).toBe('后续编辑');
+        expect(body.data.version).toBe(2);
       });
   });
 
@@ -205,11 +553,106 @@ describe('Backend foundation (e2e)', () => {
         date: '2026-10-13',
         privacy: 'private',
         photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot('冲突版本', ['photo-1', 'photo-2', 'photo-3']),
         version: 2,
       })
       .expect(409)
       .expect(({ body }) => {
         expect(body.error.code).toBe('version_conflict');
+      });
+  });
+
+  it('allows only one concurrent edit from the same source diary version', async () => {
+    const original = await store.saveDiary({
+      draftId: 'draft-concurrent-source',
+      title: '并发编辑前',
+      summary: '原始摘要',
+      location: '杭州',
+      date: '2026.10.01',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      version: 1,
+    }, deviceA);
+
+    const save = (suffix: string) => request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({
+        id: original.id,
+        draftId: `draft-concurrent-${suffix}`,
+        sourceDiaryId: original.id,
+        sourceDiaryVersion: original.version,
+        idempotencyKey: `concurrent-save-${suffix}`,
+        title: `并发版本 ${suffix}`,
+        summary: `摘要 ${suffix}`,
+        location: '杭州',
+        date: '2026-10-02',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot(`并发版本 ${suffix}`, ['photo-1', 'photo-2', 'photo-3']),
+        version: 1,
+      });
+
+    const responses = await Promise.all([save('a'), save('b')]);
+    expect(responses.map(response => response.status).sort()).toEqual([201, 409]);
+    expect(responses.find(response => response.status === 409)?.body.error.code).toBe('version_conflict');
+
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${original.id}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.version).toBe(2);
+        expect(['并发版本 a', '并发版本 b']).toContain(body.data.title);
+      });
+  });
+
+  it('returns the same result for concurrent retries of one edit command', async () => {
+    const original = await store.saveDiary({
+      draftId: 'draft-concurrent-idempotent-source',
+      title: '幂等并发编辑前',
+      summary: '原始摘要',
+      location: '杭州',
+      date: '2026.10.01',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: createDiaryContentSnapshot('幂等并发编辑后', ['photo-1', 'photo-2', 'photo-3']),
+      version: 1,
+    }, deviceA);
+    const body = {
+      id: original.id,
+      draftId: 'draft-concurrent-idempotent',
+      sourceDiaryId: original.id,
+      sourceDiaryVersion: original.version,
+      idempotencyKey: 'concurrent-idempotent-edit',
+      title: '幂等并发编辑后',
+      summary: '同一命令重复提交',
+      location: '杭州',
+      date: '2026-10-02',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot('幂等并发编辑后', ['photo-1', 'photo-2', 'photo-3']),
+      version: 1,
+    };
+    const submit = () => request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send(body);
+
+    const responses = await Promise.all([submit(), submit()]);
+    expect(responses.map(response => response.status)).toEqual([201, 201]);
+    expect(responses[0].body.data.diaryId).toBe(original.id);
+    expect(responses[1].body.data.diaryId).toBe(original.id);
+    expect(responses[0].body.data.savedVersion).toBe(2);
+    expect(responses[1].body.data.savedVersion).toBe(2);
+
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${original.id}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body: responseBody }) => {
+        expect(responseBody.data.version).toBe(2);
+        expect(responseBody.data.title).toBe('幂等并发编辑后');
       });
   });
 
@@ -224,6 +667,19 @@ describe('Backend foundation (e2e)', () => {
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
       version: 1,
     }, deviceA);
+    const contentSnapshot = {
+      type: 'travel',
+      subtitle: '修改后的副标题',
+      helperMessage: '',
+      characterId: 'character-green',
+      companionName: '同行人',
+      coverPhotoId: 'photo-2',
+      posterPhotoIds: ['photo-2', 'photo-3'],
+      blocks: [
+        { id: 'edited-block-1', type: 'text', title: '新段落', content: '修改后的真实正文。', photoIds: ['photo-2'] },
+      ],
+      people: [],
+    };
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
@@ -240,11 +696,22 @@ describe('Backend foundation (e2e)', () => {
         date: '2026-10-14',
         privacy: 'private',
         photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot,
         version: original.version,
       })
       .expect(201)
       .expect(({ body }) => {
         expect(body.data.diaryId).toBe(original.id);
+        expect(body.data.savedVersion).toBe(2);
+      });
+
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${original.id}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.version).toBe(2);
+        expect(body.data.contentSnapshot).toEqual(contentSnapshot);
       });
 
     await request(app.getHttpServer())
@@ -258,6 +725,7 @@ describe('Backend foundation (e2e)', () => {
         expect(body.data.items[0].summary).toBe('编辑后摘要');
         expect(body.data.items[0].location).toBe('苏州平江路');
         expect(body.data.items[0].date).toBe('2026.10.14');
+        expect(body.data.items[0].contentSnapshot).toEqual(contentSnapshot);
       });
 
     await request(app.getHttpServer())
@@ -270,6 +738,250 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
+  it('persists an applied material photo on the existing diary without changing another diary', async () => {
+    const source = await store.saveDiary({
+      draftId: 'draft-material-source',
+      title: '素材追加前',
+      summary: '原有段落',
+      location: '苏州',
+      date: '2026-10-10',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: createDiaryContentSnapshot('原有段落', ['photo-1', 'photo-2', 'photo-3']),
+      version: 1,
+    }, deviceA);
+    const other = await store.saveDiary({
+      draftId: 'draft-material-other',
+      title: '另一篇日记',
+      summary: '保持原样',
+      location: '杭州',
+      date: '2026-10-11',
+      privacy: 'private',
+      photoIds: ['photo-5', 'photo-6', 'photo-7'],
+      contentSnapshot: createDiaryContentSnapshot('保持原样', ['photo-5', 'photo-6', 'photo-7']),
+      version: 1,
+    }, deviceA);
+    const contentSnapshot: DiaryContentSnapshotRecord = {
+      type: 'travel',
+      subtitle: '素材追加后的副标题',
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: 'photo-1',
+      posterPhotoIds: ['photo-1', 'photo-2'],
+      blocks: [{
+        id: 'material-block-1',
+        type: 'text',
+        title: '同一段落',
+        content: '原有正文继续保留。',
+        photoIds: ['photo-1', 'photo-4'],
+      }],
+      people: [],
+    };
+
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({
+        id: source.id,
+        draftId: 'draft-material-edit',
+        sourceDiaryId: source.id,
+        sourceDiaryVersion: source.version,
+        idempotencyKey: 'mat002-material-apply-save',
+        title: '素材追加后',
+        summary: '原有段落',
+        location: '苏州',
+        date: '2026-10-10',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3', 'photo-4'],
+        contentSnapshot,
+        version: source.version,
+      })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.data.diaryId).toBe(source.id);
+        expect(body.data.savedVersion).toBe(2);
+      });
+
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${source.id}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.id).toBe(source.id);
+        expect(body.data.version).toBe(2);
+        expect(body.data.photoIds).toEqual(['photo-1', 'photo-2', 'photo-3', 'photo-4']);
+        expect(body.data.contentSnapshot).toEqual(contentSnapshot);
+      });
+
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${other.id}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.id).toBe(other.id);
+        expect(body.data.version).toBe(1);
+        expect(body.data.photoIds).toEqual(['photo-5', 'photo-6', 'photo-7']);
+        expect(body.data.contentSnapshot).toEqual(other.contentSnapshot);
+      });
+
+    await request(app.getHttpServer())
+      .get('/api/memories')
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.total).toBe(2);
+        expect(body.data.items.filter((item: { id: string }) => item.id === source.id)).toHaveLength(1);
+        expect(body.data.items.find((item: { id: string }) => item.id === source.id).photoIds).toContain('photo-4');
+      });
+  });
+
+  it('applies and saves a material photo through the app store and real HTTP repository', async () => {
+    const sourceSnapshot = createDiaryContentSnapshot('素材追加前', ['photo-1', 'photo-2', 'photo-3']);
+    const source = await store.saveDiary({
+      draftId: 'draft-material-http-source',
+      title: '素材追加前',
+      summary: '原有段落',
+      location: '苏州',
+      date: '2026-10-10',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: sourceSnapshot,
+      version: 1,
+    }, deviceA);
+    const otherSnapshot = createDiaryContentSnapshot('另一篇保持原样', ['photo-5', 'photo-6', 'photo-7']);
+    const other = await store.saveDiary({
+      draftId: 'draft-material-http-other',
+      title: '另一篇日记',
+      summary: '保持原样',
+      location: '杭州',
+      date: '2026-10-11',
+      privacy: 'private',
+      photoIds: ['photo-5', 'photo-6', 'photo-7'],
+      contentSnapshot: otherSnapshot,
+      version: 1,
+    }, deviceA);
+
+    const server = app.getHttpServer() as {
+      listening: boolean;
+      address: () => { port: number } | string | null;
+    };
+    if (!server.listening) await app.listen(0, '127.0.0.1');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('missing test server address');
+
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: `http://127.0.0.1:${address.port}/api`,
+      getHeaders: () => ({ 'x-device-id': deviceA }),
+      timeoutMs: 5000,
+    }));
+    const clientDiary = (
+      record: typeof source,
+      snapshot: DiaryContentSnapshotRecord,
+    ): DiaryItem => ({
+      id: record.id,
+      type: 'travel',
+      status: 'ready',
+      title: record.title,
+      subtitle: snapshot.subtitle,
+      location: record.location,
+      date: record.date,
+      summary: record.summary,
+      helperMessage: snapshot.helperMessage,
+      characterId: snapshot.characterId,
+      companionName: snapshot.companionName,
+      privacy: 'private',
+      photoIds: [...record.photoIds],
+      coverPhotoId: snapshot.coverPhotoId,
+      blocks: snapshot.blocks as DiaryItem['blocks'],
+      exportedImage: false,
+      exportedPdf: false,
+      shareModes: [],
+      exportModes: [],
+      posterPhotoIds: snapshot.posterPhotoIds,
+      people: [],
+      version: record.version,
+    });
+    const materialPhotoId = 'device-photo-mat-002-http';
+    const photos: DiaryPhoto[] = [...new Set([
+      ...source.photoIds,
+      ...other.photoIds,
+      materialPhotoId,
+    ])].map(id => ({
+      id,
+      title: id,
+      location: '苏州',
+      emoji: 'P',
+      color: '#EFE3D5',
+      date: '2026.10.15',
+      source: id === materialPhotoId ? 'device' : 'mock',
+      ...(id === materialPhotoId
+        ? {
+            uri: 'file:///fixture/device-photo-mat-002-http.jpg',
+            localUri: 'file:///fixture/device-photo-mat-002-http.jpg',
+          }
+        : {}),
+    }));
+    const clientStore = createAppStore(createDefaultAppStoreDeps({
+      now: () => 1_800_000_000_000,
+      createId: prefix => `${prefix}-mat002-http`,
+      photos,
+      diaries: [clientDiary(source, sourceSnapshot), clientDiary(other, otherSnapshot)],
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+
+    const draftId = clientStore.getState().beginEdit(source.id);
+    if (!draftId) throw new Error('failed to create client edit draft');
+    const textBlock = clientStore.getState().drafts[draftId].diary.blocks.find(block => block.type === 'text');
+    if (!textBlock || textBlock.type !== 'text') throw new Error('missing client source text block');
+    clientStore.getState().setDraftBlockPhotos(draftId, textBlock.id, [
+      ...(textBlock.photoIds ?? []),
+      materialPhotoId,
+    ]);
+
+    let remoteDraftSelectedPhotoIds: string[] | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await request(app.getHttpServer())
+        .get(`/api/drafts/${draftId}`)
+        .set('x-device-id', deviceA);
+      if (response.status === 200 && response.body.data.selectedPhotoIds.includes(materialPhotoId)) {
+        remoteDraftSelectedPhotoIds = response.body.data.selectedPhotoIds;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    expect(remoteDraftSelectedPhotoIds).toContain(materialPhotoId);
+
+    const saveResult = await clientStore.getState().submitDraft(draftId);
+    expect(saveResult).toEqual({
+      ok: true,
+      diaryId: source.id,
+      destination: 'detail',
+    });
+
+    const persistedSource = await repository.getDiary?.(source.id);
+    expect(persistedSource?.ok).toBe(true);
+    if (!persistedSource?.ok) throw new Error('saved source diary could not be read through repository');
+    expect(persistedSource.data.version).toBe(2);
+    expect(persistedSource.data.photoIds).toContain(materialPhotoId);
+    const persistedTextBlock = persistedSource.data.blocks.find(block => block.id === textBlock.id);
+    expect(persistedTextBlock && 'photoIds' in persistedTextBlock ? persistedTextBlock.photoIds : undefined).toContain(materialPhotoId);
+
+    const persistedOther = await repository.getDiary?.(other.id);
+    expect(persistedOther?.ok).toBe(true);
+    if (!persistedOther?.ok) throw new Error('other diary could not be read through repository');
+    expect(persistedOther.data.version).toBe(1);
+    expect(persistedOther.data.photoIds).toEqual(other.photoIds);
+    const memories = await repository.listMemories({ page: 1, pageSize: 100 });
+    expect(memories.ok).toBe(true);
+    if (!memories.ok) throw new Error('memories could not be read through repository');
+    expect(memories.data.total).toBe(2);
+    expect(memories.data.items.filter(item => item.id === source.id)).toHaveLength(1);
+  });
+
   it('persists diary visibility and selected public blocks through the sharing endpoint', async () => {
     const diary = await store.saveDiary({
       draftId: 'draft-share-1',
@@ -279,6 +991,20 @@ describe('Backend foundation (e2e)', () => {
       date: '2026.10.03',
       privacy: 'private',
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: {
+        type: 'travel',
+        subtitle: '台南慢行',
+        helperMessage: '',
+        characterId: 'character-blue',
+        companionName: '自己',
+        coverPhotoId: 'photo-1',
+        posterPhotoIds: ['photo-1', 'photo-2'],
+        blocks: [
+          { id: 'block-1', type: 'text', title: '台南', content: '准备公开一段内容', photoIds: ['photo-1'] },
+          { id: 'photo-block-1', type: 'photo', photoId: 'photo-1', caption: '台南街景', relatedBlockId: 'block-1' },
+        ],
+        people: [],
+      },
       version: 1,
     }, deviceA);
 
@@ -335,6 +1061,46 @@ describe('Backend foundation (e2e)', () => {
           expect(body.data.publicBlockIds).toBeUndefined();
         });
     }
+
+    const invalidVisibilityCases = [
+      { privacy: 'anonymous' },
+      { privacy: 'public-likes', publicBlockIds: [] },
+      { privacy: 'public-comments', publicBlockIds: ['   '] },
+      { privacy: 'anonymous', publicBlockIds: ['unknown-block'] },
+      { privacy: 'public-likes', publicBlockIds: ['photo-block-1'] },
+      { privacy: 'unknown-visibility', publicBlockIds: ['block-1'] },
+    ];
+    for (const invalidVisibility of invalidVisibilityCases) {
+      await request(app.getHttpServer())
+        .post('/api/sharing/project')
+        .set('x-device-id', deviceA)
+        .send({ diaryId: diary.id, ...invalidVisibility })
+        .expect(400)
+        .expect(({ body }) => {
+          expect(body.error.code).toBe('invalid_input');
+        });
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/sharing/project')
+      .set('x-device-id', deviceB)
+      .send({
+        diaryId: diary.id,
+        privacy: 'private',
+      })
+      .expect(403)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('permission_denied');
+      });
+
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${diary.id}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.privacy).toBe('public-comments');
+        expect(body.data.publicBlockIds).toEqual(['block-1']);
+      });
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${diary.id}`)
@@ -1752,6 +2518,7 @@ describe('Backend foundation (e2e)', () => {
         date: '2026-10-13',
         privacy: 'private',
         photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot('仅设备 A 可见', ['photo-1', 'photo-2', 'photo-3']),
         version: 1,
       })
       .expect(201);
@@ -1779,6 +2546,7 @@ describe('Backend foundation (e2e)', () => {
         date: '2026-10-14',
         privacy: 'private',
         photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: createDiaryContentSnapshot('不应成功', ['photo-1', 'photo-2', 'photo-3']),
         version: 2,
       })
       .expect(403)
@@ -1831,6 +2599,7 @@ describe('Backend foundation (e2e)', () => {
       date: '2026-10-11',
       privacy: 'private',
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: createDiaryContentSnapshot('设备 A 的日记', ['photo-1', 'photo-2', 'photo-3']),
       version: 1,
     };
 
@@ -1843,6 +2612,7 @@ describe('Backend foundation (e2e)', () => {
       date: '2026-10-12',
       privacy: 'private',
       photoIds: ['photo-4', 'photo-5', 'photo-6'],
+      contentSnapshot: createDiaryContentSnapshot('设备 B 的日记', ['photo-4', 'photo-5', 'photo-6']),
       version: 1,
     };
 

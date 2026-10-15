@@ -4,7 +4,7 @@
 
 ## 项目背景
 
-这是 iOS 优先的 Expo Router / React Native / TypeScript 应用，使用 Zustand 管理内存状态。目前日记、照片、发现、成长主要来自 `src/mocks`；生成、聊天、导出、平台分享存在本地模拟。当前仓库未提供生产后端、真实 AI 适配、持久化仓库或完整集成测试环境。
+这是 iOS 优先的 Expo Router / React Native / TypeScript 应用，使用 Zustand 管理状态。当前仓库已包含本地 NestJS 后端、Prisma/MySQL 持久化，以及已接通的设备身份、草稿/生成任务/保存/回忆等部分真实服务链路；前端仍有 mock/deterministic 流程。仓库没有已确认的生产后端部署、真实 AI provider 凭据或完整 iOS 文件/平台集成环境。上述边界是当前执行基线，不把本地服务和替身测试当成生产交付。
 
 产品范围来自[业务规格](../business-spec/README.md)、[通用规则](../business-spec/common-rules.md)和[用户流程](../business-spec/user-journeys.md)。真实交付必须读取真实用户数据、产生可使用结果，并完成相应持久化或外部交付；提示“成功”、固定回复和开发页切换状态不证明交付完成。
 

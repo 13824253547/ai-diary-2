@@ -1,4 +1,6 @@
 import { createShareDeliveryOrchestrator } from '../share-delivery-orchestrator';
+import { createShareExportFileService } from '../share-export-file-service';
+import { createAsyncFaultPlan } from '../../test-utils/fakes/create-async-fault-plan';
 import type { DiaryItem, DiaryPhoto } from '../../types/diary';
 
 function createPhoto(overrides: Partial<DiaryPhoto> = {}): DiaryPhoto {
@@ -135,6 +137,49 @@ describe('share delivery orchestrator', () => {
     });
     expect(diary.exportModes).toEqual([]);
     expect(diary.exportedPdf).toBe(false);
+  });
+
+  test('does not confirm local export history when writing the real file fails', async () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-delivery-write-failure-'));
+    const writeFault = createAsyncFaultPlan<void>([
+      { type: 'reject', reason: new Error('simulated disk full') },
+    ]);
+    const exportFileService = createShareExportFileService({
+      getOutputDirectory: () => `file://${tempRoot}/`,
+      writeFile: () => writeFault.next(),
+    });
+    const onConfirmed = jest.fn();
+    const diary = createDiary({ privacy: 'private' });
+    const orchestrator = createShareDeliveryOrchestrator({
+      createOperationId: () => 'share-op-write-failure',
+      prepareAssets: async () => ({ ok: true, assets: [] }),
+      exportToFile: input => exportFileService.exportFile(input),
+      onConfirmed,
+    });
+
+    try {
+      await expect(orchestrator.execute({
+        diary,
+        mode: 'pdf',
+        getPhotoById,
+      })).resolves.toEqual({
+        ok: false,
+        operationId: 'share-op-write-failure',
+        mode: 'pdf',
+        reason: 'delivery_failed',
+        message: '导出文件生成失败：simulated disk full',
+      });
+      expect(onConfirmed).not.toHaveBeenCalled();
+      expect(diary.exportModes).toEqual([]);
+      expect(diary.exportedPdf).toBe(false);
+      expect(writeFault.callCount).toBe(1);
+      expect(writeFault.remainingCount).toBe(0);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('does not record cancelled deliveries as successful share history', async () => {

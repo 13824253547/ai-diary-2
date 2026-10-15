@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View, type ImageSourcePropType } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -12,8 +12,9 @@ import { useAppStore } from '../../src/store/use-app-store';
 import { mockPhotos } from '../../src/mocks/photos';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
+import type { DiaryPhoto } from '../../src/types/diary';
 
-type Preview = { title: string; image: number; photoId?: string; artKey?: keyof typeof art };
+type Preview = { title: string; image?: ImageSourcePropType; photoId?: string; artKey?: keyof typeof art };
 const stickerItems = [
   { title: '开心的小橘', image: art.stickerHappy, artKey: 'stickerHappy' },
   { title: '一起记录', image: art.mascotCamera, artKey: 'mascotCamera' },
@@ -23,9 +24,15 @@ const stickerItems = [
 ] as const;
 const inspirationCards = ['今天阳光正好，发生了什么小确幸？', '如果用一个颜色形容今天，你会选什么？', '最近有没有什么让你心动的瞬间？'];
 
+function getPhotoImageSource(photo: DiaryPhoto): ImageSourcePropType | undefined {
+  if (photo.localUri || photo.uri) return { uri: photo.localUri ?? photo.uri };
+  return photo.image;
+}
+
 export default function LibraryScreen() {
   const router = useRouter();
   const material = useAppStore(s => s.materialPhotoIds);
+  const photoCatalog = useAppStore(s => s.photos);
   const diaries = useAppStore(s => s.diaries);
   const add = useAppStore(s => s.addMaterialPhoto);
   const [search, setSearch] = useState('');
@@ -35,14 +42,21 @@ export default function LibraryScreen() {
   const [prompt, setPrompt] = useState('');
   const [answer, setAnswer] = useState('');
   const [generating, setGenerating] = useState(false);
-  const photos = material.map(id => mockPhotos.find(p => p.id === id)).filter(p => p !== undefined).filter(p => `${p.title}${p.location}`.includes(search));
+  const photoById = new Map(photoCatalog.map(photo => [photo.id, photo]));
+  const photos = material
+    .map(id => photoById.get(id))
+    .filter((photo): photo is DiaryPhoto => photo !== undefined)
+    .filter(photo => `${photo.title}${photo.location}`.includes(search));
   const close = () => { setSheet(null); setPreview(null); };
   const applyPhoto = (diaryId: string) => {
     if (!preview?.photoId) return;
     const store = useAppStore.getState();
+    if (!store.photos.some(photo => photo.id === preview.photoId)) return;
+    const diary = store.diaries.find(item => item.id === diaryId);
+    const block = diary?.blocks.find(item => item.type === 'text');
+    if (!block || block.type !== 'text') return;
     const id = store.beginEdit(diaryId);
-    const block = diaries.find(d => d.id === diaryId)?.blocks.find(b => b.type === 'text');
-    if (!id || !block || block.type !== 'text') return;
+    if (!id) return;
     store.setDraftBlockPhotos(id, block.id, [...(block.photoIds ?? []), preview.photoId]);
     close();
     router.push({ pathname: '/diary/[id]/edit', params: { id: diaryId, draftId: id } });
@@ -50,7 +64,7 @@ export default function LibraryScreen() {
   return <Screen header={<TopBar title="素材库 · 灵感" centered onBackPress={() => router.back()} trailing={<IconAction name="search-outline" label="搜索素材" onPress={() => setSearching(!searching)} />} />}>
     {searching ? <SearchField value={search} onChangeText={setSearch} placeholder="搜索照片与地点" /> : null}
     <SectionTitle title="我的照片素材" action="上传" onPress={() => setSheet('upload')} />
-    <View style={s.grid}>{photos.map(p => <Pressable accessibilityRole="button" accessibilityLabel={`预览${p.title}`} key={p.id} onPress={() => setPreview({ title: p.title, image: p.image!, photoId: p.id })} style={s.photo}><Image source={p.image} style={s.image} />{!diaries.some(d => d.photoIds.includes(p.id)) ? <Text style={s.badge}>未生成日记</Text> : null}</Pressable>)}<Pressable accessibilityLabel="添加照片" onPress={() => setSheet('upload')} style={s.add}><Ionicons name="add-outline" size={27} color={colors.textSecondary} /></Pressable></View>
+    <View style={s.grid}>{photos.map(p => <Pressable accessibilityRole="button" accessibilityLabel={`预览${p.title}`} key={p.id} onPress={() => setPreview({ title: p.title, image: getPhotoImageSource(p), photoId: p.id })} style={s.photo}><Image testID={`material-photo-${p.id}`} source={getPhotoImageSource(p)} style={s.image} />{!diaries.some(d => d.photoIds.includes(p.id)) ? <Text style={s.badge}>未生成日记</Text> : null}</Pressable>)}<Pressable accessibilityLabel="添加照片" onPress={() => setSheet('upload')} style={s.add}><Ionicons name="add-outline" size={27} color={colors.textSecondary} /></Pressable></View>
     {photos.length === 0 && search ? <EmptyResult title="没有找到这张照片" /> : null}
     <View style={s.divider} />
     <SectionTitle title="贴纸表情" />
@@ -66,7 +80,7 @@ export default function LibraryScreen() {
           {sheet === 'diary' ? diaries.map(d => <Pressable key={d.id} style={s.diaryOption} onPress={() => applyPhoto(d.id)}><Text style={u.body}>{d.title}</Text><Ionicons name="chevron-forward" size={18} color={colors.textMuted} /></Pressable>) : null}
           {sheet === 'ai' ? <><Text style={u.body}>描述你想留下的画面</Text><TextInput accessibilityLabel="画面描述" value={prompt} onChangeText={setPrompt} placeholder="比如：日落时分，老街亮起温柔的灯" multiline style={s.textInput} /><Button disabled={!prompt.trim() || generating} label={generating ? '正在描绘…' : '生成配图'} onPress={() => { setGenerating(true); add('photo-9'); setGenerating(false); setSheet(null); setPreview({ title: '给回忆配一张图', image: art.night, photoId: 'photo-9' }); Alert.alert('配图已准备好', '这是本地示例配图，可用于日记。'); }} /></> : null}
           {sheet === 'inspiration' ? <><Text style={u.body}>{prompt}</Text><TextInput accessibilityLabel="记录灵感" value={answer} onChangeText={setAnswer} multiline placeholder="慢慢写，把心情留在这里…" style={s.textInput} /><Button disabled={!answer.trim()} label="和小橘聊聊" onPress={() => { useAppStore.getState().sendChat(`${prompt}\n${answer}`); close(); router.push('/(tabs)/pet'); }} /></> : null}
-          {preview && !sheet ? <><Image source={preview.image} style={s.preview} resizeMode="contain" />{preview.photoId ? <Button label="用于日记" onPress={() => setSheet('diary')} /> : null}<Button label="用于明信片" variant={preview.photoId ? 'secondary' : 'primary'} onPress={() => { const params = preview.photoId ? { photoId: preview.photoId } : { decoration: preview.artKey! }; close(); router.push({ pathname: '/postcard', params }); }} /></> : null}
+          {preview && !sheet ? <><Image testID="material-photo-preview" source={preview.image} style={s.preview} resizeMode="contain" />{preview.photoId ? <Button label="用于日记" onPress={() => setSheet('diary')} /> : null}<Button label="用于明信片" variant={preview.photoId ? 'secondary' : 'primary'} onPress={() => { const params = preview.photoId ? { photoId: preview.photoId } : { decoration: preview.artKey! }; close(); router.push({ pathname: '/postcard', params }); }} /></> : null}
     </BottomSheet>
   </Screen>;
 }

@@ -1,4 +1,5 @@
-import type { DraftContract, GenerationJobContract, MemoriesQuery, MemoriesQueryResult, RemoteResult, RewriteBlockRequestContract, RewriteBlockResultContract, SaveDraftResult } from '../contracts/core-diary-contract';
+import type { DraftContract, GenerationJobContract, MemoriesQuery, MemoriesQueryResult, RemoteResult, RewriteBlockRequestContract, RewriteBlockResultContract, SaveDiaryRequestContract, SaveDraftResult } from '../contracts/core-diary-contract';
+import type { ApiRequestOptions } from '../services/api-client';
 import type { DiaryItem } from '../types/diary';
 
 export type IdentityContract = {
@@ -7,41 +8,27 @@ export type IdentityContract = {
 };
 
 export interface CoreDiaryRepository {
-  getIdentity(): Promise<IdentityContract>;
-  createDraft(input: DraftContract): Promise<RemoteResult<DraftContract>>;
+  getIdentity(options?: ApiRequestOptions): Promise<IdentityContract>;
+  createDraft(input: DraftContract, options?: ApiRequestOptions): Promise<RemoteResult<DraftContract>>;
   createGenerationJob(input: {
     draftId: string;
     draftVersion: number;
     idempotencyKey: string;
-  }): Promise<RemoteResult<GenerationJobContract>>;
-  rewriteBlock?(input: RewriteBlockRequestContract): Promise<RemoteResult<RewriteBlockResultContract>>;
-  getGenerationJob(jobId: string): Promise<RemoteResult<GenerationJobContract>>;
-  cancelGenerationJob?(jobId: string): Promise<RemoteResult<GenerationJobContract>>;
-  saveDiary(input: {
-    id?: string;
-    draftId: string;
-    sourceDiaryId?: string;
-    sourceDiaryVersion?: number;
-    idempotencyKey: string;
-    title: string;
-    summary: string;
-    location: string;
-    date: string;
-    privacy: string;
-    photoIds: string[];
-    publicBlockIds?: string[];
-    version: number;
-  }): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
+  }, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
+  rewriteBlock?(input: RewriteBlockRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<RewriteBlockResultContract>>;
+  getGenerationJob(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
+  cancelGenerationJob?(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
+  saveDiary(input: SaveDiaryRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
   updateDiaryVisibility?(input: {
     diaryId: string;
     privacy: string;
     publicBlockIds?: string[];
-  }): Promise<RemoteResult<{
+  }, options?: ApiRequestOptions): Promise<RemoteResult<{
     diaryId: string;
     privacy: string;
     publicBlockIds?: string[];
   }>>;
-  getSaveResult(idempotencyKey: string): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
-  getDiary?(diaryId: string): Promise<RemoteResult<DiaryItem>>;
-  listMemories(query: MemoriesQuery): Promise<RemoteResult<MemoriesQueryResult>>;
+  getSaveResult(idempotencyKey: string, options?: ApiRequestOptions): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
+  getDiary?(diaryId: string, options?: ApiRequestOptions): Promise<RemoteResult<DiaryItem>>;
+  listMemories(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>>;
 }
