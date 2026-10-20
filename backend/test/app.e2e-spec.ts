@@ -1,32 +1,10 @@
-jest.mock('../../src/services/photo-permission', () => ({
-  getPhotoPermissionStatus: jest.fn(),
-}));
-
-jest.mock('../../src/services/draft-snapshot-storage', () => ({
-  createLocalDraftSnapshotStore: jest.fn(),
-}));
-
-jest.mock('../../src/store/adapters/backend-core-diary-adapter', () => ({
-  createBackendCoreDiaryRepository: jest.fn(),
-}));
-
-jest.mock('../../src/mocks/photos', () => ({ mockPhotos: [] }));
-jest.mock('../../src/mocks/diaries', () => ({ mockDiaries: [], historyGroups: [] }));
-jest.mock('../../src/mocks/characters', () => ({ mockCharacters: [] }));
-jest.mock('../../src/mocks/companions', () => ({ companionCandidates: [] }));
-jest.mock('../../src/mocks/creation', () => ({ diaryTypeOptions: [], generationPhases: [] }));
-jest.mock('../../src/mocks/share-options', () => ({ shareOptions: [] }));
-
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { configureApiBodyParser } from '../src/common/api-body-parser';
 import { MemoryStoreService, type DiaryContentSnapshotRecord } from '../src/common/memory-store.service';
 import { PrismaService } from '../src/common/prisma.service';
-import { ApiClient } from '../../src/services/api-client';
-import { HttpCoreDiaryRepository } from '../../src/repositories/http-core-diary-repository';
-import { createAppStore, createDefaultAppStoreDeps } from '../../src/store/create-app-store';
-import type { DiaryItem, DiaryPhoto } from '../../src/types/diary';
 
 describe('Backend foundation (e2e)', () => {
   let app: INestApplication;
@@ -79,7 +57,8 @@ describe('Backend foundation (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ bodyParser: false });
+    configureApiBodyParser(app);
     store = moduleRef.get(MemoryStoreService);
     prisma = moduleRef.get(PrismaService);
     app.setGlobalPrefix('api');
@@ -101,10 +80,18 @@ describe('Backend foundation (e2e)', () => {
   it('GET /api/health', async () => {
     await request(app.getHttpServer())
       .get('/api/health')
+      .set('x-device-id', 'device-health')
       .expect(200)
       .expect(({ body }) => {
         expect(body.ok).toBe(true);
       });
+  });
+
+  it('requires device identity for health requests', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(400);
+    expect(response.body.error.code).toBe('device_identity_required');
   });
 
   it('rejects missing device identity instead of reading the shared anonymous namespace', async () => {
@@ -208,12 +195,50 @@ describe('Backend foundation (e2e)', () => {
       });
 
     await request(app.getHttpServer())
-      .get('/api/memories?month=2026.10&day=2026.10.13&keyword=厦门')
+      .get('/api/memories?month=2026-10&day=2026-10-13&keyword=厦门')
       .set('x-device-id', deviceA)
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
         expect(body.data.items[0].title).toBe('测试日记');
+      });
+  });
+
+  it('marks a scalar-corrupted database snapshot without hiding the diary metadata', async () => {
+    const saved = await store.saveDiary({
+      draftId: 'draft-corrupt-content-snapshot',
+      title: '正文快照损坏',
+      summary: '数据库中的正文快照已损坏。',
+      location: '厦门',
+      date: '2026-10-13',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      contentSnapshot: createDiaryContentSnapshot('有效初始正文', ['photo-1', 'photo-2', 'photo-3']),
+      version: 1,
+    }, deviceA);
+    await prisma.diary.update({
+      where: { id: saved.id },
+      data: { contentSnapshot: 'corrupt-snapshot-scalar' },
+    });
+
+    await request(app.getHttpServer())
+      .get(`/api/diaries/${saved.id}`)
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.id).toBe(saved.id);
+        expect(body.data.contentSnapshot).toBeUndefined();
+        expect(body.data.contentSnapshotStatus).toBe('invalid');
+      });
+
+    await request(app.getHttpServer())
+      .get('/api/memories')
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.total).toBe(1);
+        expect(body.data.items[0].id).toBe(saved.id);
+        expect(body.data.items[0].contentSnapshotStatus).toBe('invalid');
       });
   });
 
@@ -269,6 +294,32 @@ describe('Backend foundation (e2e)', () => {
             content: '不应引用未选择的照片。',
             photoIds: ['photo-outside-selection'],
           }],
+        },
+        version: 1,
+      })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('invalid_input');
+      });
+
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: draft.body.data.id,
+        idempotencyKey: 'duplicate-person-ids',
+        title: '人物标识重复',
+        summary: '两个候选不能共享一个标识。',
+        location: '厦门',
+        date: '2026-10-15',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: {
+          ...createDiaryContentSnapshot('人物标识重复', ['photo-1', 'photo-2', 'photo-3']),
+          people: [
+            { id: 'person-duplicate', name: '同行者甲', photoIds: ['photo-1'], avatarPhotoId: 'photo-1' },
+            { id: 'person-duplicate', name: '同行者乙', photoIds: ['photo-2'], avatarPhotoId: 'photo-2' },
+          ],
         },
         version: 1,
       })
@@ -446,6 +497,77 @@ describe('Backend foundation (e2e)', () => {
       .expect(201)
       .expect(({ body }) => {
         expect(body.data.diaryId).toBe(first.body.data.diaryId);
+      });
+  });
+
+  it('rejects a save idempotency key reused for a different draft or source revision', async () => {
+    const photos = ['photo-1', 'photo-2', 'photo-3'];
+    const newSave = {
+      draftId: 'draft-idempotency-new-a',
+      idempotencyKey: 'save-idempotency-shared-key',
+      title: '首次保存',
+      summary: '初始摘要',
+      location: '泉州',
+      date: '2026-10-12',
+      privacy: 'private',
+      photoIds: photos,
+      contentSnapshot: createDiaryContentSnapshot('首次保存', photos),
+      version: 1,
+    };
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send(newSave)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({ ...newSave, draftId: 'draft-idempotency-new-b' })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('version_conflict');
+        expect(body.error.retryable).toBe(false);
+      });
+
+    const source = await store.saveDiary({
+      draftId: 'draft-idempotency-source',
+      title: '待编辑作品',
+      summary: '原始摘要',
+      location: '杭州',
+      date: '2026-10-10',
+      privacy: 'private',
+      photoIds: photos,
+      contentSnapshot: createDiaryContentSnapshot('待编辑作品', photos),
+      version: 1,
+    }, deviceA);
+    const editSave = {
+      id: source.id,
+      draftId: 'draft-idempotency-edit',
+      sourceDiaryId: source.id,
+      sourceDiaryVersion: 1,
+      idempotencyKey: 'save-idempotency-edit-key',
+      title: '编辑后作品',
+      summary: '更新摘要',
+      location: '杭州',
+      date: '2026-10-11',
+      privacy: 'private',
+      photoIds: photos,
+      contentSnapshot: createDiaryContentSnapshot('编辑后作品', photos),
+      version: 1,
+    };
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send(editSave)
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({ ...editSave, sourceDiaryVersion: 2 })
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('version_conflict');
+        expect(body.error.retryable).toBe(false);
       });
   });
 
@@ -836,152 +958,6 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
-  it('applies and saves a material photo through the app store and real HTTP repository', async () => {
-    const sourceSnapshot = createDiaryContentSnapshot('素材追加前', ['photo-1', 'photo-2', 'photo-3']);
-    const source = await store.saveDiary({
-      draftId: 'draft-material-http-source',
-      title: '素材追加前',
-      summary: '原有段落',
-      location: '苏州',
-      date: '2026-10-10',
-      privacy: 'private',
-      photoIds: ['photo-1', 'photo-2', 'photo-3'],
-      contentSnapshot: sourceSnapshot,
-      version: 1,
-    }, deviceA);
-    const otherSnapshot = createDiaryContentSnapshot('另一篇保持原样', ['photo-5', 'photo-6', 'photo-7']);
-    const other = await store.saveDiary({
-      draftId: 'draft-material-http-other',
-      title: '另一篇日记',
-      summary: '保持原样',
-      location: '杭州',
-      date: '2026-10-11',
-      privacy: 'private',
-      photoIds: ['photo-5', 'photo-6', 'photo-7'],
-      contentSnapshot: otherSnapshot,
-      version: 1,
-    }, deviceA);
-
-    const server = app.getHttpServer() as {
-      listening: boolean;
-      address: () => { port: number } | string | null;
-    };
-    if (!server.listening) await app.listen(0, '127.0.0.1');
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('missing test server address');
-
-    const repository = new HttpCoreDiaryRepository(new ApiClient({
-      baseUrl: `http://127.0.0.1:${address.port}/api`,
-      getHeaders: () => ({ 'x-device-id': deviceA }),
-      timeoutMs: 5000,
-    }));
-    const clientDiary = (
-      record: typeof source,
-      snapshot: DiaryContentSnapshotRecord,
-    ): DiaryItem => ({
-      id: record.id,
-      type: 'travel',
-      status: 'ready',
-      title: record.title,
-      subtitle: snapshot.subtitle,
-      location: record.location,
-      date: record.date,
-      summary: record.summary,
-      helperMessage: snapshot.helperMessage,
-      characterId: snapshot.characterId,
-      companionName: snapshot.companionName,
-      privacy: 'private',
-      photoIds: [...record.photoIds],
-      coverPhotoId: snapshot.coverPhotoId,
-      blocks: snapshot.blocks as DiaryItem['blocks'],
-      exportedImage: false,
-      exportedPdf: false,
-      shareModes: [],
-      exportModes: [],
-      posterPhotoIds: snapshot.posterPhotoIds,
-      people: [],
-      version: record.version,
-    });
-    const materialPhotoId = 'device-photo-mat-002-http';
-    const photos: DiaryPhoto[] = [...new Set([
-      ...source.photoIds,
-      ...other.photoIds,
-      materialPhotoId,
-    ])].map(id => ({
-      id,
-      title: id,
-      location: '苏州',
-      emoji: 'P',
-      color: '#EFE3D5',
-      date: '2026.10.15',
-      source: id === materialPhotoId ? 'device' : 'mock',
-      ...(id === materialPhotoId
-        ? {
-            uri: 'file:///fixture/device-photo-mat-002-http.jpg',
-            localUri: 'file:///fixture/device-photo-mat-002-http.jpg',
-          }
-        : {}),
-    }));
-    const clientStore = createAppStore(createDefaultAppStoreDeps({
-      now: () => 1_800_000_000_000,
-      createId: prefix => `${prefix}-mat002-http`,
-      photos,
-      diaries: [clientDiary(source, sourceSnapshot), clientDiary(other, otherSnapshot)],
-      adapters: {
-        diaryRepository: repository,
-        memoriesRepository: repository,
-      },
-    }));
-
-    const draftId = clientStore.getState().beginEdit(source.id);
-    if (!draftId) throw new Error('failed to create client edit draft');
-    const textBlock = clientStore.getState().drafts[draftId].diary.blocks.find(block => block.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') throw new Error('missing client source text block');
-    clientStore.getState().setDraftBlockPhotos(draftId, textBlock.id, [
-      ...(textBlock.photoIds ?? []),
-      materialPhotoId,
-    ]);
-
-    let remoteDraftSelectedPhotoIds: string[] | undefined;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const response = await request(app.getHttpServer())
-        .get(`/api/drafts/${draftId}`)
-        .set('x-device-id', deviceA);
-      if (response.status === 200 && response.body.data.selectedPhotoIds.includes(materialPhotoId)) {
-        remoteDraftSelectedPhotoIds = response.body.data.selectedPhotoIds;
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, 10));
-    }
-    expect(remoteDraftSelectedPhotoIds).toContain(materialPhotoId);
-
-    const saveResult = await clientStore.getState().submitDraft(draftId);
-    expect(saveResult).toEqual({
-      ok: true,
-      diaryId: source.id,
-      destination: 'detail',
-    });
-
-    const persistedSource = await repository.getDiary?.(source.id);
-    expect(persistedSource?.ok).toBe(true);
-    if (!persistedSource?.ok) throw new Error('saved source diary could not be read through repository');
-    expect(persistedSource.data.version).toBe(2);
-    expect(persistedSource.data.photoIds).toContain(materialPhotoId);
-    const persistedTextBlock = persistedSource.data.blocks.find(block => block.id === textBlock.id);
-    expect(persistedTextBlock && 'photoIds' in persistedTextBlock ? persistedTextBlock.photoIds : undefined).toContain(materialPhotoId);
-
-    const persistedOther = await repository.getDiary?.(other.id);
-    expect(persistedOther?.ok).toBe(true);
-    if (!persistedOther?.ok) throw new Error('other diary could not be read through repository');
-    expect(persistedOther.data.version).toBe(1);
-    expect(persistedOther.data.photoIds).toEqual(other.photoIds);
-    const memories = await repository.listMemories({ page: 1, pageSize: 100 });
-    expect(memories.ok).toBe(true);
-    if (!memories.ok) throw new Error('memories could not be read through repository');
-    expect(memories.data.total).toBe(2);
-    expect(memories.data.items.filter(item => item.id === source.id)).toHaveLength(1);
-  });
-
   it('persists diary visibility and selected public blocks through the sharing endpoint', async () => {
     const diary = await store.saveDiary({
       draftId: 'draft-share-1',
@@ -1183,6 +1159,52 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
+  it('rejects malformed draft fields before persistence and checks identity first', async () => {
+    const validDraft = {
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+      privacy: 'private',
+      version: 1,
+    };
+    const malformedBodies = [
+      { ...validDraft, id: 'draft-invalid-photo-list', selectedPhotoIds: 'photo-1' },
+      { ...validDraft, id: 'draft-invalid-photo-entry', selectedPhotoIds: ['photo-1', 2] },
+      { ...validDraft, id: 'draft-invalid-privacy', privacy: 'public' },
+      { ...validDraft, id: 'draft-invalid-version', version: 1.5 },
+      null,
+    ];
+
+    for (const body of malformedBodies) {
+      await request(app.getHttpServer())
+        .post('/api/drafts')
+        .set('x-device-id', deviceA)
+        .set('Content-Type', 'application/json')
+        .send(JSON.stringify(body))
+        .expect(400)
+        .expect(({ body: responseBody }) => {
+          expect(responseBody.error.code).toBe('invalid_input');
+        });
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('Content-Type', 'application/json')
+      .send('null')
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('device_identity_required');
+      });
+
+    await request(app.getHttpServer())
+      .get('/api/drafts')
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data).toEqual([]);
+      });
+  });
+
   it('preserves an existing travel draft when an invalid type overwrite is submitted', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
@@ -1349,6 +1371,416 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
+  it('reads published discovery snapshots and persists device-scoped idempotent likes', async () => {
+    const publishedAt = new Date('2026-10-16T10:00:00.000Z');
+    const stories = [
+      {
+        id: 'story-latest-new',
+        ownerDeviceId: deviceA,
+        publicationStatus: 'published',
+        title: '海港的傍晚',
+        authorDisplayName: '小林',
+        coverUri: 'file:///tmp/story-latest-new.png',
+        date: new Date('2026-10-15T10:00:00.000Z'),
+        location: '台南海港',
+        body: '沿着海港慢慢散步。',
+        likesEnabled: true,
+        publishedAt,
+        withdrawnAt: null,
+      },
+      {
+        id: 'story-latest-old',
+        ownerDeviceId: deviceA,
+        publicationStatus: 'published',
+        title: '海港的清晨',
+        authorDisplayName: '小周',
+        coverUri: 'file:///tmp/story-latest-old.png',
+        date: new Date('2026-10-14T10:00:00.000Z'),
+        location: '台南海港',
+        body: '清晨在海边看船只出发。',
+        likesEnabled: true,
+        publishedAt,
+        withdrawnAt: null,
+      },
+      {
+        id: 'story-unpublished',
+        ownerDeviceId: deviceA,
+        publicationStatus: 'draft',
+        title: '海港草稿',
+        authorDisplayName: '小林',
+        coverUri: 'file:///tmp/story-unpublished.png',
+        date: new Date('2026-10-17T10:00:00.000Z'),
+        location: '台南海港',
+        body: '尚未发布。',
+        likesEnabled: true,
+        publishedAt: null,
+        withdrawnAt: null,
+      },
+      {
+        id: 'story-withdrawn',
+        ownerDeviceId: deviceA,
+        publicationStatus: 'published',
+        title: '海港已撤回',
+        authorDisplayName: '小林',
+        coverUri: 'file:///tmp/story-withdrawn.png',
+        date: new Date('2026-10-18T10:00:00.000Z'),
+        location: '台南海港',
+        body: '已撤回。',
+        likesEnabled: true,
+        publishedAt,
+        withdrawnAt: new Date('2026-10-16T11:00:00.000Z'),
+      },
+      {
+        id: 'story-likes-disabled',
+        ownerDeviceId: deviceA,
+        publicationStatus: 'published',
+        title: '海港禁用互动',
+        authorDisplayName: '小林',
+        coverUri: 'file:///tmp/story-likes-disabled.png',
+        date: new Date('2026-10-13T10:00:00.000Z'),
+        location: '台南海港',
+        body: '当前不可点赞。',
+        likesEnabled: false,
+        publishedAt,
+        withdrawnAt: null,
+      },
+    ];
+    for (const story of stories) {
+      await prisma.discoveryStory.create({ data: story });
+    }
+    await prisma.discoveryLike.create({
+      data: { storyId: 'story-latest-new', ownerDeviceId: deviceB },
+    });
+
+    const listing = await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .query({ category: 'latest', keyword: '海港', page: '1', pageSize: '10' })
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(listing.body.data.items.map((item: { id: string }) => item.id))
+      .toEqual(['story-latest-new', 'story-latest-old', 'story-likes-disabled']);
+    expect(listing.body.data.items[0]).toMatchObject({ likeCount: 1, liked: false });
+    expect(listing.body.data.total).toBe(3);
+
+    await request(app.getHttpServer())
+      .get('/api/discovery/stories/story-latest-new')
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data).toMatchObject({
+          id: 'story-latest-new',
+          title: '海港的傍晚',
+          author: '小林',
+          body: '沿着海港慢慢散步。',
+        });
+      });
+    await request(app.getHttpServer())
+      .get('/api/discovery/stories/story-withdrawn')
+      .set('x-device-id', deviceA)
+      .expect(404)
+      .expect(({ body }) => expect(body.error.code).toBe('not_found'));
+    await request(app.getHttpServer())
+      .get('/api/discovery/stories/story-unpublished')
+      .set('x-device-id', deviceA)
+      .expect(404)
+      .expect(({ body }) => expect(body.error.code).toBe('not_found'));
+    await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('device_identity_required'));
+
+    for (let replay = 0; replay < 2; replay += 1) {
+      await request(app.getHttpServer())
+        .put('/api/discovery/stories/story-latest-new/like')
+        .set('x-device-id', deviceA)
+        .send({ liked: true })
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.data).toMatchObject({
+            storyId: 'story-latest-new',
+            liked: true,
+            likeCount: 2,
+          });
+        });
+    }
+    await request(app.getHttpServer())
+      .put('/api/discovery/stories/story-latest-new/like')
+      .set('x-device-id', deviceA)
+      .send({ liked: false })
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data).toMatchObject({
+          storyId: 'story-latest-new',
+          liked: false,
+          likeCount: 1,
+        });
+      });
+    await request(app.getHttpServer())
+      .put('/api/discovery/stories/story-likes-disabled/like')
+      .set('x-device-id', deviceA)
+      .send({ liked: true })
+      .expect(409)
+      .expect(({ body }) => expect(body.error.code).toBe('interaction_not_available'));
+
+    const otherDeviceDetail = await request(app.getHttpServer())
+      .get('/api/discovery/stories/story-latest-new')
+      .set('x-device-id', deviceB)
+      .expect(200);
+    expect(otherDeviceDetail.body.data).toMatchObject({ liked: true, likeCount: 1 });
+
+    await store.reset();
+    expect(await prisma.discoveryStory.count()).toBe(0);
+    expect(await prisma.discoveryLike.count()).toBe(0);
+  });
+
+  it('persists chat turns, explicit retries and device-scoped conversation history', async () => {
+    const conversationId = 'chat-e2e-conversation-1';
+    const requestId = 'chat-e2e-request-1';
+    const beginBody = {
+      requestId,
+      userMessageId: 'chat-e2e-user-message-1',
+      text: '今天沿着海边散步。',
+    };
+
+    const begun = await request(app.getHttpServer())
+      .post(`/api/chat/conversations/${conversationId}/turns`)
+      .set('x-device-id', deviceA)
+      .send(beginBody)
+      .expect(201);
+    expect(begun.body.data).toMatchObject({
+      id: conversationId,
+      messages: [{ id: beginBody.userMessageId, role: 'user', text: beginBody.text }],
+      turns: [{ requestId, sequence: 1, attempt: 1, status: 'pending' }],
+    });
+
+    const replayedBegin = await request(app.getHttpServer())
+      .post(`/api/chat/conversations/${conversationId}/turns`)
+      .set('x-device-id', deviceA)
+      .send(beginBody)
+      .expect(201);
+    expect(replayedBegin.body.data.messages).toHaveLength(1);
+    expect(replayedBegin.body.data.turns).toHaveLength(1);
+
+    await request(app.getHttpServer())
+      .post(`/api/chat/conversations/${conversationId}/turns/${requestId}/failure`)
+      .set('x-device-id', deviceA)
+      .send({ attempt: 1, failureCode: 'provider_failed' })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.data.turns[0]).toMatchObject({
+          requestId,
+          attempt: 1,
+          status: 'failed',
+          failureCode: 'provider_failed',
+        });
+      });
+
+    await request(app.getHttpServer())
+      .post(`/api/chat/conversations/${conversationId}/turns/${requestId}/retry`)
+      .set('x-device-id', deviceA)
+      .send({ nextAttempt: 2 })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.data.turns[0]).toMatchObject({
+          requestId,
+          attempt: 2,
+          status: 'pending',
+        });
+      });
+
+    await request(app.getHttpServer())
+      .post(`/api/chat/conversations/${conversationId}/turns/${requestId}/reply`)
+      .set('x-device-id', deviceA)
+      .send({
+        attempt: 2,
+        assistantMessageId: 'chat-e2e-assistant-message-1',
+        text: '海边的风景听起来很惬意。',
+        source: 'mock',
+      })
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.data.turns[0]).toMatchObject({
+          requestId,
+          attempt: 2,
+          status: 'completed',
+          source: 'mock',
+        });
+        expect(body.data.messages.map((message: { role: string }) => message.role))
+          .toEqual(['user', 'assistant']);
+      });
+
+    const history = await request(app.getHttpServer())
+      .get(`/api/chat/conversations/${conversationId}`)
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(history.body.data.messages).toHaveLength(2);
+    const ownerList = await request(app.getHttpServer())
+      .get('/api/chat/conversations?page=1&pageSize=10')
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(ownerList.body.data).toMatchObject({
+      total: 1,
+      items: [{ id: conversationId, messageCount: 2 }],
+    });
+    const otherDeviceList = await request(app.getHttpServer())
+      .get('/api/chat/conversations?page=1&pageSize=10')
+      .set('x-device-id', deviceB)
+      .expect(200);
+    expect(otherDeviceList.body.data).toMatchObject({ total: 0, items: [] });
+    await request(app.getHttpServer())
+      .get(`/api/chat/conversations/${conversationId}`)
+      .set('x-device-id', deviceB)
+      .expect(403)
+      .expect(({ body }) => expect(body.error.code).toBe('permission_denied'));
+
+    await store.reset();
+    expect(await prisma.chatConversation.count()).toBe(0);
+    expect(await prisma.chatTurn.count()).toBe(0);
+    expect(await prisma.chatMessage.count()).toBe(0);
+  });
+
+  it('persists provider anchor results and versioned corrections against a saved diary', async () => {
+    const diaryId = 'anchor-e2e-diary-1';
+    const sourceBlockId = 'anchor-e2e-text-1';
+    const requestId = 'anchor-e2e-request-1';
+    await prisma.diary.create({
+      data: {
+        id: diaryId,
+        ownerDeviceId: deviceA,
+        draftId: 'anchor-e2e-draft-1',
+        title: '海边散步',
+        summary: '傍晚沿海边慢慢走。',
+        location: '台南海港',
+        date: new Date('2026-10-15T10:00:00.000Z'),
+        privacy: 'private',
+        photoIds: ['photo-1'],
+        publicBlockIds: [],
+        contentSnapshot: {
+          type: 'travel',
+          subtitle: '傍晚沿海边慢慢走。',
+          helperMessage: '',
+          characterId: 'character-blue',
+          companionName: '自己',
+          coverPhotoId: 'photo-1',
+          posterPhotoIds: ['photo-1'],
+          blocks: [
+            { id: sourceBlockId, type: 'text', content: '沿着海港慢慢散步。' },
+            { id: 'anchor-e2e-quote-1', type: 'quote', content: '把时间留给海风。' },
+          ],
+          people: [],
+        },
+        version: 1,
+      },
+    });
+
+    const begin = await request(app.getHttpServer())
+      .post('/api/anchors/extractions/begin')
+      .set('x-device-id', deviceA)
+      .send({ diaryId, diaryVersion: 1, requestId, attempt: 1 })
+      .expect(201);
+    expect(begin.body.data).toMatchObject({ diaryId, diaryVersion: 1, requestId, attempt: 1, status: 'pending' });
+
+    const providerResult = {
+      requestId,
+      diaryId,
+      diaryVersion: 1,
+      source: 'provider',
+      anchors: [{
+        id: 'anchor-e2e-anchor-1',
+        tagId: 'tag-seaside',
+        sourceBlockId,
+        excerpt: '沿着海港散步',
+      }],
+    };
+    const completed = await request(app.getHttpServer())
+      .post('/api/anchors/extractions/complete')
+      .set('x-device-id', deviceA)
+      .send({ attempt: 1, result: providerResult })
+      .expect(201);
+    expect(completed.body.data).toMatchObject({
+      diaryId,
+      requestId,
+      status: 'succeeded',
+      source: 'provider',
+      anchors: [{ anchorId: 'anchor-e2e-anchor-1', sourceBlockId }],
+    });
+
+    await request(app.getHttpServer())
+      .post('/api/anchors/extractions/complete')
+      .set('x-device-id', deviceA)
+      .send({ attempt: 1, result: providerResult })
+      .expect(201);
+    const anchors = await request(app.getHttpServer())
+      .get('/api/anchors')
+      .query({ tagId: 'tag-seaside', page: '1', pageSize: '10' })
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(anchors.body.data).toMatchObject({
+      tagId: 'tag-seaside',
+      total: 1,
+      items: [{
+        anchorId: 'anchor-e2e-anchor-1',
+        sourceBlockId,
+        diary: { id: diaryId, version: 1, title: '海边散步', coverPhotoId: 'photo-1' },
+      }],
+    });
+    const otherDeviceAnchors = await request(app.getHttpServer())
+      .get('/api/anchors')
+      .query({ tagId: 'tag-seaside', page: '1', pageSize: '10' })
+      .set('x-device-id', deviceB)
+      .expect(200);
+    expect(otherDeviceAnchors.body.data).toMatchObject({ total: 0, items: [] });
+
+    const correctionInput = {
+      diaryId,
+      diaryVersion: 1,
+      sourceBlockId,
+      correction: '  海边散步让我放慢了脚步。  ',
+      expectedVersion: 0,
+      idempotencyKey: 'anchor-e2e-correction-command-1',
+    };
+    await request(app.getHttpServer())
+      .put('/api/anchors/anchor-e2e-anchor-1/correction')
+      .set('x-device-id', deviceA)
+      .send(correctionInput)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data).toMatchObject({
+          diaryId,
+          diaryVersion: 1,
+          anchorId: 'anchor-e2e-anchor-1',
+          sourceBlockId,
+          correction: '海边散步让我放慢了脚步。',
+          version: 1,
+        });
+      });
+    const correction = await request(app.getHttpServer())
+      .get('/api/anchors/anchor-e2e-anchor-1/correction')
+      .query({ diaryId, diaryVersion: '1' })
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(correction.body.data).toMatchObject({
+      diaryId,
+      diaryVersion: 1,
+      anchorId: 'anchor-e2e-anchor-1',
+      sourceBlockId,
+      correction: '海边散步让我放慢了脚步。',
+      version: 1,
+    });
+    await request(app.getHttpServer())
+      .get('/api/anchors/anchor-e2e-anchor-1/correction')
+      .query({ diaryId, diaryVersion: '1' })
+      .set('x-device-id', deviceB)
+      .expect(403)
+      .expect(({ body }) => expect(body.error.code).toBe('permission_denied'));
+
+    await store.reset();
+    expect(await prisma.diaryAnchor.count()).toBe(0);
+    expect(await prisma.diaryAnchorExtraction.count()).toBe(0);
+    expect(await prisma.anchorCorrection.count()).toBe(0);
+    expect(await prisma.anchorCorrectionCommand.count()).toBe(0);
+  });
+
   it('supports generation job create and polling', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
@@ -1383,6 +1815,65 @@ describe('Backend foundation (e2e)', () => {
     expect(completed.body.data.result.title).toContain('把旅程写成一页');
     expect(completed.body.data.result.coverPhotoId).toBe('photo-1');
     expect(completed.body.data.result.blocks.length).toBeGreaterThan(0);
+  });
+
+  it('reuses generation jobs only when an idempotency key matches the original draft and version', async () => {
+    for (const id of ['draft-idempotency-a', 'draft-idempotency-b']) {
+      await request(app.getHttpServer())
+        .post('/api/drafts')
+        .set('x-device-id', deviceA)
+        .send({
+          id,
+          type: 'travel',
+          characterId: 'character-blue',
+          selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+          privacy: 'private',
+          version: 1,
+        })
+        .expect(201);
+    }
+
+    const input = {
+      draftId: 'draft-idempotency-a',
+      draftVersion: 1,
+      idempotencyKey: 'generation-idempotency-key',
+    };
+    const [first, concurrentRetry] = await Promise.all([
+      request(app.getHttpServer())
+        .post('/api/generation/jobs')
+        .set('x-device-id', deviceA)
+        .send(input),
+      request(app.getHttpServer())
+        .post('/api/generation/jobs')
+        .set('x-device-id', deviceA)
+        .send(input),
+    ]);
+
+    expect(first.status).toBe(201);
+    expect(concurrentRetry.status).toBe(201);
+    expect(concurrentRetry.body.data.jobId).toBe(first.body.data.jobId);
+
+    const sameRequest = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send(input)
+      .expect(201);
+    expect(sameRequest.body.data.jobId).toBe(first.body.data.jobId);
+
+    for (const conflictingInput of [
+      { ...input, draftId: 'draft-idempotency-b' },
+      { ...input, draftVersion: 2 },
+    ]) {
+      await request(app.getHttpServer())
+        .post('/api/generation/jobs')
+        .set('x-device-id', deviceA)
+        .send(conflictingInput)
+        .expect(409)
+        .expect(({ body }) => {
+          expect(body.error.code).toBe('version_conflict');
+          expect(body.error.retryable).toBe(false);
+        });
+    }
   });
 
   it('parses openai-compatible provider content arrays with fenced JSON through the generation job flow', async () => {
@@ -1774,6 +2265,89 @@ describe('Backend foundation (e2e)', () => {
     }
 
     throw new Error('generation job with malformed provider payload did not fail in time');
+  });
+
+  it('records duplicate provider person IDs as a non-retryable generation failure', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_MAX_ATTEMPTS = '2';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                title: '旅途中的同行者',
+                summary: '人物候选具备不同照片关系。',
+                location: '台南',
+                date: '2026.10.13',
+                companionName: '同行人',
+                coverPhotoId: 'photo-8',
+                posterPhotoIds: ['photo-8', 'photo-9'],
+                blocks: [
+                  {
+                    id: 'provider-block-duplicate-person',
+                    type: 'text',
+                    content: '我们一起走过了海边。',
+                    photoIds: ['photo-8', 'photo-9'],
+                  },
+                ],
+                people: [
+                  { id: 'person-duplicate', name: '同行者甲', photoIds: ['photo-8'], avatarPhotoId: 'photo-8' },
+                  { id: 'person-duplicate', name: '同行者乙', photoIds: ['photo-9'], avatarPhotoId: 'photo-9' },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('x-device-id', deviceA)
+      .send({
+        id: 'draft-provider-duplicate-person-ids',
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: 'draft-provider-duplicate-person-ids',
+        draftVersion: 1,
+        idempotencyKey: 'draft-provider-duplicate-person-ids-round-1',
+      })
+      .expect(201);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await request(app.getHttpServer())
+        .get(`/api/generation/jobs/${created.body.data.jobId}`)
+        .set('x-device-id', deviceA)
+        .expect(200);
+      if (response.body.data.status === 'failed') {
+        expect(response.body.data.attemptCount).toBe(1);
+        expect(response.body.data.maxAttempts).toBe(2);
+        expect(response.body.data.errorCode).toBe('provider_failed');
+        expect(response.body.data.errorMessage).toBe('provider people contain duplicate person IDs');
+        expect(response.body.data.retryable).toBe(false);
+        expect(response.body.data.result).toBeUndefined();
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    throw new Error('generation job with duplicate provider person IDs did not fail in time');
   });
 
   it('rejects unselected text block photo references on the generation job', async () => {
@@ -2373,7 +2947,8 @@ describe('Backend foundation (e2e)', () => {
     const restartedModuleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
-    const restartedApp = restartedModuleRef.createNestApplication();
+    const restartedApp = restartedModuleRef.createNestApplication({ bodyParser: false });
+    configureApiBodyParser(restartedApp);
     restartedApp.setGlobalPrefix('api');
     await restartedApp.init();
 
@@ -2402,7 +2977,26 @@ describe('Backend foundation (e2e)', () => {
     }
   });
 
-  it('supports generation job cancellation', async () => {
+  it('supports generation job cancellation and aborts the active provider request', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_TIMEOUT_MS = '10000';
+    let markProviderStarted!: () => void;
+    let providerSignal: AbortSignal | undefined;
+    const providerStarted = new Promise<void>(resolve => {
+      markProviderStarted = resolve;
+    });
+    global.fetch = jest.fn((_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        providerSignal = init?.signal;
+        providerSignal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        }, { once: true });
+        markProviderStarted();
+      })) as unknown as typeof fetch;
+
     await request(app.getHttpServer())
       .post('/api/drafts')
       .set('x-device-id', deviceA)
@@ -2426,6 +3020,7 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
+    await providerStarted;
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${created.body.data.jobId}/cancel`)
       .set('x-device-id', deviceA)
@@ -2434,6 +3029,7 @@ describe('Backend foundation (e2e)', () => {
         expect(body.data.status).toBe('cancelled');
         expect(body.data.stage).toBe('cancelled');
       });
+    expect(providerSignal?.aborted).toBe(true);
 
     await request(app.getHttpServer())
       .get(`/api/generation/jobs/${created.body.data.jobId}`)

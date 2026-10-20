@@ -115,10 +115,14 @@ describe('Library screen apply material photo to diary', () => {
     if (!target || !otherDiary) throw new Error('missing diary fixtures');
     const firstTextBlock = target.blocks.find(block => block.type === 'text');
     if (!firstTextBlock || firstTextBlock.type !== 'text') throw new Error('missing target text block');
+      const beginEdit = jest.spyOn(useAppStore.getState(), 'beginEdit');
+      const setDraftBlockPhotos = jest.spyOn(useAppStore.getState(), 'setDraftBlockPhotos');
 
     const screen = await render(<LibraryScreen />);
     await openPhotoTarget(screen, target.title);
 
+      expect(beginEdit).toHaveBeenCalledWith(target.id);
+      expect(setDraftBlockPhotos).toHaveBeenCalled();
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/diary/[id]/edit',
       params: { id: target.id, draftId: expect.any(String) },
@@ -135,6 +139,48 @@ describe('Library screen apply material photo to diary', () => {
     expect(draft?.diary.photoIds).toEqual([...target.photoIds, 'device-photo-p4']);
     expect(useAppStore.getState().diaries[0]).toEqual(target);
     expect(useAppStore.getState().diaries[1]).toEqual(otherDiary);
+  });
+
+  test('appends to the current draft references without restoring saved content', async () => {
+    const target = useAppStore.getState().diaries[0];
+    if (!target) throw new Error('missing diary fixture');
+    const savedFirstTextBlock = target.blocks.find(block => block.type === 'text');
+    if (!savedFirstTextBlock || savedFirstTextBlock.type !== 'text') {
+      throw new Error('missing target text block');
+    }
+
+    const existingDraftId = useAppStore.getState().beginEdit(target.id);
+    if (!existingDraftId) throw new Error('could not begin editing target');
+    useAppStore.getState().updateDraft(existingDraftId, {
+      title: '未保存标题',
+      summary: '未保存摘要',
+    });
+    useAppStore.getState().updateDraftBlock(existingDraftId, savedFirstTextBlock.id, '未保存正文');
+    useAppStore.getState().setDraftBlockPhotos(existingDraftId, savedFirstTextBlock.id, ['photo-3']);
+      const draftBeforeApplication = useAppStore.getState().drafts[existingDraftId]?.diary;
+      if (!draftBeforeApplication) throw new Error('missing edited draft snapshot');
+
+    const screen = await render(<LibraryScreen />);
+    await openPhotoTarget(screen, target.title);
+
+    const draft = useAppStore.getState().drafts[existingDraftId];
+    const currentFirstTextBlock = draft.diary.blocks.find(block => block.id === savedFirstTextBlock.id);
+    expect(useAppStore.getState().activeDraftId).toBe(existingDraftId);
+      expect(draft.diary).toMatchObject({
+        title: draftBeforeApplication.title,
+        summary: draftBeforeApplication.summary,
+      });
+    expect(currentFirstTextBlock).toMatchObject({
+      type: 'text',
+      content: '未保存正文',
+      photoIds: ['photo-3', 'device-photo-p4'],
+    });
+    expect(draft.selectedPhotoIds).toContain('device-photo-p4');
+    expect(useAppStore.getState().diaries[0]).toEqual(target);
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/diary/[id]/edit',
+      params: { id: target.id, draftId: existingDraftId },
+    });
   });
 
   test('discarding a material-photo edit draft leaves both saved diaries unchanged', async () => {

@@ -14,8 +14,8 @@ import type { DiaryItem } from '../../../src/types/diary';
 export default function Detail() {
   const { diary, diaryId, readDiaryById, router } = useDiaryRoute();
   const requestVersionRef = useRef(0);
-  const [resolvedDiary, setResolvedDiary] = useState<DiaryItem | undefined>(undefined);
-  const currentDiary = resolvedDiary ?? diary;
+  const [resolvedDiary, setResolvedDiary] = useState<{ diaryId: string; diary: DiaryItem } | undefined>(undefined);
+  const currentDiary = resolvedDiary && resolvedDiary.diaryId === diaryId ? resolvedDiary.diary : diary;
   const isSummaryPlaceholder = useMemo(() => {
     if (!currentDiary) return false;
     return currentDiary.blocks.length === 1 && currentDiary.blocks[0]?.id === `${currentDiary.id}-summary`;
@@ -30,6 +30,7 @@ export default function Detail() {
   const shouldLoad = Boolean(diaryId) && (!currentDiary || isSummaryPlaceholder);
 
   useEffect(() => {
+    const requestVersion = ++requestVersionRef.current;
     if (!diaryId) {
       setResolvedDiary(undefined);
       setStatus('not_found');
@@ -40,14 +41,13 @@ export default function Detail() {
       setErrorMessage(undefined);
       return;
     }
-    const requestVersion = ++requestVersionRef.current;
     setResolvedDiary(undefined);
     setStatus('loading');
     setErrorMessage(undefined);
     void readDiaryById(diaryId).then(result => {
       if (requestVersion !== requestVersionRef.current) return;
       if (result.ok) {
-        setResolvedDiary(result.diary);
+        setResolvedDiary({ diaryId, diary: result.diary });
         setStatus('ready');
         return;
       }

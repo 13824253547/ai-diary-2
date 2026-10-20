@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import CompleteScreen from '../create/complete';
 import DetailScreen from '../diary/[id]';
 import { createTestStore } from '../../src/test-utils/create-test-store';
@@ -338,6 +338,68 @@ describe('Saved diary screens', () => {
     fireEvent.press(screen.getByLabelText('重新加载'));
     await waitFor(() => expect(screen.getByText('重新加载后读到了这篇日记')).toBeTruthy());
     expect(readDiaryById).toHaveBeenCalledTimes(2);
+  });
+
+  test('detail screen scopes cached reads to the active diary and invalidates reads after switching to local content', async () => {
+    useAppStore.setState(state => ({
+      diaries: state.diaries.map(item => item.id === 'diary-1'
+        ? {
+            ...item,
+            blocks: [{
+              id: 'diary-1-summary',
+              type: 'text',
+              title: '这段回忆',
+              content: '日记一的摘要占位。',
+              photoIds: ['photo-1'],
+            }],
+          }
+        : item.id === 'diary-2'
+          ? { ...item, title: '本地完整的第二篇日记' }
+          : item),
+    }));
+    const first = createDeferred<{ ok: true; diary: AppStore['diaries'][number] }>();
+    const firstDiary = useAppStore.getState().diaries.find(item => item.id === 'diary-1')!;
+    const readDiaryById = jest.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce({
+        ok: true,
+        diary: {
+          ...firstDiary,
+          title: '重新读取后得到的第一篇日记',
+          blocks: [{
+            id: 'diary-1-full-text',
+            type: 'text',
+            content: '这是重新读取后的完整正文。',
+            photoIds: [],
+          }],
+        },
+      });
+    useAppStore.setState({ readDiaryById });
+
+    mockParams.id = 'diary-1';
+    const screen = await render(<DetailScreen />);
+    expect(readDiaryById).toHaveBeenCalledTimes(1);
+
+    mockParams.id = 'diary-2';
+    await screen.rerender(<DetailScreen />);
+    expect(screen.getByText('日记卡片:diary-2')).toBeTruthy();
+    expect(screen.getByText('本地完整的第二篇日记')).toBeTruthy();
+
+    await act(async () => {
+      first.resolve({
+        ok: true,
+        diary: { ...firstDiary, title: '切换后迟到的旧结果' },
+      });
+      await first.promise;
+    });
+    expect(screen.getByText('本地完整的第二篇日记')).toBeTruthy();
+    expect(screen.queryByText('切换后迟到的旧结果')).toBeNull();
+
+    mockParams.id = 'diary-1';
+    await screen.rerender(<DetailScreen />);
+    await waitFor(() => expect(screen.getByText('重新读取后得到的第一篇日记')).toBeTruthy());
+    expect(readDiaryById).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('切换后迟到的旧结果')).toBeNull();
   });
 
   test('detail screen ignores an older delayed read after route switch', async () => {

@@ -9,16 +9,60 @@ type CreateGenerationBody = {
   idempotencyKey: string;
 };
 
+function isCreateGenerationBody(value: unknown): value is CreateGenerationBody {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const body = value as Record<string, unknown>;
+  return typeof body.draftId === 'string'
+    && body.draftId.trim().length > 0
+    && Number.isSafeInteger(body.draftVersion)
+    && (body.draftVersion as number) > 0
+    && typeof body.idempotencyKey === 'string'
+    && body.idempotencyKey.trim().length > 0;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isStringIdArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isNonEmptyString);
+}
+
+function isRewriteBody(value: unknown): value is RewriteInputSnapshot {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const body = value as Record<string, unknown>;
+  return isNonEmptyString(body.draftId)
+    && isNonEmptyString(body.blockId)
+    && Number.isSafeInteger(body.draftVersion)
+    && (body.draftVersion as number) > 0
+    && isNonEmptyString(body.characterId)
+    && (body.blockType === 'text' || body.blockType === 'quote')
+    && isNonEmptyString(body.content)
+    && isStringIdArray(body.selectedPhotoIds)
+    && (body.photoIds === undefined || isStringIdArray(body.photoIds));
+}
+
 @Controller('generation')
 export class GenerationController {
   constructor(private readonly store: MemoryStoreService) {}
 
   @Post('jobs')
-  async createJob(@Body() body: CreateGenerationBody, @Headers('x-device-id') deviceId?: string) {
+  async createJob(@Body() body: unknown, @Headers('x-device-id') deviceId?: string) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    if (!isCreateGenerationBody(body)) {
+      throw new BadRequestException({
+        ok: false,
+        error: {
+          code: 'invalid_input',
+          message: '生成任务请求参数无效。',
+          retryable: false,
+        },
+      });
+    }
     try {
       return {
         ok: true,
-        data: await this.store.createGenerationJob(body, resolveDeviceId(deviceId)),
+        data: await this.store.createGenerationJob(body, ownerDeviceId),
       };
     } catch (error) {
       if (error instanceof GenerationJobError && error.code === 'not_found') {
@@ -26,6 +70,16 @@ export class GenerationController {
           ok: false,
           error: {
             code: 'not_found',
+            message: error.message,
+            retryable: false,
+          },
+        });
+      }
+      if (error instanceof GenerationJobError && error.code === 'version_conflict') {
+        throw new ConflictException({
+          ok: false,
+          error: {
+            code: 'version_conflict',
             message: error.message,
             retryable: false,
           },
@@ -46,11 +100,22 @@ export class GenerationController {
   }
 
   @Post('rewrite')
-  async rewriteBlock(@Body() body: RewriteInputSnapshot, @Headers('x-device-id') deviceId?: string) {
+  async rewriteBlock(@Body() body: unknown, @Headers('x-device-id') deviceId?: string) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    if (!isRewriteBody(body)) {
+      throw new BadRequestException({
+        ok: false,
+        error: {
+          code: 'invalid_input',
+          message: '重写请求参数无效。',
+          retryable: false,
+        },
+      });
+    }
     try {
       return {
         ok: true,
-        data: await this.store.rewriteDraftBlock(body, resolveDeviceId(deviceId)),
+        data: await this.store.rewriteDraftBlock(body, ownerDeviceId),
       };
     } catch (error) {
       if (error instanceof RewriteDraftError && error.code === 'not_found') {

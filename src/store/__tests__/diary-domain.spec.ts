@@ -1,11 +1,11 @@
-import { CORE_DIARY_CONTRACT_VERSION, type RemoteResult } from '../../contracts/core-diary-contract';
+import { CORE_DIARY_CONTRACT_VERSION, type CreateGenerationJobRequestContract, type GenerationJobContract, type RemoteResult } from '../../contracts/core-diary-contract';
 import { mockDiaries } from '../../mocks/diaries';
 import { mockPhotos } from '../../mocks/photos';
 import { createTestStore } from '../../test-utils/create-test-store';
 import { createDeferred } from '../../test-utils/fakes/create-deferred';
 import { createAsyncFaultPlan } from '../../test-utils/fakes/create-async-fault-plan';
 import type { CoreDiaryRepository } from '../../repositories/core-diary-repository';
-import { createAppStore, createDefaultAppStoreDeps } from '../create-app-store';
+import { createAppSelectors, createAppStore, createDefaultAppStoreDeps } from '../create-app-store';
 import type { DraftSnapshotStore } from '../adapters/types';
 import type { DiaryPhoto } from '../../types/diary';
 import { buildGeneratedDiaryFromResult, canGenerate, cloneDiary, getDiaryStatistics, getHistoryGroups, getPeopleForPhotos, projectDiaryForSharing, sanitizePhotoIds } from '../diary-domain';
@@ -29,6 +29,18 @@ describe('domain/store regression', () => {
         { id: `${draftId}-remote-block-2`, type: 'quote' as const, content: '把这一刻重新写下来。', relatedBlockId: `${draftId}-remote-block-1` },
         { id: `${draftId}-remote-photo-1`, type: 'photo' as const, photoId: photoIds[0] ?? 'photo-1', caption: '远端选中的照片', relatedBlockId: `${draftId}-remote-block-1` },
       ],
+    };
+  }
+
+  function bindGenerationJobRequest(
+    request: CreateGenerationJobRequestContract,
+    response: Omit<GenerationJobContract, 'draftId' | 'draftVersion' | 'idempotencyKey'>,
+  ): GenerationJobContract {
+    return {
+      ...response,
+      draftId: request.draftId,
+      draftVersion: request.draftVersion,
+      idempotencyKey: request.idempotencyKey,
     };
   }
 
@@ -153,6 +165,47 @@ describe('domain/store regression', () => {
       },
     };
   }
+
+  test('production store defaults do not seed sample user records and can start an empty creation', () => {
+    const developmentDeps = createDefaultAppStoreDeps();
+    expect(developmentDeps.diaries.length).toBeGreaterThan(0);
+    expect(developmentDeps.photos.length).toBeGreaterThan(0);
+    const originalWorkerId = process.env.JEST_WORKER_ID;
+    const originalDevDescriptor = Object.getOwnPropertyDescriptor(globalThis, '__DEV__');
+    delete process.env.JEST_WORKER_ID;
+    Object.defineProperty(globalThis, '__DEV__', { configurable: true, value: false });
+
+    try {
+      const deps = createDefaultAppStoreDeps();
+      expect(deps.diaries).toEqual([]);
+      expect(deps.photos).toEqual([]);
+
+      const store = createAppStore(deps);
+      const selectors = createAppSelectors(store, deps);
+      expect(store.getState().diaries).toEqual([]);
+      expect(store.getState().currentDiaryId).toBe('');
+      expect(store.getState().materialPhotoIds).toEqual([]);
+      expect(selectors.historyGroups).toEqual([]);
+
+      const draftId = store.getState().beginCreation();
+      expect(store.getState().drafts[draftId].diary).toMatchObject({
+        title: '',
+        summary: '',
+        photoIds: [],
+        coverPhotoId: '',
+        blocks: [],
+        privacy: 'private',
+      });
+    } finally {
+      if (originalWorkerId === undefined) delete process.env.JEST_WORKER_ID;
+      else process.env.JEST_WORKER_ID = originalWorkerId;
+      if (originalDevDescriptor) {
+        Object.defineProperty(globalThis, '__DEV__', originalDevDescriptor);
+      } else {
+        delete (globalThis as unknown as { __DEV__?: boolean }).__DEV__;
+      }
+    }
+  });
 
   test('E01 CASE-BAS-004-002 photo selection allows 0/2/3/12 and deduplicates invalid IDs', () => {
     const { get } = createContext();
@@ -468,9 +521,9 @@ describe('domain/store regression', () => {
       version: CORE_DIARY_CONTRACT_VERSION,
       data: {
         jobId: 'job-duplicate-start',
-        draftId,
-        draftVersion: 1,
-        idempotencyKey: `${draftId}-round-${firstRound}`,
+          draftId,
+          draftVersion: firstRound,
+          idempotencyKey: `${draftId}-round-${firstRound}`,
         status: 'queued',
         stage: 'queued',
         progressPercent: 0,
@@ -507,6 +560,7 @@ describe('domain/store regression', () => {
 
     await flushAsyncWork();
     expect(snapshotStore.getSnapshot()).toBeTruthy();
+    const savedEditRevision = store.getState().drafts[draftId].editRevision;
 
     store = createAppStore(deps);
     await store.getState().hydrateDrafts();
@@ -514,12 +568,45 @@ describe('domain/store regression', () => {
     expect(store.getState().hydratedDrafts).toBe(true);
     expect(store.getState().activeDraftId).toBe(draftId);
     expect(store.getState().drafts[draftId]?.diary.blocks.some(block => block.type === 'text' && block.content === '重启后也要保留这一段。')).toBe(true);
+    expect(store.getState().drafts[draftId]?.editRevision).toBe(savedEditRevision);
     expect(store.getState().selectedCharacterId).toBe(store.getState().drafts[draftId]?.diary.characterId);
     expect(store.getState().selectedPhotoIds).toEqual(store.getState().drafts[draftId]?.selectedPhotoIds);
 
     expect(await store.getState().saveDraft(draftId)).toBeTruthy();
     await flushAsyncWork();
     expect(snapshotStore.getSnapshot()).toBeUndefined();
+  });
+
+  test('draft snapshot writes stay ordered when an earlier write is delayed', async () => {
+    const firstWrite = createDeferred<void>();
+    let persistedSnapshot: unknown;
+    const save = jest.fn(async (snapshot: Parameters<DraftSnapshotStore['save']>[0]) => {
+      if (save.mock.calls.length === 1) await firstWrite.promise;
+      persistedSnapshot = JSON.parse(JSON.stringify(snapshot));
+    });
+    const snapshotStore: DraftSnapshotStore = {
+      load: async () => undefined,
+      save,
+      clear: async () => {
+        persistedSnapshot = undefined;
+      },
+    };
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: { draftSnapshotStore: snapshotStore },
+    }));
+    await store.getState().hydrateDrafts();
+
+    const draftId = store.getState().beginCreation();
+    store.getState().updateDraft(draftId, { title: '较新的草稿标题' });
+    await flushAsyncWork();
+
+    expect(save).toHaveBeenCalledTimes(1);
+    firstWrite.resolve();
+    await flushAsyncWork();
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect((persistedSnapshot as { drafts: Record<string, { diary: { title: string } }> }).drafts[draftId].diary.title)
+      .toBe('较新的草稿标题');
   });
 
   test('draft changes during startup hydration do not overwrite prior snapshots', async () => {
@@ -713,50 +800,48 @@ describe('domain/store regression', () => {
   });
 
   test('remote generation polling stores job snapshots and completes only after backend success', async () => {
+    let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
-      createGenerationJob: async input => ({
-        ok: true,
-        version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
-          jobId: 'job-1',
-          draftId: input.draftId,
-          draftVersion: input.draftVersion,
-          idempotencyKey: input.idempotencyKey,
-          status: 'queued',
-          stage: 'queued',
-          progressPercent: 0,
-        },
-      }),
-      getGenerationJob: jest.fn()
-        .mockResolvedValueOnce({
+      createGenerationJob: async input => {
+        generationRequest = input;
+        return {
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
           data: {
             jobId: 'job-1',
-            draftId: 'draft-test-1',
-            draftVersion: 1,
-            idempotencyKey: 'draft-test-1-round-1',
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'queued',
+            stage: 'queued',
+            progressPercent: 0,
+          },
+        };
+      },
+      getGenerationJob: jest.fn()
+        .mockImplementationOnce(async () => ({
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: bindGenerationJobRequest(generationRequest!, {
+            jobId: 'job-1',
             status: 'running',
             stage: 'drafting',
             progressPercent: 48,
-          },
-        })
-        .mockResolvedValueOnce({
+          }),
+        }))
+        .mockImplementationOnce(async () => ({
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
-          data: {
+          data: bindGenerationJobRequest(generationRequest!, {
             jobId: 'job-1',
-            draftId: 'draft-test-1',
-            draftVersion: 1,
-            idempotencyKey: 'draft-test-1-round-1',
             status: 'succeeded',
             stage: 'completed',
             progressPercent: 100,
-            result: buildRemoteGenerationResult('draft-test-1'),
-          },
-        }),
+            result: buildRemoteGenerationResult(generationRequest!.draftId),
+          }),
+        })),
       saveDiary: async input => ({
         ok: true,
         version: CORE_DIARY_CONTRACT_VERSION,
@@ -820,59 +905,54 @@ describe('domain/store regression', () => {
   });
 
   test('remote generation can advance with stage-only snapshots when backend omits progress percent', async () => {
+    let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
-      createGenerationJob: async input => ({
-        ok: true,
-        version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
-          jobId: 'job-stage-only',
-          draftId: input.draftId,
-          draftVersion: input.draftVersion,
-          idempotencyKey: input.idempotencyKey,
-          status: 'queued',
-          stage: 'queued',
-        },
-      }),
-      getGenerationJob: jest.fn()
-        .mockResolvedValueOnce({
+      createGenerationJob: async input => {
+        generationRequest = input;
+        return {
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
           data: {
             jobId: 'job-stage-only',
-            draftId: 'draft-test-stage-only',
-            draftVersion: 1,
-            idempotencyKey: 'draft-test-stage-only-round-1',
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'queued',
+            stage: 'queued',
+          },
+        };
+      },
+      getGenerationJob: jest.fn()
+        .mockImplementationOnce(async () => ({
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: bindGenerationJobRequest(generationRequest!, {
+            jobId: 'job-stage-only',
             status: 'running',
             stage: 'analyzing-photos',
-          },
-        })
-        .mockResolvedValueOnce({
+          }),
+        }))
+        .mockImplementationOnce(async () => ({
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
-          data: {
+          data: bindGenerationJobRequest(generationRequest!, {
             jobId: 'job-stage-only',
-            draftId: 'draft-test-stage-only',
-            draftVersion: 1,
-            idempotencyKey: 'draft-test-stage-only-round-1',
             status: 'running',
             stage: 'structuring',
-          },
-        })
-        .mockResolvedValueOnce({
+          }),
+        }))
+        .mockImplementationOnce(async () => ({
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
-          data: {
+          data: bindGenerationJobRequest(generationRequest!, {
             jobId: 'job-stage-only',
-            draftId: 'draft-test-stage-only',
-            draftVersion: 1,
-            idempotencyKey: 'draft-test-stage-only-round-1',
             status: 'succeeded',
             stage: 'completed',
-            result: buildRemoteGenerationResult('draft-test-stage-only'),
-          },
-        }),
+            result: buildRemoteGenerationResult(generationRequest!.draftId),
+          }),
+        })),
       saveDiary: async input => ({
         ok: true,
         version: CORE_DIARY_CONTRACT_VERSION,
@@ -939,41 +1019,42 @@ describe('domain/store regression', () => {
   });
 
   test('remote generation fails when backend result references photos outside the selected set', async () => {
+    let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
-      createGenerationJob: async input => ({
-        ok: true,
-        version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
-          jobId: 'job-invalid-result',
-          draftId: input.draftId,
-          draftVersion: input.draftVersion,
-          idempotencyKey: input.idempotencyKey,
-          status: 'queued',
-          stage: 'queued',
-          progressPercent: 0,
-        },
-      }),
+      createGenerationJob: async input => {
+        generationRequest = input;
+        return {
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: {
+            jobId: 'job-invalid-result',
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'queued',
+            stage: 'queued',
+            progressPercent: 0,
+          },
+        };
+      },
       getGenerationJob: async () => ({
         ok: true,
         version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
+        data: bindGenerationJobRequest(generationRequest!, {
           jobId: 'job-invalid-result',
-          draftId: 'draft-test-invalid-result',
-          draftVersion: 1,
-          idempotencyKey: 'draft-test-invalid-result-round-1',
           status: 'succeeded',
           stage: 'completed',
           progressPercent: 100,
           result: {
-            ...buildRemoteGenerationResult('draft-test-invalid-result', ['photo-1', 'photo-2', 'photo-3']),
+            ...buildRemoteGenerationResult(generationRequest!.draftId, ['photo-1', 'photo-2', 'photo-3']),
             coverPhotoId: 'photo-999',
             blocks: [
               { id: 'invalid-text', type: 'text', content: '无效照片引用', photoIds: ['photo-1', 'photo-999'] },
             ],
           },
-        },
+        }),
       }),
       saveDiary: async input => ({
         ok: true,
@@ -1028,49 +1109,47 @@ describe('domain/store regression', () => {
   });
 
   test('remote generation ignores regressing stage snapshots within the same running round', async () => {
+    let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
-      createGenerationJob: async input => ({
-        ok: true,
-        version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
-          jobId: 'job-stage-order',
-          draftId: input.draftId,
-          draftVersion: input.draftVersion,
-          idempotencyKey: input.idempotencyKey,
-          status: 'queued',
-          stage: 'queued',
-          progressPercent: 0,
-        },
-      }),
-      getGenerationJob: jest.fn()
-        .mockResolvedValueOnce({
+      createGenerationJob: async input => {
+        generationRequest = input;
+        return {
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
           data: {
             jobId: 'job-stage-order',
-            draftId: 'draft-stage-order',
-            draftVersion: 1,
-            idempotencyKey: 'draft-stage-order-round-1',
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'queued',
+            stage: 'queued',
+            progressPercent: 0,
+          },
+        };
+      },
+      getGenerationJob: jest.fn()
+        .mockImplementationOnce(async () => ({
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: bindGenerationJobRequest(generationRequest!, {
+            jobId: 'job-stage-order',
             status: 'running',
             stage: 'structuring',
             progressPercent: 82,
-          },
-        })
-        .mockResolvedValueOnce({
+          }),
+        }))
+        .mockImplementationOnce(async () => ({
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
-          data: {
+          data: bindGenerationJobRequest(generationRequest!, {
             jobId: 'job-stage-order',
-            draftId: 'draft-stage-order',
-            draftVersion: 1,
-            idempotencyKey: 'draft-stage-order-round-1',
             status: 'running',
             stage: 'drafting',
             progressPercent: 48,
-          },
-        }),
+          }),
+        })),
       saveDiary: async input => ({
         ok: true,
         version: CORE_DIARY_CONTRACT_VERSION,
@@ -1406,41 +1485,42 @@ describe('domain/store regression', () => {
   });
 
   test('failed generation snapshot keeps backend error message and retry metadata semantics', async () => {
+    let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
-      createGenerationJob: async input => ({
-        ok: true,
-        version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
-          jobId: 'job-provider-failed',
-          draftId: input.draftId,
-          draftVersion: input.draftVersion,
-          idempotencyKey: input.idempotencyKey,
-          status: 'queued',
-          stage: 'queued',
-          progressPercent: 0,
-          attemptCount: 0,
-          maxAttempts: 2,
-        },
-      }),
+      createGenerationJob: async input => {
+        generationRequest = input;
+        return {
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: {
+            jobId: 'job-provider-failed',
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'queued',
+            stage: 'queued',
+            progressPercent: 0,
+            attemptCount: 0,
+            maxAttempts: 2,
+          },
+        };
+      },
       getGenerationJob: async () => ({
         ok: true,
         version: CORE_DIARY_CONTRACT_VERSION,
-        data: {
+        data: bindGenerationJobRequest(generationRequest!, {
           jobId: 'job-provider-failed',
-          draftId: 'draft-test-provider-failed',
-          draftVersion: 1,
-          idempotencyKey: 'draft-test-provider-failed-round-1',
           status: 'failed',
           stage: 'failed',
           progressPercent: 0,
           attemptCount: 2,
           maxAttempts: 2,
-          errorCode: 'provider_failed' as const,
+          errorCode: 'provider_failed',
           errorMessage: 'AI provider request failed with status 400',
           retryable: false,
-        },
+        }),
       }),
       saveDiary: async input => ({
         ok: true,
@@ -1492,6 +1572,81 @@ describe('domain/store regression', () => {
     expect(get().drafts[draftId].generation.status).toBe('failed');
     expect(get().drafts[draftId].generation.errorMessage).toBe('AI provider request failed with status 400');
     expect(await get().saveDraft(draftId)).toBeUndefined();
+  });
+
+  test('generation rejects a job snapshot bound to another draft', async () => {
+    const repository = createRepository({
+      createGenerationJob: async input => ({
+        ok: true,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        data: {
+          jobId: 'job-unrelated',
+          draftId: 'another-draft',
+          draftVersion: input.draftVersion,
+          idempotencyKey: input.idempotencyKey,
+          status: 'running',
+          stage: 'drafting',
+        },
+      }),
+    });
+    const { store } = createTestStore({
+      adapters: { diaryRepository: repository, memoriesRepository: repository },
+    });
+    const draftId = store.getState().beginCreation();
+    store.getState().setDraftPhotos(draftId, defaultSelectablePhotoIds());
+
+    store.getState().startGeneration(draftId);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(store.getState().drafts[draftId].generation.status).toBe('failed');
+    expect(store.getState().drafts[draftId].generation.errorMessage).toBe('生成结果异常，请稍后重试。');
+    expect(store.getState().issueLog.at(-1)).toBe('生成任务响应与当前草稿或任务不匹配。');
+  });
+
+  test('generation polling rejects a snapshot for a different job ID', async () => {
+    let request: CreateGenerationJobRequestContract | undefined;
+    const repository = createRepository({
+      createGenerationJob: async input => {
+        request = input;
+        return {
+          ok: true,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: {
+            jobId: 'job-current',
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'running',
+            stage: 'drafting',
+          },
+        };
+      },
+      getGenerationJob: async () => ({
+        ok: true,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        data: {
+          jobId: 'job-unrelated',
+          draftId: request!.draftId,
+          draftVersion: request!.draftVersion,
+          idempotencyKey: request!.idempotencyKey,
+          status: 'running',
+          stage: 'structuring',
+        },
+      }),
+    });
+    const { store } = createTestStore({
+      adapters: { diaryRepository: repository, memoriesRepository: repository },
+    });
+    const draftId = store.getState().beginCreation();
+    store.getState().setDraftPhotos(draftId, defaultSelectablePhotoIds());
+    const round = store.getState().startGeneration(draftId)!;
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    await store.getState().refreshDraftGeneration(draftId, round);
+
+    expect(store.getState().drafts[draftId].generation.status).toBe('failed');
+    expect(store.getState().drafts[draftId].generation.errorMessage).toBe('生成失败，请稍后重试。');
+    expect(store.getState().issueLog.at(-1)).toBe('生成任务响应与当前草稿或任务不匹配。');
   });
 
   test('generation job creation failure becomes visible failed state instead of spinning forever', async () => {
@@ -2151,36 +2306,26 @@ describe('domain/store regression', () => {
   });
 
   test('failed generation can start a new round and ignore stale refreshes from the old round', async () => {
+    const generationRequests = new Map<string, CreateGenerationJobRequestContract>();
     const repository: CoreDiaryRepository = {
       getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
-      createGenerationJob: jest.fn()
-        .mockResolvedValueOnce({
+      createGenerationJob: jest.fn(async (
+        input: CreateGenerationJobRequestContract,
+      ): Promise<RemoteResult<GenerationJobContract>> => {
+        const jobId = generationRequests.size === 0 ? 'job-retry-1' : 'job-retry-2';
+        generationRequests.set(jobId, input);
+        return {
           ok: true,
           version: CORE_DIARY_CONTRACT_VERSION,
-          data: {
-            jobId: 'job-retry-1',
-            draftId: 'draft-test-retry',
-            draftVersion: 1,
-            idempotencyKey: 'draft-test-retry-round-1',
+          data: bindGenerationJobRequest(input, {
+            jobId,
             status: 'queued',
             stage: 'queued',
             progressPercent: 0,
-          },
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          version: CORE_DIARY_CONTRACT_VERSION,
-          data: {
-            jobId: 'job-retry-2',
-            draftId: 'draft-test-retry',
-            draftVersion: 2,
-            idempotencyKey: 'draft-test-retry-round-2',
-            status: 'queued',
-            stage: 'queued',
-            progressPercent: 0,
-          },
-        }),
+          }),
+        };
+      }),
       getGenerationJob: jest.fn()
         .mockResolvedValueOnce({
           ok: false,
@@ -2191,19 +2336,20 @@ describe('domain/store regression', () => {
             retryable: true,
           },
         })
-        .mockResolvedValueOnce({
-          ok: true,
-          version: CORE_DIARY_CONTRACT_VERSION,
-          data: {
-            jobId: 'job-retry-2',
-            draftId: 'draft-test-retry',
-            draftVersion: 2,
-            idempotencyKey: 'draft-test-retry-round-2',
+        .mockImplementationOnce(async jobId => {
+          const request = generationRequests.get(jobId);
+          if (!request) throw new Error('missing generation request fixture');
+          return {
+            ok: true,
+            version: CORE_DIARY_CONTRACT_VERSION,
+            data: bindGenerationJobRequest(request, {
+              jobId,
             status: 'succeeded',
             stage: 'completed',
             progressPercent: 100,
-            result: buildRemoteGenerationResult('draft-test-retry'),
-          },
+              result: buildRemoteGenerationResult(request.draftId),
+            }),
+          };
         }),
       saveDiary: async input => ({
         ok: true,
@@ -2375,8 +2521,8 @@ describe('domain/store regression', () => {
     const store = createAppStore(deps);
     const get = () => store.getState();
 
-    const firstSearch = get().searchMemories({ month: '2026.01', page: 1, pageSize: 100 });
-    const secondSearch = get().searchMemories({ month: '2026.02', page: 1, pageSize: 100 });
+    const firstSearch = get().searchMemories({ month: '2026-01', page: 1, pageSize: 100 });
+    const secondSearch = get().searchMemories({ month: '2026-02', page: 1, pageSize: 100 });
 
     second.resolve({
       ok: true,
@@ -2558,6 +2704,74 @@ describe('domain/store regression', () => {
     expect(restoredDiary?.coverPhotoId).toBe('photo-1');
   });
 
+  test('memories hydration and search restore the persisted public paragraph scope', async () => {
+    const contentSnapshot = {
+      type: 'travel' as const,
+      subtitle: '',
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: 'photo-1',
+      posterPhotoIds: ['photo-1'],
+      blocks: [
+        { id: 'public-block', type: 'text' as const, content: '公开的段落。', photoIds: ['photo-1'] },
+        { id: 'private-block', type: 'text' as const, content: '未选中的段落。', photoIds: ['photo-2'] },
+      ],
+      people: [],
+    };
+    let listCall = 0;
+    const repository = createRepository({
+      listMemories: async () => {
+        listCall += 1;
+        const privacy = listCall < 3 ? 'public-comments' as const : 'private' as const;
+        return {
+          ok: true as const,
+          version: CORE_DIARY_CONTRACT_VERSION,
+          data: {
+            items: [{
+              id: 'diary-public-scope',
+              title: '已保存选段',
+              summary: '公开的段落。',
+              location: '苏州',
+              date: '2026.10.14',
+              privacy,
+              photoIds: ['photo-1', 'photo-2', 'photo-3'],
+              ...(privacy === 'public-comments' ? { publicBlockIds: ['public-block'] } : {}),
+              version: 2,
+              contentSnapshot,
+            }],
+            page: 1,
+            pageSize: 100,
+            total: 1,
+          },
+        };
+      },
+    });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+    const get = () => store.getState();
+
+    await get().hydrateMemories();
+    let restored = get().diaries.find(item => item.id === 'diary-public-scope')!;
+    expect(restored.publicBlockIds).toEqual(['public-block']);
+    expect(projectDiaryForSharing(restored).blocks.map(block => block.id)).toEqual(['public-block']);
+
+    await get().searchMemories({ page: 1, pageSize: 100 });
+    restored = get().memoriesItems.find(item => item.id === 'diary-public-scope')!;
+    expect(restored.publicBlockIds).toEqual(['public-block']);
+    expect(projectDiaryForSharing(restored).blocks.map(block => block.id)).toEqual(['public-block']);
+
+    await get().searchMemories({ page: 1, pageSize: 100 });
+    restored = get().memoriesItems.find(item => item.id === 'diary-public-scope')!;
+    expect(restored.privacy).toBe('private');
+    expect(restored.publicBlockIds).toBeUndefined();
+    expect(projectDiaryForSharing(restored).blocks.map(block => block.id)).toEqual(['public-block', 'private-block']);
+  });
+
   test('metadata-only legacy memories do not synthesize diary body blocks', async () => {
     const repository = createRepository({
       listMemories: async () => ({
@@ -2590,6 +2804,87 @@ describe('domain/store regression', () => {
     await store.getState().hydrateMemories();
 
     expect(store.getState().diaries.find(item => item.id === mockDiaries[0].id)?.blocks).toEqual([]);
+  });
+
+  test('isolates a malformed remote diary snapshot and restores other memories', async () => {
+    const repository = createRepository({
+      listMemories: async () => ({
+        ok: true,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        data: {
+          items: [
+            {
+              id: 'diary-damaged-snapshot',
+              title: '正文快照损坏',
+              summary: '摘要仍可读取。',
+              location: '厦门',
+              date: '2026.10.15',
+              privacy: 'private',
+              photoIds: ['photo-1', 'photo-2', 'photo-3'],
+              version: 1,
+              contentSnapshotStatus: 'invalid',
+            },
+            {
+              id: 'diary-empty-snapshot',
+              title: '正文块为空',
+              summary: '摘要仍可读取。',
+              location: '厦门',
+              date: '2026.10.15',
+              privacy: 'private',
+              photoIds: ['photo-1', 'photo-2', 'photo-3'],
+              version: 1,
+              contentSnapshot: {
+                type: 'travel',
+                subtitle: '',
+                helperMessage: '',
+                characterId: 'character-blue',
+                companionName: '自己',
+                coverPhotoId: 'photo-1',
+                blocks: [],
+              },
+            },
+            {
+              id: 'diary-valid-snapshot',
+              title: '正文正常',
+              summary: '完整正文。',
+              location: '苏州',
+              date: '2026.10.14',
+              privacy: 'private',
+              photoIds: ['photo-1', 'photo-2', 'photo-3'],
+              version: 1,
+              contentSnapshot: {
+                type: 'travel',
+                subtitle: '',
+                helperMessage: '',
+                characterId: 'character-blue',
+                companionName: '自己',
+                coverPhotoId: 'photo-1',
+                blocks: [{ id: 'valid-block', type: 'text', content: '有效正文。', photoIds: ['photo-1'] }],
+              },
+            },
+          ],
+          page: 1,
+          pageSize: 100,
+          total: 3,
+        },
+      }),
+    });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+
+    await store.getState().hydrateMemories();
+
+    expect(store.getState().hydratedMemories).toBe(true);
+    expect(store.getState().diaries.find(item => item.id === 'diary-damaged-snapshot')?.blocks).toEqual([]);
+    expect(store.getState().diaries.find(item => item.id === 'diary-empty-snapshot')?.blocks).toEqual([]);
+    expect(store.getState().diaries.find(item => item.id === 'diary-valid-snapshot')?.blocks).toMatchObject([
+      { id: 'valid-block', type: 'text', content: '有效正文。' },
+    ]);
+    expect(store.getState().issueLog.some(message => message.includes('diary-damaged-snapshot'))).toBe(true);
   });
 
   test('memories filters persist and retry uses the same query after failure', async () => {
@@ -2685,8 +2980,8 @@ describe('domain/store regression', () => {
     });
 
     await get().searchMemories({
-      month: '2026.02',
-      day: '2026.02.03',
+      month: '2026-02',
+      day: '2026-02-03',
       keyword: '厦门',
       page: 1,
       pageSize: 100,
@@ -2701,8 +2996,8 @@ describe('domain/store regression', () => {
     await get().retryMemoriesSearch();
 
     expect(listMemories).toHaveBeenLastCalledWith({
-      month: '2026.02',
-      day: '2026.02.03',
+      month: '2026-02',
+      day: '2026-02-03',
       keyword: '厦门',
       page: 1,
       pageSize: 100,
@@ -2867,7 +3162,7 @@ describe('domain/store regression', () => {
 
     await get().saveDraft(draftId);
 
-    expect(getSaveResult).toHaveBeenCalledWith(`${draftId}-save-${round}`);
+    expect(getSaveResult).toHaveBeenCalledWith(`${draftId}-save-new-0-${round}-${get().drafts[draftId].editRevision}`);
     expect(get().issueLog).toEqual([]);
   });
 
@@ -2913,7 +3208,7 @@ describe('domain/store regression', () => {
       destination: 'complete',
     });
     expect(saveDiary).toHaveBeenCalledTimes(1);
-    expect(getSaveResult).toHaveBeenCalledWith(`${draftId}-save-${round}`);
+    expect(getSaveResult).toHaveBeenCalledWith(`${draftId}-save-new-0-${round}-${get().drafts[draftId].editRevision}`);
     expect(get().diaries.filter(diary => diary.id === 'diary-timeout-recovered')).toHaveLength(1);
     expect(get().drafts[draftId]?.savedDiaryId).toBe('diary-timeout-recovered');
     expect(get().savingDraftIds).toEqual([]);
@@ -2957,7 +3252,7 @@ describe('domain/store regression', () => {
     get().finishGeneration(draftId, round);
     const initialDiaries = JSON.stringify(get().diaries);
     const initialDraftDiary = JSON.stringify(get().drafts[draftId].diary);
-    const idempotencyKey = `${draftId}-save-${round}`;
+    const idempotencyKey = `${draftId}-save-new-0-${round}-${get().drafts[draftId].editRevision}`;
 
     const failed = await get().submitDraft(draftId);
 
@@ -3306,6 +3601,83 @@ describe('domain/store regression', () => {
     expect(get().savingDraftIds).toEqual([]);
     expect(get().diaries).toHaveLength(diaryCount + 1);
     expect(get().drafts[draftId].savedDiaryId).toBe('diary-save-draft-boundary');
+  });
+
+  test('preserves edits made during a save and rebases them onto the confirmed version', async () => {
+    type SaveResult = Awaited<ReturnType<CoreDiaryRepository['saveDiary']>>;
+    const firstSave = createDeferred<SaveResult>();
+    const secondSave = createDeferred<SaveResult>();
+    const saveDiary = jest.fn()
+      .mockReturnValueOnce(firstSave.promise)
+      .mockReturnValueOnce(secondSave.promise);
+    const repository = createRepository({ saveDiary });
+    const store = createAppStore(createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    }));
+    const get = () => store.getState();
+    const draftId = get().beginEdit('diary-1')!;
+    get().updateDraft(draftId, { title: '提交中的版本' });
+    const firstRevision = get().drafts[draftId].editRevision;
+    const firstSubmit = get().submitDraft(draftId);
+    const firstRequest = saveDiary.mock.calls[0][0];
+
+    get().updateDraft(draftId, { title: '提交期间的新修改' });
+    firstSave.resolve({
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: {
+        id: 'diary-1',
+        diaryId: 'diary-1',
+        draftId,
+        savedVersion: 2,
+      },
+    });
+
+    await expect(firstSubmit).resolves.toEqual({
+      ok: false,
+      reason: 'pending',
+      message: '较早版本已保存，新的修改仍保留在草稿中。',
+    });
+    expect(get().diaries.find(diary => diary.id === 'diary-1')?.title).toBe('提交中的版本');
+    expect(get().drafts[draftId]).toMatchObject({
+      sourceDiaryId: 'diary-1',
+      diary: { id: 'diary-1', version: 2, title: '提交期间的新修改' },
+      editRevision: (firstRevision ?? 0) + 1,
+      dirty: true,
+      savedDiaryId: undefined,
+    });
+    expect(get().activeDraftId).toBe(draftId);
+    expect(get().savingDraftIds).toEqual([]);
+
+    const secondSubmit = get().submitDraft(draftId);
+    const secondRequest = saveDiary.mock.calls[1][0];
+    expect(secondRequest).toMatchObject({
+      sourceDiaryId: 'diary-1',
+      sourceDiaryVersion: 2,
+      title: '提交期间的新修改',
+    });
+    expect(secondRequest.idempotencyKey).not.toBe(firstRequest.idempotencyKey);
+
+    secondSave.resolve({
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: {
+        id: 'diary-1',
+        diaryId: 'diary-1',
+        draftId,
+        savedVersion: 3,
+      },
+    });
+    await expect(secondSubmit).resolves.toEqual({
+      ok: true,
+      diaryId: 'diary-1',
+      destination: 'detail',
+    });
+    expect(get().diaries.find(diary => diary.id === 'diary-1')?.title).toBe('提交期间的新修改');
+    expect(get().drafts[draftId]?.savedDiaryId).toBe('diary-1');
   });
 
   test('submitDraft rejects a running generation draft without mutating saved diaries or dropping the draft', async () => {
@@ -3925,6 +4297,40 @@ describe('domain/store regression', () => {
     expect(get().issueLog.at(-1)).toBe('段落重写失败：rewrite result response is invalid');
   });
 
+  test('rewrite results bound to another block are rejected by the store', async () => {
+    const repository = createRepository({
+      rewriteBlock: async input => ({
+        ok: true,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        data: {
+          draftId: input.draftId,
+          blockId: 'different-block',
+          draftVersion: input.draftVersion,
+          blockType: input.blockType,
+          content: '不应写入的串线结果',
+        },
+      }),
+    });
+    const deps = createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    });
+    const store = createAppStore(deps);
+    const get = () => store.getState();
+    const draftId = get().beginEdit('diary-1')!;
+    const targetBlock = get().drafts[draftId].diary.blocks.find(item => item.type === 'text')!;
+    const originalContent = 'content' in targetBlock ? targetBlock.content : '';
+
+    get().rewriteDraftBlock(draftId, targetBlock.id);
+    await flushAsyncWork();
+
+    const currentTarget = get().drafts[draftId].diary.blocks.find(item => item.id === targetBlock.id);
+    expect(currentTarget && 'content' in currentTarget ? currentTarget.content : '').toBe(originalContent);
+    expect(get().issueLog.at(-1)).toBe('段落重写结果与当前请求不匹配。');
+  });
+
   test('repeated rewrite taps reuse the in-flight request and stale results cannot overwrite new input', async () => {
     const deferred = createDeferred<Awaited<ReturnType<NonNullable<CoreDiaryRepository['rewriteBlock']>>>>();
     const rewriteBlock = jest.fn().mockReturnValue(deferred.promise);
@@ -3962,6 +4368,69 @@ describe('domain/store regression', () => {
 
     const currentTarget = get().drafts[draftId].diary.blocks.find(item => item.id === targetBlock.id);
     expect(currentTarget && 'content' in currentTarget ? currentTarget.content : '').toBe('我先手动改成新内容');
+  });
+
+  test('rewrite results are invalidated when the target photo context changes', async () => {
+    const first = createDeferred<Awaited<ReturnType<NonNullable<CoreDiaryRepository['rewriteBlock']>>>>();
+    const second = createDeferred<Awaited<ReturnType<NonNullable<CoreDiaryRepository['rewriteBlock']>>>>();
+    const rewriteBlock = jest.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const repository = createRepository({ rewriteBlock });
+    const deps = createDefaultAppStoreDeps({
+      adapters: {
+        diaryRepository: repository,
+        memoriesRepository: repository,
+      },
+    });
+    const store = createAppStore(deps);
+    const get = () => store.getState();
+    const draftId = get().beginEdit('diary-1')!;
+    const targetBlock = get().drafts[draftId].diary.blocks.find(item => item.type === 'text')!;
+    const originalContent = 'content' in targetBlock ? targetBlock.content : '';
+
+    get().rewriteDraftBlock(draftId, targetBlock.id);
+    expect(rewriteBlock).toHaveBeenCalledTimes(1);
+    expect(rewriteBlock.mock.calls[0][0]).not.toHaveProperty('fingerprint');
+    expect(rewriteBlock.mock.calls[0][0]).not.toHaveProperty('requestId');
+
+    get().setDraftBlockPhotos(draftId, targetBlock.id, ['photo-3']);
+    first.resolve({
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: {
+        draftId,
+        blockId: targetBlock.id,
+        draftVersion: get().drafts[draftId].generation.round,
+        blockType: 'text',
+        content: '基于旧图片上下文生成的迟到结果',
+        photoIds: undefined,
+      },
+    });
+    await flushAsyncWork();
+
+    let currentTarget = get().drafts[draftId].diary.blocks.find(item => item.id === targetBlock.id);
+    expect(currentTarget && 'content' in currentTarget ? currentTarget.content : '').toBe(originalContent);
+
+    get().rewriteDraftBlock(draftId, targetBlock.id);
+    expect(rewriteBlock).toHaveBeenCalledTimes(2);
+    expect(rewriteBlock.mock.calls[1][0].photoIds).toEqual(['photo-3']);
+    second.resolve({
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: {
+        draftId,
+        blockId: targetBlock.id,
+        draftVersion: get().drafts[draftId].generation.round,
+        blockType: 'text',
+        content: '基于当前图片上下文生成的新结果',
+        photoIds: undefined,
+      },
+    });
+    await flushAsyncWork();
+
+    currentTarget = get().drafts[draftId].diary.blocks.find(item => item.id === targetBlock.id);
+    expect(currentTarget && 'content' in currentTarget ? currentTarget.content : '').toBe('基于当前图片上下文生成的新结果');
   });
 
   test('saved drafts ignore later edits and rewrites, and repeated save keeps the first saved diary unchanged', async () => {

@@ -21,7 +21,7 @@ export default function InsightsEntry() {
         <Ionicons name="chevron-back" size={23} color="#68513B" />
       </Pressable>
     </View>} contentStyle={s.screen}>
-    <GrowthArtwork kind="tree" width={contentWidth} onLabelPress={name => router.push({ pathname: '/profile/anchors', params: { tag: name } })} onFlowerPress={() => router.push('/profile/flowers')} />
+    <GrowthArtwork kind="tree" width={contentWidth} onLabelPress={({ id }) => router.push({ pathname: '/profile/anchors', params: { tag: id } })} onFlowerPress={() => router.push('/profile/flowers')} />
     <Pressable accessibilityRole="button" accessibilityLabel="查看记忆花朵" onPress={() => router.push('/profile/flowers')} style={({ pressed }) => [s.grow, pressed && { opacity: 0.75 }]}>
       <Ionicons name="leaf" size={17} color="#88B64E" /><Text style={s.growText}>再长 3 片叶子就会开花啦</Text>
     </Pressable>

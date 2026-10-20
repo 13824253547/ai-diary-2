@@ -184,6 +184,65 @@ describe('HttpCoreDiaryRepository', () => {
     }
   });
 
+  test('binds generation create, poll, and cancel responses to their requests', async () => {
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+    const job = {
+      jobId: 'job-other',
+      draftId: 'draft-1',
+      draftVersion: 1,
+      idempotencyKey: 'draft-1-round-1',
+      status: 'running',
+      stage: 'drafting',
+    };
+
+    const invalidId = await repository.getGenerationJob('');
+    expect(invalidId).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, data: { ...job, idempotencyKey: 'another-request' } }),
+    });
+    const create = await repository.createGenerationJob({
+      draftId: 'draft-1',
+      draftVersion: 1,
+      idempotencyKey: 'draft-1-round-1',
+    });
+    expect(create).toMatchObject({ ok: false, error: { code: 'provider_failed', retryable: false } });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, data: job }),
+    });
+    const poll = await repository.getGenerationJob('job-requested');
+    expect(poll).toMatchObject({ ok: false, error: { code: 'provider_failed', retryable: false } });
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ok: true, data: { ...job, status: 'cancelled', stage: 'cancelled' } }),
+    });
+    const cancel = await repository.cancelGenerationJob('job-requested');
+    expect(cancel).toMatchObject({ ok: false, error: { code: 'provider_failed', retryable: false } });
+  });
+
+  test('rejects an invalid generation draftVersion before sending a request', async () => {
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    const result = await repository.createGenerationJob({
+      draftId: 'draft-1',
+      draftVersion: 1.5,
+      idempotencyKey: 'draft-1-round-1',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('invalid_input');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   test('accepts generation job payloads that only report stage without progress percent', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
@@ -469,6 +528,46 @@ describe('HttpCoreDiaryRepository', () => {
     if (!result.ok) {
       expect(result.error.code).toBe('provider_failed');
       expect(result.error.message).toBe('rewrite result response is invalid');
+    }
+  });
+
+  test('rejects rewrite results bound to a different request target', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        data: {
+          draftId: 'draft-1',
+          blockId: 'another-block',
+          draftVersion: 2,
+          blockType: 'text',
+          content: '不应被写入的结果。',
+        },
+      }),
+    });
+
+    const repository = new HttpCoreDiaryRepository(
+      new ApiClient({
+        baseUrl: 'http://127.0.0.1:3001/api',
+      }),
+    );
+
+    const result = await repository.rewriteBlock({
+      draftId: 'draft-1',
+      blockId: 'block-1',
+      draftVersion: 2,
+      characterId: 'character-blue',
+      blockType: 'text',
+      content: '原始段落',
+      selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+      photoIds: ['photo-1'],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('provider_failed');
+      expect(result.error.retryable).toBe(false);
+      expect(result.error.message).toBe('rewrite result response does not match the request');
     }
   });
 
@@ -801,6 +900,100 @@ describe('HttpCoreDiaryRepository', () => {
     }
   });
 
+  test('rejects malformed lookup IDs and a valid diary response for another ID', async () => {
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    const malformed = await repository.getDiary(null as never);
+    expect(malformed).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        data: {
+          id: 'diary-other',
+          draftId: 'draft-other',
+          title: '另一篇日记',
+          summary: '另一段摘要。',
+          location: '厦门',
+          date: '2026.10.15',
+          privacy: 'private',
+          photoIds: ['photo-1', 'photo-2', 'photo-3'],
+          version: 1,
+          contentSnapshot: {
+            type: 'travel',
+            subtitle: '',
+            helperMessage: '',
+            characterId: 'character-blue',
+            companionName: '自己',
+            coverPhotoId: 'photo-1',
+            blocks: [{ id: 'block-other', type: 'text', content: '另一篇正文。' }],
+            people: [],
+          },
+        },
+      }),
+    });
+
+    const mismatched = await repository.getDiary('diary-requested');
+    expect(mismatched).toMatchObject({
+      ok: false,
+      error: { code: 'provider_failed', retryable: false },
+    });
+  });
+
+  test('rejects empty diary bodies and photo references outside the saved diary', async () => {
+    const validSnapshot = {
+      type: 'travel',
+      subtitle: '',
+      helperMessage: '',
+      characterId: 'character-blue',
+      companionName: '自己',
+      coverPhotoId: 'photo-1',
+      blocks: [{ id: 'block-1', type: 'text', content: '正文。', photoIds: ['photo-1'] }],
+      posterPhotoIds: ['photo-1'],
+      people: [],
+    };
+    const invalidSnapshots = [
+      { ...validSnapshot, blocks: [] },
+      { ...validSnapshot, coverPhotoId: 'photo-outside-diary' },
+      {
+        ...validSnapshot,
+        blocks: [{ id: 'block-1', type: 'text', content: '越界引用。', photoIds: ['photo-outside-diary'] }],
+      },
+    ];
+
+    for (const contentSnapshot of invalidSnapshots) {
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          data: {
+            id: 'diary-1',
+            title: '台南日记',
+            summary: '正文。',
+            location: '台南',
+            date: '2026.10.15',
+            privacy: 'private',
+            photoIds: ['photo-1', 'photo-2', 'photo-3'],
+            version: 1,
+            contentSnapshot,
+          },
+        }),
+      });
+      const repository = new HttpCoreDiaryRepository(new ApiClient({
+        baseUrl: 'http://127.0.0.1:3001/api',
+      }));
+
+      const result = await repository.getDiary('diary-1');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('provider_failed');
+    }
+  });
+
   test('rejects a diary response that omits its content snapshot', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
@@ -826,5 +1019,90 @@ describe('HttpCoreDiaryRepository', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('provider_failed');
+  });
+
+  test('loads every memories page when the UI requests the complete collection', async () => {
+    const firstItems = Array.from({ length: 10 }, (_, index) => ({ id: `diary-${index + 1}` }));
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          data: { items: firstItems, page: 1, pageSize: 10, total: 11 },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          data: { items: [{ id: 'diary-11' }], page: 2, pageSize: 10, total: 11 },
+        }),
+      });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    const result = await repository.listAllMemories({ page: 1, pageSize: 10 });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.items).toHaveLength(11);
+      expect(result.data.items[10].id).toBe('diary-11');
+      expect(result.data.total).toBe(11);
+    }
+  });
+
+  test('rejects inconsistent memories pages instead of returning a truncated collection', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          data: { items: Array.from({ length: 10 }, (_, index) => ({ id: `diary-${index + 1}` })), page: 1, pageSize: 10, total: 11 },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          data: { items: [{ id: 'diary-11' }], page: 2, pageSize: 10, total: 12 },
+        }),
+      });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    const result = await repository.listAllMemories({ page: 1, pageSize: 10 });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('provider_failed');
+  });
+
+  test('rejects invalid memories dates before making an HTTP request', async () => {
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+    }));
+
+    const invalidMonth = await repository.listAllMemories({
+      month: '2026-13',
+      page: 1,
+      pageSize: 20,
+    });
+    const invalidDay = await repository.listMemories({
+      day: '2026-02-30',
+      page: 1,
+      pageSize: 20,
+    });
+
+    expect(invalidMonth).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_input' },
+    });
+    expect(invalidDay).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_input' },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

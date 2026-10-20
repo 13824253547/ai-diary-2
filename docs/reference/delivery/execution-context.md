@@ -17,7 +17,7 @@
 
 ## 执行边界
 
-2026-10-15 策略更新：当前按 [开发优先策略](development-strategy.md) 执行 DEV/TEST 轮次，阶段状态见 [开发台账](reports/development-progress.md)。下面的测试层级和真实交付标准保留，但不要求开发阶段每完成一项即跑测试。
+2026-10-16 策略更新：当前按 [开发优先策略](development-strategy.md) 执行 DEV/TEST 轮次；先尊重任务依赖，再从依赖就绪集合中按复杂度由易到难推进。初次开发后的缺陷修复最多两轮，每轮后复测，仍失败则登记暂跳；阶段及轮次状态见 [开发台账](reports/development-progress.md)。下面的测试层级和真实交付标准保留，但不要求开发阶段每完成一项即跑测试。
 
 外部能力缺失允许在服务/adapter/provider 边界使用显式 mock 先开发业务，分类见 [外部能力清单](external-dependencies.md)。该授权不允许 mock 与真实身份/生产数据/真实交付记录混用，也不允许改变已定型 UI/UX、将产品建议当作确认，或以模拟成功代替真实验收。
 

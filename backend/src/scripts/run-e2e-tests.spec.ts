@@ -1,4 +1,4 @@
-import { validateE2eDatabaseUrl } from './run-e2e-tests';
+import { validateE2eDatabaseEnvironment, validateE2eDatabaseUrl } from './run-e2e-tests';
 
 describe('e2e database guard', () => {
   it('requires an explicit isolated database URL', () => {
@@ -18,5 +18,16 @@ describe('e2e database guard', () => {
     expect(
       validateE2eDatabaseUrl('mysql://root:root@127.0.0.1:33306/ai_diary_e2e_run_123'),
     ).toBe('mysql://root:root@127.0.0.1:33306/ai_diary_e2e_run_123');
+  });
+
+  it('requires the active Prisma URL to match the validated e2e URL', () => {
+    const safeUrl = 'mysql://root:root@127.0.0.1:33306/ai_diary_e2e_run_123';
+    expect(validateE2eDatabaseEnvironment(safeUrl, safeUrl)).toBe(safeUrl);
+    expect(() => validateE2eDatabaseEnvironment(safeUrl, undefined))
+      .toThrow('DATABASE_URL must match');
+    expect(() => validateE2eDatabaseEnvironment(
+      safeUrl,
+      'mysql://root:root@127.0.0.1:33306/ai_diary',
+    )).toThrow('DATABASE_URL must match');
   });
 });

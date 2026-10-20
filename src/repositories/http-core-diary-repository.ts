@@ -1,4 +1,4 @@
-import { CORE_DIARY_CONTRACT_VERSION, isDiaryContentContract, isDraftContract, isGenerationJobContract, isRewriteBlockResultContract, type DiaryContract, type DraftContract, type GenerationJobContract, type MemoriesQuery, type MemoriesQueryResult, type RemoteError, type RemoteResult, type RewriteBlockRequestContract, type RewriteBlockResultContract, type SaveDiaryRequestContract, type SaveDraftResult } from '../contracts/core-diary-contract';
+import { CORE_DIARY_CONTRACT_VERSION, isCreateGenerationJobRequestContract, isDiaryContentContractForPhotoIds, isDraftContract, isGenerationJobContract, isMemoriesQuery, isRewriteBlockResultContract, MEMORIES_PAGE_SIZES, type CreateGenerationJobRequestContract, type DiaryContract, type DraftContract, type GenerationJobContract, type MemoriesQuery, type MemoriesQueryResult, type RemoteError, type RemoteResult, type RewriteBlockRequestContract, type RewriteBlockResultContract, type SaveDiaryRequestContract, type SaveDraftResult } from '../contracts/core-diary-contract';
 import { ApiClient, ApiRequestError, type ApiRequestOptions, type ApiResponse } from '../services/api-client';
 import type { CoreDiaryRepository, IdentityContract } from './core-diary-repository';
 import type { DiaryItem } from '../types/diary';
@@ -27,6 +27,10 @@ const ERROR_CODES = new Set<ErrorEnvelope['error']['code']>([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 function isOkEnvelope<T>(value: unknown): value is OkEnvelope<T> {
@@ -75,7 +79,7 @@ function buildDiaryItem(value: unknown): DiaryItem | undefined {
   if (!isRecord(value)) return undefined;
   const data = value as unknown as DiaryContract;
   const content = data.contentSnapshot;
-  if (!isDiaryContentContract(content)) return undefined;
+  if (!isDiaryContentContractForPhotoIds(content, data.photoIds)) return undefined;
   return {
     ...content,
     id: data.id,
@@ -110,35 +114,43 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     }, options);
   }
 
-  async createGenerationJob(input: {
-    draftId: string;
-    draftVersion: number;
-    idempotencyKey: string;
-  }, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>> {
+  async createGenerationJob(input: CreateGenerationJobRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>> {
+    if (!isCreateGenerationJobRequestContract(input)) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: { code: 'invalid_input', message: '生成任务请求参数无效。', retryable: false },
+      };
+    }
     return this.requestGenerationJobResult('/generation/jobs', {
       method: 'POST',
       body: JSON.stringify(input),
-    }, options);
+    }, options, job =>
+      job.draftId === input.draftId
+      && job.draftVersion === input.draftVersion
+      && job.idempotencyKey === input.idempotencyKey);
   }
 
   async rewriteBlock(input: RewriteBlockRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<RewriteBlockResultContract>> {
     return this.requestRewriteResult('/generation/rewrite', {
       method: 'POST',
       body: JSON.stringify(input),
-    }, options);
+    }, options, input);
   }
 
   async getGenerationJob(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>> {
-    return this.requestGenerationJobResult(`/generation/jobs/${jobId}`, {
+    if (!isNonEmptyString(jobId)) return this.invalidGenerationJobRequest();
+    return this.requestGenerationJobResult(`/generation/jobs/${encodeURIComponent(jobId)}`, {
       method: 'GET',
-    }, options);
+    }, options, job => job.jobId === jobId);
   }
 
   async cancelGenerationJob(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>> {
-    return this.requestGenerationJobResult(`/generation/jobs/${jobId}/cancel`, {
+    if (!isNonEmptyString(jobId)) return this.invalidGenerationJobRequest();
+    return this.requestGenerationJobResult(`/generation/jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: 'POST',
       body: JSON.stringify({}),
-    }, options);
+    }, options, job => job.jobId === jobId);
   }
 
   async saveDiary(input: SaveDiaryRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<SaveDraftResult & { id?: string }>> {
@@ -200,7 +212,18 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     }, options);
   }
 
-  async getDiary(diaryId: string, options?: ApiRequestOptions): Promise<RemoteResult<DiaryItem>> {
+  async getDiary(diaryId: unknown, options?: ApiRequestOptions): Promise<RemoteResult<DiaryItem>> {
+    if (typeof diaryId !== 'string' || !diaryId.trim()) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: {
+          code: 'invalid_input',
+          message: '日记标识无效。',
+          retryable: false,
+        },
+      };
+    }
     let response: ApiResponse<OkEnvelope<DiaryContract> | ErrorEnvelope>;
     try {
       response = await this.client.request(`/diaries/${encodeURIComponent(diaryId)}`, {
@@ -210,7 +233,7 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
       return requestFailure(error);
     }
     const json = response.data;
-    if (!response.ok || !isOkEnvelope<{ id?: string; diaryId: string; draftId: string; savedVersion: number }>(json)) {
+    if (!response.ok || !isOkEnvelope<DiaryContract>(json)) {
       return {
         ok: false,
         version: CORE_DIARY_CONTRACT_VERSION,
@@ -229,6 +252,17 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
         },
       };
     }
+    if (diary.id !== diaryId) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: {
+          code: 'provider_failed',
+          message: '服务器返回的日记标识与请求不一致。',
+          retryable: false,
+        },
+      };
+    }
     return {
       ok: true,
       version: CORE_DIARY_CONTRACT_VERSION,
@@ -237,6 +271,7 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
   }
 
   async listMemories(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>> {
+    if (!isMemoriesQuery(query)) return this.invalidMemoriesQueryResult();
     const search = new URLSearchParams();
     if (query.month) search.set('month', query.month);
     if (query.day) search.set('day', query.day);
@@ -259,6 +294,85 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
       };
     }
     return { ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: response.data.data };
+  }
+
+  async listAllMemories(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>> {
+    if (!isMemoriesQuery(query)) return this.invalidMemoriesQueryResult();
+    const pageSize = query.pageSize;
+    if (!MEMORIES_PAGE_SIZES.includes(pageSize as typeof MEMORIES_PAGE_SIZES[number])) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: { code: 'invalid_input', message: 'unsupported memories page size', retryable: false },
+      };
+    }
+
+    const first = await this.listMemories({ ...query, page: 1 }, options);
+    if (!first.ok) return first;
+    const { total } = first.data;
+    if (
+      first.data.page !== 1
+      || first.data.pageSize !== pageSize
+      || !Number.isSafeInteger(total)
+      || total < 0
+      || !Array.isArray(first.data.items)
+      || first.data.items.length > total
+    ) {
+      return this.invalidMemoriesPaginationResult();
+    }
+
+    const items = [...first.data.items];
+    const itemIds = new Set(items.map(item => item.id));
+    const pageCount = Math.ceil(total / pageSize);
+    for (let page = 2; page <= pageCount; page += 1) {
+      const next = await this.listMemories({ ...query, page, pageSize }, options);
+      if (!next.ok) return next;
+      if (
+        next.data.page !== page
+        || next.data.pageSize !== pageSize
+        || next.data.total !== total
+        || !Array.isArray(next.data.items)
+        || next.data.items.length === 0
+      ) {
+        return this.invalidMemoriesPaginationResult();
+      }
+      if (next.data.items.some(item => itemIds.has(item.id))) {
+        return this.invalidMemoriesPaginationResult();
+      }
+      next.data.items.forEach(item => itemIds.add(item.id));
+      items.push(...next.data.items);
+    }
+
+    if (items.length !== total) return this.invalidMemoriesPaginationResult();
+    return {
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: { items, page: 1, pageSize, total },
+    };
+  }
+
+  private invalidMemoriesPaginationResult(): RemoteResult<MemoriesQueryResult> {
+    return {
+      ok: false,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      error: {
+        code: 'provider_failed',
+        message: 'memories pagination response is inconsistent',
+        retryable: true,
+      },
+    };
+  }
+
+  private invalidMemoriesQueryResult(): RemoteResult<MemoriesQueryResult> {
+    return {
+      ok: false,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      error: {
+        code: 'invalid_input',
+        message: 'memories query contains an invalid date or pagination value',
+        retryable: false,
+      },
+    };
   }
 
   private async requestSaveResult(
@@ -343,6 +457,7 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     path: string,
     init: RequestInit,
     options?: ApiRequestOptions,
+    matchesRequest?: (job: GenerationJobContract) => boolean,
   ): Promise<RemoteResult<GenerationJobContract>> {
     let response: ApiResponse<OkEnvelope<GenerationJobContract> | ErrorEnvelope>;
     try {
@@ -363,13 +478,36 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
         error: responseError(response),
       };
     }
-    return this.parseGenerationJobResult(json.data);
+    const parsed = this.parseGenerationJobResult(json.data);
+    if (!parsed.ok || !matchesRequest || matchesRequest(parsed.data)) return parsed;
+    return {
+      ok: false,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      error: {
+        code: 'provider_failed',
+        message: 'generation job response does not match the request',
+        retryable: false,
+      },
+    };
+  }
+
+  private invalidGenerationJobRequest(): RemoteResult<GenerationJobContract> {
+    return {
+      ok: false,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      error: {
+        code: 'invalid_input',
+        message: 'generation job ID is invalid',
+        retryable: false,
+      },
+    };
   }
 
   private async requestRewriteResult(
     path: string,
     init: RequestInit,
     options?: ApiRequestOptions,
+    expected?: Pick<RewriteBlockRequestContract, 'draftId' | 'blockId' | 'draftVersion' | 'blockType'>,
   ): Promise<RemoteResult<RewriteBlockResultContract>> {
     let response: ApiResponse<OkEnvelope<RewriteBlockResultContract> | ErrorEnvelope>;
     try {
@@ -397,6 +535,25 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
         error: {
           code: 'provider_failed',
           message: 'rewrite result response is invalid',
+          retryable: false,
+        },
+      };
+    }
+    if (
+      expected
+      && (
+        json.data.draftId !== expected.draftId
+        || json.data.blockId !== expected.blockId
+        || json.data.draftVersion !== expected.draftVersion
+        || json.data.blockType !== expected.blockType
+      )
+    ) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: {
+          code: 'provider_failed',
+          message: 'rewrite result response does not match the request',
           retryable: false,
         },
       };

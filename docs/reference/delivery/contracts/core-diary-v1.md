@@ -83,6 +83,9 @@
 | `selectedPhotoIds` | `string[]` | 当前选中照片 |
 | `privacy` | `private \| anonymous \| public-likes \| public-comments` | 当前草稿隐私 |
 | `version` | `number` | 草稿版本号 |
+| `editRevision` | `number` | 本地草稿快照修订号；每次有效状态修改递增，用于区分保存命令并在重启后稳定重试 |
+
+`POST /drafts` 校验可选 ID 为非空字符串、日记类型/角色/隐私为已定义值、照片 ID 为字符串数组、版本为从 1 开始的正安全整数。照片数组在此边界允许为空，不额外规定数量或去重语义。缺少/空白设备身份优先返回 `device_identity_required`；畸形请求返回 `invalid_input`，不得写入草稿。
 
 ### 3.3 GenerationJob
 
@@ -90,11 +93,19 @@
 | --- | --- | --- |
 | `jobId` | `string` | 任务 ID |
 | `draftId` | `string` | 归属草稿 |
-| `draftVersion` | `number` | 提交时的草稿版本 |
+| `draftVersion` | `number` | 提交时的草稿版本，正安全整数，从 1 开始 |
 | `idempotencyKey` | `string` | 幂等键 |
 | `status` | `queued \| running \| succeeded \| failed \| cancelled` | 任务状态 |
 | `stage` | `queued \| analyzing-photos \| drafting \| structuring \| completed \| failed \| cancelled` | 可观测阶段 |
 | `progressPercent` | `number?` | 可选百分比；没有真实值时不返回 |
+
+`POST /generation/jobs` requires non-empty `draftId` and `idempotencyKey`, and `draftVersion` must be a positive safe integer. The server validates device identity before inspecting the request body; malformed input returns `invalid_input` without creating or reading a generation task.
+
+The client accepts a successful create response only when its `draftId`, `draftVersion`, and `idempotencyKey` match the submitted request. Poll/cancel responses must carry the exact requested `jobId`. The Store repeats the draft/version/idempotency association check and, while polling, also checks the active `jobId` before applying any snapshot.
+
+`POST /generation/rewrite` requires non-empty draft/block/character IDs, a positive safe-integer `draftVersion`, `blockType` of `text` or `quote`, non-blank source content, and string arrays for `selectedPhotoIds` and optional `photoIds`. The server validates device identity before the body and returns `invalid_input` for malformed requests without invoking the rewrite service.
+
+A successful rewrite response must echo the requested `draftId`, `blockId`, positive safe-integer `draftVersion`, and `blockType`. The repository and Store reject a response bound to another target/version; the Store also discards a candidate if the source text, character, generation round, selected photo set, or target block photo references changed while the request was pending. Internal deduplication/request IDs are not part of the HTTP payload.
 
 ### 3.4 SaveDraftCommand / SaveDraftResult
 
@@ -122,9 +133,13 @@
 
 `POST /diaries/save` includes a required `contentSnapshot` alongside the save metadata. It preserves the detail fields needed after a process restart: `type`, `subtitle`, `helperMessage`, `characterId`, `companionName`, `coverPhotoId`, `blocks`, and optional `posterPhotoIds` / `people`.
 
-Each block is a text, quote, or photo block. Block IDs must be unique; text/quote/photo references, cover, poster, and person photo references must point to the request's `photoIds`. A non-private visibility update may select only persisted text or quote block IDs. Missing or malformed snapshots and out-of-scope references return `invalid_input`; they must not create or update a diary.
+Each block is a text, quote, or photo block. A saved snapshot must contain at least one text or quote block; block IDs and person IDs must be unique within that snapshot, and photo-block references must point to a text or quote block. Person ID uniqueness protects the current ID-based candidate lookup and list rendering; this does not define name uniqueness or cross-diary identity. Text/quote/photo references, cover, poster, and person photo references must point to the request's `photoIds`. A non-private visibility update may select only persisted text or quote block IDs. Missing or malformed snapshots and out-of-scope references return `invalid_input`; they must not create or update a diary. Client-side diary reads apply the same non-empty body and photo-ownership checks and reject malformed snapshots instead of treating them as complete diary content. If a persisted JSON scalar/array is corrupt, the API omits that body and returns `contentSnapshotStatus: "invalid"` so the client can retain metadata, report the damaged record, and isolate its body without hiding other memories.
 
-`GET /diaries/:id` and `GET /memories` return the persisted `contentSnapshot`. Older metadata-only records are not expanded into synthetic body blocks; they require a content migration/backfill before full detail reading.
+`POST /sharing/project` requires a valid device identity before body inspection. Its body must be an object with a non-empty `diaryId`, one supported privacy value, and an optional array of non-empty block IDs; malformed requests return `invalid_input` before database access. Non-private visibility still requires at least one persisted text/quote block ID.
+
+`GET /diaries/:id` returns the persisted `contentSnapshot`; its response ID must match the requested path ID or the client rejects the response. `GET /memories` returns each persisted snapshot. Older metadata-only records are not expanded into synthetic body blocks; they require a content migration/backfill before full detail reading.
+
+Generation result `people`, when present, must also contain unique non-empty person IDs. The provider rejects duplicate IDs as a non-retryable `provider_failed`; the client contract and save boundary reject duplicate IDs rather than choosing one candidate implicitly.
 
 ### 3.6 MemoriesQuery
 
@@ -134,7 +149,11 @@ Each block is a text, quote, or photo block. Block IDs must be unique; text/quot
 | `day` | `string?` | `YYYY-MM-DD` |
 | `keyword` | `string?` | 仅搜标题/摘要/地点 |
 | `page` | `number` | 页码，从 1 开始 |
-| `pageSize` | `number` | 每页数量 |
+| `pageSize` | `10 \| 20 \| 50 \| 100` | 每页数量；完整回忆集合由客户端按页续取，不能因首屏页容量截断月份、搜索和回忆数据 |
+
+`month`, when present, must be a real `YYYY-MM` month; `day`, when present, must be a real Gregorian `YYYY-MM-DD` date. Invalid formats, months, and calendar days return `invalid_input` instead of being reported as an empty result. This validation does not define timezone, cross-day/month attribution, or recent-group behavior; those remain subject to Q-004.
+
+HTTP `page` and `pageSize` query values use decimal integer strings; `page` must be positive and `pageSize` must be one of 10, 20, 50, or 100. Repeated/non-string query parameters and exponent, hexadecimal, or fractional encodings return `invalid_input` before diary data is read. The device identity check runs before query validation.
 
 ## 4. 通用远程结果
 
@@ -182,8 +201,17 @@ Each block is a text, quote, or photo block. Block IDs must be unique; text/quot
 
 - 生成与保存都必须带 `idempotencyKey`。
 - 同一 `draftId + draftVersion + idempotencyKey` 的重复提交，不应产生重复副作用。
+- 生成任务幂等键按设备作用域绑定原始 `draftId + draftVersion`；同键并发/重放且请求一致时返回同一任务，不同草稿或版本复用该键时返回不可重试 `version_conflict`。
+- Save key is stable for one persisted draft revision and includes the source diary/version, generation round, and local `editRevision`; an unchanged retry reuses the key, while a changed payload receives a different key.
+- 保存命令按设备作用域绑定 `draftId + sourceDiaryId + sourceDiaryVersion`；同键重放保持这些命令身份字段，否则返回不可重试 `version_conflict`。相同命令身份的重放返回首次保存结果且不重复写入；客户端修改 payload 时必须生成新 key。
 
-### 6.2 取消与过期
+### 6.2 Edits during save
+
+- A save submits an immutable snapshot of the draft revision captured at request start.
+- If the user changes the draft while that request is pending and the submitted snapshot succeeds, the saved snapshot is committed, while the newer local draft remains unsaved and is rebased onto the returned diary ID/version.
+- The newer draft must not be marked saved or navigated away as if its latest edits were included. A subsequent save uses the rebased source version and a new idempotency key.
+
+### 6.3 取消与过期
 
 - 草稿版本变化后，旧版本的生成/重写回调只能记录历史，不能写入当前草稿。
 - 客户端取消后，迟到成功结果不能把页面状态改回成功。

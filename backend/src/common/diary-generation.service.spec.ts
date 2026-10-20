@@ -95,6 +95,56 @@ describe('DiaryGenerationService', () => {
     expect(result.content).toContain('这段话');
   });
 
+  test('fails closed in production when no real provider is configured', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.AI_PROVIDER;
+
+    await expect(service.generate({
+      draftId: 'draft-production-provider-missing',
+      draftVersion: 1,
+      type: 'travel',
+      characterId: 'character-green',
+      selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+      privacy: 'private',
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: false,
+      message: 'AI provider is not configured for production',
+    });
+
+    await expect(service.rewriteBlock({
+      draftId: 'draft-production-rewrite-provider-missing',
+      blockId: 'block-1',
+      draftVersion: 1,
+      characterId: 'character-green',
+      blockType: 'text',
+      content: '原段落',
+      selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: false,
+      message: 'AI provider is not configured for production',
+    });
+  });
+
+  test('rejects the deterministic provider in production instead of returning mock success', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.AI_PROVIDER = 'deterministic';
+
+    await expect(service.generate({
+      draftId: 'draft-production-deterministic',
+      draftVersion: 1,
+      type: 'travel',
+      characterId: 'character-green',
+      selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+      privacy: 'private',
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: false,
+      message: 'AI provider is not configured for production',
+    });
+  });
+
   test('parses openai-compatible generation responses from fenced JSON content arrays', async () => {
     process.env.AI_PROVIDER = 'openai-compatible';
     process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
@@ -463,6 +513,32 @@ describe('DiaryGenerationService', () => {
     },
   );
 
+  test('rejects openai-compatible results with duplicate person IDs as non-retryable provider failures', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    mockOpenAiGenerationResult(buildValidProviderResult({
+      people: [
+        { id: 'person-duplicate', name: '同行者甲', photoIds: ['photo-8'], avatarPhotoId: 'photo-8' },
+        { id: 'person-duplicate', name: '同行者乙', photoIds: ['photo-9'], avatarPhotoId: 'photo-9' },
+      ],
+    }));
+
+    await expect(service.generate({
+      draftId: 'draft-provider-duplicate-person-ids',
+      draftVersion: 2,
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-8', 'photo-9', 'photo-10'],
+      privacy: 'private',
+    })).rejects.toMatchObject({
+      code: 'provider_failed',
+      retryable: false,
+      message: 'provider people contain duplicate person IDs',
+    } satisfies Partial<DiaryGenerationProviderError>);
+  });
+
   test.each([
     ['title', { title: '' }, 'provider result is missing title'],
     ['summary', { summary: undefined }, 'provider result is missing summary'],
@@ -570,7 +646,12 @@ describe('DiaryGenerationService', () => {
     process.env.AI_PROVIDER_MODEL = 'gpt-test';
     process.env.AI_PROVIDER_API_KEY = 'test-key';
     process.env.AI_PROVIDER_TIMEOUT_MS = '1';
-    global.fetch = jest.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' })) as unknown as typeof fetch;
+    global.fetch = jest.fn((_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        }, { once: true });
+      })) as unknown as typeof fetch;
 
     await expect(service.generate({
       draftId: 'draft-provider-timeout',
@@ -584,6 +665,45 @@ describe('DiaryGenerationService', () => {
       retryable: true,
       message: 'AI provider request timed out after 1ms',
     } satisfies Partial<DiaryGenerationProviderError>);
+  });
+
+  test('propagates generation cancellation to the provider without classifying it as a timeout', async () => {
+    process.env.AI_PROVIDER = 'openai-compatible';
+    process.env.AI_PROVIDER_BASE_URL = 'https://api.openai.com/v1';
+    process.env.AI_PROVIDER_MODEL = 'gpt-test';
+    process.env.AI_PROVIDER_API_KEY = 'test-key';
+    process.env.AI_PROVIDER_TIMEOUT_MS = '10000';
+    let markProviderStarted!: () => void;
+    let providerSignal: AbortSignal | undefined;
+    const providerStarted = new Promise<void>(resolve => {
+      markProviderStarted = resolve;
+    });
+    global.fetch = jest.fn((_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        providerSignal = init?.signal;
+        providerSignal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        }, { once: true });
+        markProviderStarted();
+      })) as unknown as typeof fetch;
+    const controller = new AbortController();
+    const pending = service.generate({
+      draftId: 'draft-provider-cancelled',
+      draftVersion: 2,
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-4', 'photo-5', 'photo-6'],
+      privacy: 'private',
+    }, { signal: controller.signal });
+
+    await providerStarted;
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'cancelled',
+      retryable: false,
+    } satisfies Partial<DiaryGenerationProviderError>);
+    expect(providerSignal?.aborted).toBe(true);
   });
 
   test('uses the default response format and falls back for an invalid generation temperature', async () => {

@@ -1,4 +1,4 @@
-import type { DraftContract, GenerationJobContract, MemoriesQuery, MemoriesQueryResult, RemoteResult, RewriteBlockRequestContract, RewriteBlockResultContract, SaveDiaryRequestContract, SaveDraftResult } from '../contracts/core-diary-contract';
+import type { CreateGenerationJobRequestContract, DraftContract, GenerationJobContract, MemoriesQuery, MemoriesQueryResult, RemoteResult, RewriteBlockRequestContract, RewriteBlockResultContract, SaveDiaryRequestContract, SaveDraftResult } from '../contracts/core-diary-contract';
 import type { ApiRequestOptions } from '../services/api-client';
 import type { DiaryItem } from '../types/diary';
 
@@ -10,11 +10,7 @@ export type IdentityContract = {
 export interface CoreDiaryRepository {
   getIdentity(options?: ApiRequestOptions): Promise<IdentityContract>;
   createDraft(input: DraftContract, options?: ApiRequestOptions): Promise<RemoteResult<DraftContract>>;
-  createGenerationJob(input: {
-    draftId: string;
-    draftVersion: number;
-    idempotencyKey: string;
-  }, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
+  createGenerationJob(input: CreateGenerationJobRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
   rewriteBlock?(input: RewriteBlockRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<RewriteBlockResultContract>>;
   getGenerationJob(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
   cancelGenerationJob?(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
@@ -31,4 +27,5 @@ export interface CoreDiaryRepository {
   getSaveResult(idempotencyKey: string, options?: ApiRequestOptions): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
   getDiary?(diaryId: string, options?: ApiRequestOptions): Promise<RemoteResult<DiaryItem>>;
   listMemories(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>>;
+  listAllMemories?(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>>;
 }

@@ -1,0 +1,137 @@
+import { HttpAnchorReadModelRepository } from '../http-anchor-read-model-repository';
+import { AnchorReadRepositoryError } from '../anchor-read-model-repository';
+import type { ApiClient } from '../../services/api-client';
+
+const page = {
+  items: [{
+    id: 'row-1',
+    anchorId: 'anchor-1',
+    tagId: 'tag-stable',
+    sourceBlockId: 'block-1',
+    excerpt: 'A saved excerpt.',
+    source: 'provider',
+    diary: {
+      id: 'diary-1',
+      version: 3,
+      title: 'A saved diary',
+      date: '2026-10-16T00:00:00.000Z',
+      coverPhotoId: 'photo-1',
+    },
+  }],
+  tagId: 'tag-stable',
+  page: 1,
+  pageSize: 20,
+  total: 1,
+};
+
+const pendingRun = {
+  diaryId: 'diary-1',
+  diaryVersion: 3,
+  requestId: 'request-1',
+  attempt: 1,
+  status: 'pending',
+  anchors: [],
+};
+
+describe('HttpAnchorReadModelRepository', () => {
+  const client = { request: jest.fn() } as unknown as ApiClient;
+  const repository = new HttpAnchorReadModelRepository(client);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('queries only an explicit tag and validates the source diary projection', async () => {
+    jest.mocked(client.request).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true, version: 'anchor-extraction-v1', data: page },
+    });
+
+    await expect(repository.listByTag({ tagId: 'tag-stable' })).resolves.toEqual(page);
+    expect(client.request).toHaveBeenCalledWith(
+      '/anchors?tagId=tag-stable&page=1&pageSize=20',
+      { method: 'GET' },
+      undefined,
+    );
+    await expect(repository.listByTag({ tagId: ' ' }))
+      .rejects.toMatchObject({ code: 'invalid_input' });
+  });
+
+  test('rejects malformed queries and responses for a different tag or page', async () => {
+    await expect(repository.listByTag(null as never)).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(repository.listByTag({
+      tagId: 'tag-stable',
+      page: '1',
+    } as never)).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(client.request).not.toHaveBeenCalled();
+
+    const mismatches = [
+      { ...page, tagId: 'tag-other', items: page.items.map(item => ({ ...item, tagId: 'tag-other' })) },
+      { ...page, page: 2 },
+      { ...page, pageSize: 10 },
+    ];
+    for (const responsePage of mismatches) {
+      jest.mocked(client.request).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: { ok: true, version: 'anchor-extraction-v1', data: responsePage },
+      });
+      await expect(repository.listByTag({ tagId: 'tag-stable' })).rejects.toMatchObject({
+        code: 'provider_failed',
+        retryable: false,
+      });
+    }
+  });
+
+  test('starts a request with diary source version and attempt', async () => {
+    jest.mocked(client.request).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true, version: 'anchor-extraction-v1', data: pendingRun },
+    });
+
+    await expect(repository.beginExtraction({
+      diaryId: 'diary-1',
+      diaryVersion: 3,
+      requestId: 'request-1',
+      attempt: 1,
+    })).resolves.toEqual(pendingRun);
+    expect(client.request).toHaveBeenCalledWith(
+      '/anchors/extractions/begin',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          diaryId: 'diary-1',
+          diaryVersion: 3,
+          requestId: 'request-1',
+          attempt: 1,
+        }),
+      },
+      undefined,
+    );
+  });
+
+  test('refuses mock results and fails closed on malformed service responses', async () => {
+    await expect(repository.completeExtraction({
+      attempt: 1,
+      result: {
+        requestId: 'request-1',
+        diaryId: 'diary-1',
+        diaryVersion: 3,
+        source: 'mock',
+        anchors: [],
+      } as never,
+    })).rejects.toBeInstanceOf(AnchorReadRepositoryError);
+    expect(client.request).not.toHaveBeenCalled();
+
+    jest.mocked(client.request).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true, version: 'wrong-version', data: page },
+    });
+    await expect(repository.listByTag({ tagId: 'tag-stable' }))
+      .rejects.toMatchObject({ code: 'provider_failed' });
+  });
+});

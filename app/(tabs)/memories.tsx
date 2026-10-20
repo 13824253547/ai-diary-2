@@ -80,9 +80,10 @@ export default function MemoriesScreen() {
     return targetDay >= startDay && targetDay <= endDay;
   });
   useEffect(() => {
-    const queryDay = day ? `${selectedMonth}.${String(day).padStart(2, '0')}` : undefined;
+    const queryMonth = month === '全部' ? undefined : month.replaceAll('.', '-');
+    const queryDay = day && queryMonth ? `${queryMonth}-${String(day).padStart(2, '0')}` : undefined;
     void searchMemories({
-      month: month === '全部' ? undefined : month,
+      month: queryMonth,
       day: queryDay,
       keyword: search.trim() || undefined,
       page: 1,

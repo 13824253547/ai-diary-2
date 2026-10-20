@@ -1,16 +1,38 @@
 # 当前执行快照
 
-## 当前阶段（2026-10-15）
+## 当前阶段（2026-10-16）
 
-`DEV-1`：用户批准先完成可开发业务，缺第三方能力使用隔离 mock 或延期适配器，再集中测试、问题返工。详情见 [开发策略](../development-strategy.md)、[外部能力分类](../external-dependencies.md) 和 [开发台账](development-progress.md)。
+最新阶段为 `TEST-14`（DEV-12 数据库服务集成后的集中回归）并已完成；DEV-1/2/3 及后续轮次历史均保留。后端 unit 17/17 suites、199/199 tests，专用隔离 MySQL e2e 49/49，typecheck、backend build、migrate status 与 schema diff 通过；BAS-004-A01 guard 仍通过。DEV-12 增加 discovery/chat/anchor 服务层部分证据，但没有扩大整项 CASE passed。下阶段 DEV-13 继续全范围开发与复测；其他真实 provider、设备、文件和产品决策 CASE 不因本轮完成而关闭。
 
-本轮执行的是文档/依赖扫描，未运行业务测试或数据库操作；下表保留既有 CASE 证据。中断前新增的 app store + HTTP repository 集成测试已存在于 `backend/test/app.e2e-spec.ts`，本轮只确认源码存在，未验证其运行结果；不得拿下面的历史 40/40 证明新增用例通过。集中 TEST 轮再核验，正式 UI/UX 未调整。
+`DEV-5`（TEST-6 后缺陷修复轮）：DEV-1 已完成 42/42 任务源码盘点；DEV-2/3/4 历史保留。DEV-3 增量包括 DSC 后端/API/client repository、GRW-003 provider/read model、GRW-004 版本化纠正、PET-001 持久会话 API、MAT-001 设备照片导入边界、MAT-002 草稿引用保护，以及多项契约/身份/并发校验；详情见开发台账。本轮次仅处理集中测试暴露的回归 fixture 问题，按 S→M 排序；不接正式 UI，不改变 UI/UX，也不重置 DEV-1/2/3。
+
+TEST-5 / TEST-6 已集中执行：TEST-6 backend unit 17 suites / 198 tests 全通过；前端为 50/55 suites、429/443 tests 通过，5 suites / 14 tests 失败，涉及 GRW-003、MAT-001、DIA-001、CRE-005、MAT-002。`npm run typecheck`、backend build、`git diff --check` 通过。DEV-4 修复的 DSC-002 空 story ID controller guard 已通过 TEST-6 后端复测；其他失败均记录在 task/CASE，待 DEV-5 修复后再集中复测。未配置 `E2E_DATABASE_URL`，不运行数据库 e2e；未调用 provider、操作数据库、设备、文件或生产 UI。
+
+TEST-1：前端全量 Jest 首次 45 suites / 340 tests，338 通过、2 失败；MAT-005 修复后 TEST-2 定向 7/7、前端全量 45 suites / 340 tests、`npm run typecheck`、`git diff --check` 通过。社区后端测试修正 fixture 和 controller 分类 guard 后 backend unit 8 suites / 77 tests、backend build 通过。GRW-003/004、PET-001 新增 Prisma Client 生成、typecheck、backend build 检查通过；本轮 GRW-003/004 查询与来源边界增量后再次运行 `npm run typecheck`、`npm --prefix backend run build`、`git diff --check` 均通过，对应新增 Jest 仍未运行。Community/anchor read model/correction/PET chat migration 均未应用，无 published fixtures；未配置 `E2E_DATABASE_URL`，未运行 MySQL e2e；本轮未调用 provider、操作数据库、设备或文件；未改正式 UI/UX。失败和复测证据见开发台账。
+
+截至 TEST-14（2026-10-16），coverage 有效验收总数 225、矩阵明确 passed 96 项，当前验收进度为 `96 / 225 × 100 = 42.7%`。CASE-BAS-004-002 仍由 TEST-10 当前 worktree normal/reverse runner 各 15/15 通过；CASE-BAS-004-001 direct Jest setup guard 已于 TEST-13 在专用隔离 schema 成功启动并跑完 e2e，现为 passed。
 
 | CASE ID | 验收 ID | 环境 | 结果 | 代码位置 | 证据 | 备注 |
 | --- | --- | --- | --- | --- | --- | --- |
+| GRW-002/006 provider 增量 | T-GRW-002-A01 / T-GRW-006-A03/A05/A06 | TEST-2 本地组件/Store | 本地回归通过；完整业务 CASE 未执行 | `src/components/profile/growth-artwork.tsx` / `app/profile/insights.tsx` / `app/profile/anchors.tsx` / `src/services/insight-report-provider.ts` / `src/store/__tests__/insight-report-generation.spec.ts` | 全量 Jest 45/45 suites、340/340 tests 与 typecheck 通过，包含稳定 tagId 与报告 mock/store 测试 | 不改成长视觉；mock 报告不接正式报告页，不视为真实报告、解锁或 AI 验收 |
+| NAV/PET-002/DSC/INT 源码盘点 | T-NAV-001/T-PET-002/T-DSC-001～003/T-INT-001 | DEV-1 源码审计 + TEST-2 全量前端 Jest | 本轮未执行完整业务 CASE | `src/hooks/use-diary-flow.ts` / `app/modal/more-actions.tsx` / `app/(tabs)/pet.tsx` / `app/(tabs)/discover.tsx` / `app/discover/[id].tsx` / `src/mocks/discovery.ts` | 前端全量 45 suites / 340 tests 通过，但不等同于各任务端到端 CASE；未运行 e2e/设备场景 | 统计/锚点待 Q-005/Q-016，社区真实数据与互动受 Q-007，INT-001 后置；不增加 CASE 通过 |
+| PCD-001/002 源码盘点 | T-PCD-001/002 | DEV-1 源码审计 | 未执行 | `app/postcard/index.tsx` / `app/__tests__/postcard-screen-assets.spec.tsx` | 已确认卡片仅预览、生成无真实 asset、分享面板仍为演示 Alert；未运行 CASE/设备/文件测试 | PCD-001 用户暂停决定保留；PCD-002 依赖可读卡片资产与 Q-013/Q-014，不增加通过项 |
+| CASE-MAT-005 provider/Store 增量 | T-MAT-005-A01/A02/A04/A05 | TEST-1 / DEV-2 / TEST-2 | 本地 Store 子集通过；真实 CASE 未执行 | `src/services/ai-image-generation-provider.ts` / `src/store/create-app-store.ts` / `src/types/diary.ts` / `src/store/__tests__/material-image-generation.spec.ts` | TEST-1 45 suites / 340 tests 曾 338 通过、2 失败；DEV-2 修复后定向 7/7，TEST-2 全量 45/45 suites / 340/340 tests、typecheck、diff check 通过 | 初测缺陷历史保留在 MAT-005 CASE；hybrid-dev mock 单独标记；页面未接线，真实 provider/图片文件/留存未建立；不增加 CASE 通过 |
+| SHR-001～005 源码盘点 | T-SHR-001～005 | DEV-1 源码审计 + TEST-2 全量前端 Jest | 本轮未执行完整分享交付 CASE | `src/store/diary-domain.ts` / `src/services/share-asset-preparation.ts` / `src/services/share-delivery-orchestrator.ts` / `src/services/share-export-file-service.ts` / `app/share/result.tsx` / `backend/src/modules/sharing/sharing.controller.ts` | 前端全量 Jest 45 suites / 340 tests 通过，覆盖部分组件/服务既有用例；未执行本轮设备、文件、视觉或平台端到端 CASE | 不新增 CASE 通过；正式页面仍为演示反馈，Q-013/Q-014/平台能力缺口仍保留 |
+| CASE-DIA-006-010 | T-DIA-006-A01/A03/A06 | TEST-1 本地 contract/repository/controller | 本地自动化通过；完整数据/CASE 未执行 | `src/contracts/core-diary-contract.ts` / `src/repositories/http-core-diary-repository.ts` / `src/store/create-app-store.ts` / `backend/src/modules/memories/memories.controller.ts` / `backend/src/common/memory-store.service.ts` | 前端全量 Jest 45/45 suites、backend unit 6 suites / 61 tests 均通过，包含对应契约/repository/controller 套件 | 101+ 条真实记录 MySQL 集成未运行（隔离 URL 缺失）；Q-004 跨日/月规则待决策；不增加 CASE 通过 |
+| CASE-CRE-005 provider 隔离增量 | T-CRE-005-A06 | TEST-1 backend unit | 新增门禁断言通过；真实 provider CASE 未执行 | `backend/src/common/diary-generation.service.ts` / `backend/src/common/diary-generation.service.spec.ts` / `backend/.env.example` | `npm --prefix backend run test -- --silent`（6 suites / 61 tests）、此前 backend build 通过，新增生产缺 provider/deterministic 断言包含在单测中 | 仅非生产可使用 deterministic；真实 provider、双环境和质量评测未验证；不改变验收 CASE 结果 |
+| DSC-001～003 DEV-2 API | T-DSC-001/002/003-A01～A07 | DEV-2 backend unit/build | 本地 controller/service tests 通过；完整 CASE 未执行 | `backend/src/modules/discovery/*` / `backend/prisma/schema.prisma` / `backend/prisma/migrations/20261015002000_discovery_read_model/migration.sql` / `docs/reference/delivery/contracts/discovery-read-v1.md` | `prisma:generate`、backend build 通过；backend unit 8 suites / 77 tests 全通过。中间 74/77 结果及 fixture/category 修复见开发台账；migration 未应用、未连接数据库 | 只读独立显式 published 快照；不从日记 privacy 自动发布；推荐/同城/缺省类别 fail closed；点赞默认关闭；页面未接线，Q-007/Q-013 权限规则未闭环，不增加 CASE passed |
+| DSC client repository | T-DSC-001/002/003 请求/错误契约子集 | DEV-3 typecheck | 未运行 Jest | `src/contracts/discovery-contract.ts` / `src/repositories/discovery-repository.ts` / `src/repositories/http-discovery-repository.ts` / `src/store/adapters/backend-discovery-adapter.ts` / `src/repositories/__tests__/http-discovery-repository.spec.ts` | `npm run typecheck` 通过；Jest 已编写未运行；页面未接线 | 使用共享 ApiClient 与设备身份；显式 `category=latest`；不新增 CASE passed |
+| DSC-003 disabled-like / identity error mapping | T-DSC-003-A05 / CASE-DSC-003-004 技术边界 | DEV-3 controller/repository boundary | 未运行 Jest / 未应用 migration / 未接页面 | `backend/src/modules/discovery/discovery.controller.ts` / `backend/src/modules/discovery/discovery.controller.spec.ts` / `src/repositories/discovery-repository.ts` / `src/repositories/http-discovery-repository.ts` / `src/repositories/__tests__/http-discovery-repository.spec.ts` / `docs/reference/delivery/contracts/discovery-read-v1.md` | 本轮 `npm run typecheck`、backend build、`git diff --check` 通过；新增 controller/client Jest 已编写未运行 | `likesEnabled=false` 返回 `interaction_not_available`/HTTP 409 并由 client 保留；所有 discovery endpoints 先解 `x-device-id` 再校验 query/body，避免缺身份被其他错误覆盖；Q-007 eligibility 未决，未操作数据库/未改页面，不新增 CASE passed |
+| GRW-003 anchor extraction/read model | T-GRW-003-A06/A07 工程边界 | DEV-3 静态编译检查；本轮服务层增量 | 未运行 Jest / 未应用 migration / 未接页面 | `src/contracts/anchor-contract.ts` / `src/services/anchor-extraction-provider.ts` / `src/services/anchor-extraction-service.ts` / `backend/src/modules/anchors/anchor-read-model.*` / `backend/prisma/migrations/20261016002000_diary_anchor_read_model/migration.sql` / `src/contracts/anchor-read-model-contract.ts` / `src/repositories/http-anchor-read-model-repository.ts` / `src/store/adapters/backend-anchor-read-model-adapter.ts` / `docs/reference/delivery/contracts/anchor-read-model-v1.md` | 既有 Prisma Client 生成/typecheck/backend build 通过；本轮 backend/client Jest 未运行，未访问数据库/provider | 版本化 run 状态、设备/来源校验；MySQL 8.4 通过 JSON_TABLE 过滤当前 diary/version/source block 后 count/page；所有非测试运行环境在可信 provider 缺失时 fail closed；mock 不写持久表；Q-001/002/003/016 未关闭，不新增 CASE passed |
+| GRW-004 correction repository/API | T-GRW-004-A03/A06/A07、CASE-GRW-004-006/007/009 子集 | DEV-3 新增实现；本轮服务层增量 | 未运行 Jest / 未应用 migration / 未接页面 | `backend/src/modules/anchors/*` / `backend/prisma/schema.prisma` / `backend/prisma/migrations/20261016000000_anchor_corrections/migration.sql` / `src/contracts/anchor-correction-contract.ts` / `src/repositories/http-anchor-correction-repository.ts` / `src/store/adapters/backend-anchor-correction-adapter.ts` / `docs/reference/delivery/contracts/anchor-correction-v1.md` | 既有 Prisma Client 生成、`npm run typecheck`、backend build、`git diff --check` 通过；本轮 controller/service/client Jest 未运行 | 纠正读写要求 anchorId 命中同设备、同作品版本的 succeeded/provider 提取记录且来源 block 匹配；Q-001/Q-003/Q-016 未决，未操作数据库，页面未接线；不新增 CASE passed |
+| PET-001 chat session service/repository | T-PET-001-A05/A06、CASE-PET-001-005/006/007 子集 | DEV-3 新增实现；本轮来源校验增量静态检查通过 | 未运行 Jest / 未应用 migration / 未接页面 | `backend/src/modules/chat/*` / `backend/prisma/schema.prisma` / `backend/prisma/migrations/20261016001000_pet_chat_sessions/migration.sql` / `src/contracts/pet-chat-contract.ts` / `src/repositories/http-pet-chat-repository.ts` / `src/store/adapters/backend-pet-chat-adapter.ts` / `docs/reference/delivery/contracts/pet-chat-v1.md` / `src/store/create-app-store.ts` | 本轮 `npm run typecheck`、backend build、`git diff --check` 通过；本轮新增 service Jest 已编写未运行；默认 AI mocks 已限制开发运行时 | 设备归属、同 request 幂等、固定失败码、attempt 与排序在服务层实现；开发允许显式 mock 回复，非测试运行环境拒绝 client-declared provider，production fail closed；Q-001 retention/恢复、Q-002 provider 质量/重试策略、Q-003 输入边界未定；页面 send/retry 未调用 repository，不新增 CASE passed |
+| MAT-001 device asset import service/Store action | T-MAT-001-A01/A04/A05 子集 | DEV-3 新增业务边界/typecheck | 未运行 Jest / 未访问真实媒体库 / 未接页面 | `src/services/photo-library.ts` / `src/services/__tests__/photo-library.spec.ts` / `src/store/create-app-store.ts` / `src/store/__tests__/material-photo-import.spec.ts` / `app/library/index.tsx` | 本轮 `npm run typecheck`、`git diff --check` 通过；导入服务/Store 测试已编写未运行；未改上传 sheet 或请求系统权限 | 按所选 system ID 读取 Expo asset，权限/URI/类型通过后顺序用 Image.getSize 探测解码，不下载 network-only asset；整批成功才登记，同 ID 会刷新当前 URI，mock ID 冲突拒绝；Q-001/Q-015 URI 留存、Q-003 元数据/数量、Q-018 设备权限与正式页面接线仍待处理；不新增 CASE passed |
+| MAT-002 preserve-current-draft references | T-MAT-002-A04 / CASE-MAT-002-004 子集 | DEV-3 现有页面动作修复；未运行新 regression | 未运行 Jest / 未做真实设备素材或 MySQL 操作 | `app/library/index.tsx` / `app/__tests__/library-screen-material-apply.spec.tsx` / `src/store/create-app-store.ts` | 本轮 `npm run typecheck`、`git diff --check` 通过；新页面回归已编写未运行 | 素材应用现在从被复用编辑草稿的当前首个 text block 追加，不从 saved diary 重建引用；正文/标题/摘要和既有引用保持草稿态，目标/正文校验顺序不变；Q-015 仍阻塞 CASE-MAT-002-004 正式结论，不新增 CASE passed |
+| CASE-PET-001-001～009 | T-PET-001-A01～A06 | DEV-1 源码/编译检查 + TEST-2 前端全量 Jest | 无新增专属聊天 CASE 执行记录 | `src/services/chat-reply-provider.ts` / `src/store/create-app-store.ts` / `src/types/diary.ts` / `backend/tsconfig.json` | 前端全量 45 suites / 340 tests 通过；`npm --prefix backend run build` 曾通过；本轮无专门覆盖新 chat provider/session 的回归套件 | 全量 Jest 不证明会话留存/身份隔离；Q-001/Q-002/Q-003 与页面失败/重试接线仍未闭环；mock 不计真实 provider 验收 |
 | CASE-BAS-001-004 | T-BAS-001-A04 | 文档 + backend jest + runner | partial | `docs/reference/delivery/contracts/ai-quality-evaluation-v1.md` / `backend/src/common/diary-generation-evaluation.ts` / `backend/src/common/diary-generation-evaluation.spec.ts` / `backend/src/scripts/run-diary-generation-evaluation.ts` / `docs/reference/delivery/reports/cre-005-quality-baseline.md` | `npm --prefix backend run build` / `npm --prefix backend run test -- diary-generation.service.spec.ts diary-generation-evaluation.spec.ts` / `npm --prefix backend run eval:diary-generation` | 已为 `CRE-005` 建立固定夹具、自动结构校验、人工评分维度和可执行 runner，当前 `deterministic` provider 可稳定产出结构通过的基线报告；真实 provider 与正式质量阈值仍待 Q-002 / BAS-002 收口 |
-| CASE-BAS-004-001 | T-BAS-004-A01 | 前端 Jest + tsc + 隔离 MySQL e2e | passed | `backend/src/scripts/run-e2e-tests.ts` / `backend/src/scripts/run-e2e-tests.spec.ts` / `backend/test/app.e2e-spec.ts` / `backend/package.json` | `npm run typecheck` / `npm test`（35 suites / 289 tests）/ `npm --prefix backend run test -- run-e2e-tests.spec.ts`（3/3）/ `E2E_DATABASE_URL=<local isolated schema> npm --prefix backend run test:e2e`（39/39）/ 故意失败断言退出码 1 / 缺少隔离 URL 退出码 2 | e2e 入口现拒绝开发库并要求本机临时 schema；故意失败探针已在确认退出码传递后移除。临时 schema 已清理，开发库日记数量仍为 2 |
-| CASE-BAS-004-002 | T-BAS-004-A02 | transpiled Node domain runner | passed | `tools/diary-domain.test.ts` / `tools/run-domain-tests.js` / `src/store/create-app-store.ts` | `node tools/run-domain-tests.js` / `DIARY_DOMAIN_TEST_ORDER=reverse node tools/run-domain-tests.js` | 正常及反向顺序各运行 15 个场景并全部通过；每个场景前重置 store，runner 会等待异步保存结束；新建草稿零预选照片、测试夹具显式选择 12 张后继续校验 |
+| CASE-BAS-004-001 | T-BAS-004-A01 | 前端 Jest + tsc + 隔离 MySQL e2e | 通过（TEST-13/14） | `backend/src/scripts/run-e2e-tests.ts` / `backend/src/scripts/run-e2e-tests.spec.ts` / `backend/test/jest-e2e.json` / `backend/test/e2e-database-safety.ts` / `backend/test/app.e2e-spec.ts` / `backend/package.json` | TEST-13 direct guard/e2e 46/46；TEST-14 扩展后当前集 49/49；6/6 migrations、migrate status up-to-date、schema diff 无 drift；backend unit 17/199，root typecheck、backend build、diff check 通过 | TEST-12 首轮 malformed draft body e2e 断言失败以非零状态定位到具体 test；DEV-11 修复后复测通过。测试 schema 均为本轮创建并已清理；从未将 URL 指向/操作开发库 |
+| CASE-BAS-004-002 | T-BAS-004-A02 | transpiled Node domain runner | 通过（TEST-10 当前 worktree） | `tools/diary-domain.test.ts` / `tools/run-domain-tests.js` / `src/store/create-app-store.ts` / `src/contracts/core-diary-contract.ts` / `src/contracts/ai-image-generation-contract.ts` / `src/contracts/insight-report-contract.ts` | `node tools/run-domain-tests.js`、`DIARY_DOMAIN_TEST_ORDER=reverse node tools/run-domain-tests.js`；当前 worktree 正常/反向各 15/15 | TEST-8/9 的 module-load 失败保留为历史；DEV-8 完善临时 contract/provider 转译和隔离 adapter stubs 后，当前版本完整执行 E01～15，保持重置与断言不变 |
 | CASE-BAS-004-003 | T-BAS-004-A03 | domain/service tests + controlled fault fixture | passed | `src/test-utils/fakes/create-async-fault-plan.ts` / `src/test-utils/fakes/create-async-fault-plan.spec.ts` / `src/store/__tests__/diary-domain.spec.ts` / `src/services/__tests__/photo-library.spec.ts` / `src/services/__tests__/share-export-file-service.spec.ts` / `src/services/__tests__/share-delivery-orchestrator.spec.ts` / `app/__tests__/album-select-screen.spec.tsx` | `npm run test:domain` / `npx jest --runInBand src/test-utils/fakes/create-async-fault-plan.spec.ts` / `npx jest --runInBand src/store/__tests__/diary-domain.spec.ts -t "E03 CASE-BAS-004-003 generation ignores paused and stale round callbacks, and finishes only once|stale generation job creation is cancelled when the active round is paused before job id returns|E15 CASE-BAS-004-003 injected write failure preserves data and a controlled retry saves once"` / `npx jest --runInBand src/services/__tests__/photo-library.spec.ts src/services/__tests__/share-export-file-service.spec.ts src/services/__tests__/share-delivery-orchestrator.spec.ts` / `npx jest --runInBand app/__tests__/album-select-screen.spec.tsx` / `npm run typecheck` | deterministic CASE 已覆盖旧回调不复活、暂停后迟到 `jobId` 被取消、保存失败后同幂等键重试、照片读取 `E_NO_PERMISSIONS` 门禁及文件 writer 失败不写成功记录；真实 iOS 权限/文件出口仍由 CRE-002 / SHR-005 集成 CASE 跟踪，不阻塞本 CASE |
 | CASE-BAS-004-004 | T-BAS-004-A04 | 文档 + jest | passed | `src/test-utils/reporting/__tests__/execution-report.spec.ts` | `npm run test` | 已能输出带环境、证据和备注的报告表格 |
 | CASE-BAS-004-005 | T-BAS-004-A05 | jest | passed | `src/store/__tests__/share-guard.spec.ts` | `npm run test` | 同一断言可检出故意引入的私密分享回归 |
@@ -19,7 +41,7 @@
 | CASE-BAS-002-003 | T-BAS-002-A03 | backend e2e + jest + mysql | partial | `backend/prisma/schema.prisma` / `backend/src/common/device-identity.ts` / `backend/src/common/device-identity.spec.ts` / `backend/src/common/memory-store.service.ts` / `backend/src/modules/diaries/diaries.controller.ts` / `backend/test/app.e2e-spec.ts` / `src/contracts/core-diary-contract.ts` / `src/repositories/http-core-diary-repository.ts` / `src/store/create-app-store.ts` | `npm --prefix backend run test -- device-identity.spec.ts` / `npm --prefix backend run build` / `npm --prefix backend run test:e2e` / `npm run typecheck` / `npm test -- --runInBand` / `npm run test:domain` | 已验证跨设备越权拒绝、完整 `contentSnapshot` 新建/编辑原子持久化与详情/回忆读回、缺失快照和越界照片引用拒绝；无正文快照的历史记录不再合成摘要正文，详情读取会拒绝缺失/畸形快照。缺失或空白身份头无法读取旧共享 `device-anonymous` 数据；非私密选段只能引用已持久化文本/引用 block。实际公开内容读取接口、完整权限对象矩阵及 Q-012 正式身份边界仍未完成，故 CASE 继续 partial |
 | CASE-BAS-002-004 | T-BAS-002-A04 | api client + repository + domain + isolated backend e2e | passed | `src/services/api-client.ts` / `src/services/__tests__/api-client.spec.ts` / `src/repositories/http-core-diary-repository.ts` / `src/repositories/__tests__/api-timeout.spec.ts` / `src/store/create-app-store.ts` / `src/store/__tests__/diary-domain.spec.ts` / `backend/test/app.e2e-spec.ts` | `npx jest --runInBand src/services/__tests__/api-client.spec.ts src/repositories/__tests__/api-timeout.spec.ts src/repositories/__tests__/http-core-diary-repository.spec.ts` (30/30) / domain timeout recovery cases (2 passed) / `E2E_DATABASE_URL=<local isolated schema> npm --prefix backend run test:e2e` (39/39) / `npm test -- --silent` (37 suites / 298 tests) / `npm run typecheck` / backend build | 统一请求入口覆盖 15 秒可配置超时、响应体读取超时、caller abort 与结构化错误映射；generation 建单结果不确定时重试沿用原 round/key，保存 POST 可按原幂等键追认已提交结果。既有 e2e 验证取消、跨设备同键隔离和 `version_conflict`；无自动 provider 重试或真实供应商调用。临时 schema 已删除，开发库保持不变 |
 | CASE-BAS-003-001 | T-BAS-003-A01 | backend e2e + mysql + jest | partial | `backend/prisma/schema.prisma` / `backend/src/common/memory-store.service.ts` / `backend/test/app.e2e-spec.ts` / `src/store/create-app-store.ts` / `src/services/draft-snapshot-storage.ts` / `src/store/__tests__/diary-domain.spec.ts` | `npm --prefix backend run prisma:generate` / `npm --prefix backend run db:push` / `npm --prefix backend run build` / `npm --prefix backend run test:e2e` / `npm run typecheck` / `npx jest --runInBand src/store/__tests__/diary-domain.spec.ts` | 已验证生成任务迁入 Prisma 后可在新的 Nest 应用实例中按原 `jobId` 继续读取，且同一设备同一生成幂等键不会在重启后重复建单；前端也已验证未提交草稿会以本地快照持久化，并可在重建 store 后恢复当前草稿与选中素材。完整的已保存作品/真实杀进程重开/素材资产重启恢复仍待 Q-001/Q-015 收口后补齐 |
-| CASE-BAS-003-003 | T-BAS-003-A03 | store domain fault test | partial | `src/store/create-app-store.ts` / `src/store/__tests__/diary-domain.spec.ts` / `app/_layout.tsx` / `src/config/app-config.ts` | `npx jest --runInBand src/store/__tests__/diary-domain.spec.ts -t "draft snapshot read failure does not block memories repository hydration"` / `npm run typecheck` | 快照读取失败会被隔离记录、保留原数据、不调用 `clear/save`，`hydrateDrafts()` resolve 后按根布局顺序调用 `hydrateMemories()`；测试使用可控 memories repository adapter 验证 D1 回灌，不代表真实后端联调。新生产身份无 mock 数据仍未验证，因为当前是 `hybrid-dev` 且未区分生产空态与演示样例，故 CASE 保持 partial |
+| CASE-BAS-003-003 | T-BAS-003-A03 | store domain fault test | partial | `src/store/create-app-store.ts` / `src/store/__tests__/diary-domain.spec.ts` / `app/_layout.tsx` / `src/config/app-config.ts` | 既有快照故障定向 Jest / `npm run typecheck`；DEV-3 release runtime regression 已编写未运行 | 快照读取失败会被隔离记录、保留原数据、不调用 `clear/save`，`hydrateDrafts()` resolve 后按根布局顺序调用 `hydrateMemories()`；测试使用可控 memories repository adapter 验证 D1 回灌，不代表真实后端联调。DEV-3 已将 release 默认 diaries/photos 设为空、currentDiaryId 为空，并补空目录创建草稿逻辑；回归待集中 TEST。A03 仍 partial：统计基线、锚点数和资料/VIP 原型受 Q-005/Q-016/Q-012，CASE 不计通过 |
 | CASE-BAS-003-004 | T-BAS-003-A04 | backend e2e + mysql transaction fault injection | passed | `backend/prisma/schema.prisma` / `backend/src/common/memory-store.service.ts` / `backend/test/app.e2e-spec.ts` | `npm --prefix backend run test:e2e -- --testNamePattern="rolls back a diary when its save command write fails and retries atomically"` / `npm --prefix backend run test:e2e` / `npm --prefix backend run build` | 在真实 Prisma/MySQL 事务内先执行 `Diary.create`，再由仅测试使用的事务代理使 `SaveCommand.create` 抛错；验证回滚后回忆为空、保存命令结果不存在、草稿保留；移除注入后以同一幂等键重试只产生一篇快照完整的作品。完整 backend e2e 39/39、build 通过。本 CASE 的原子失败与重试已通过；资产生命周期、迁移及其他持久化边界仍由 BAS-003 其他 CASE 跟踪 |
 | CASE-BAS-003-005 | T-BAS-003-A05 | local MySQL migration + store jest + typecheck | partial | `backend/prisma/migrations/20261015000000_initial_schema/migration.sql` / `backend/prisma/migrations/20261015001000_diary_content_snapshot/migration.sql` / `backend/scripts/verify-prisma-migrations.sh` / `backend/scripts/baseline-prisma-migrations.ts` / `src/store/create-app-store.ts` / `src/services/draft-snapshot-storage.ts` / `src/store/__tests__/diary-domain.spec.ts` | `npm --prefix backend run test:migrations` / `DATABASE_URL=<url> npm --prefix backend run migrate:baseline -- --confirm-current-schema-is-final` / `npx jest --runInBand src/store/__tests__/diary-domain.spec.ts -t "invalid local draft snapshots isolate broken records and keep valid drafts recoverable|unsupported local draft snapshot versions are preserved and not overwritten"` / `npm run test:domain` / `npm test -- --runInBand` / `npm run typecheck` | 临时 MySQL schema 已验证空库两步部署、旧 schema 日记记录保留和 drift 拒绝。当前本地 `ai_diary` 在只读 diff 无漂移、无既有 history 的检查后执行 baseline；日记行数前后均为 2，2 条 migration 均 applied 且状态 up-to-date。baseline 只写 `_prisma_migrations` 元数据；本地快照损坏记录隔离有效草稿，未知整数版本保留且旧客户端后续写不覆盖。legacy 正文回填与已保存记录损坏恢复未完成，故 CASE 保持 partial |
 | CASE-CRE-001-001 | T-CRE-001-A01 | app test | partial | `app/permission/photos.tsx` / `app/__tests__/photo-permission-screen.spec.tsx` | `npm run typecheck` / `npx jest --runInBand app/__tests__/photo-permission-screen.spec.tsx` | 已验证用途说明会先展示，未点击“允许访问相册”前不会触发系统权限请求，也不会提前跳转相册；“未授权时真实资源读取次数为 0”的实证仍待 `CRE-002` 真实目录读取链路补齐 |
@@ -148,7 +170,7 @@
 | CASE-PCD-001-003 | T-PCD-001-A03 | native image rendering | blocked | `app/postcard/index.tsx` / `src/services/share-export-file-service.ts` / `package.json` | `rg -n "const make|setGenerated" app/postcard/index.tsx` / package resolver check for native image renderer modules | 当前 `make()` 只设置 boolean，没有 PNG 文件或可读 asset URI；日记分享 Jimp exporter 使用结构文字骨架，不符合明信片原卡片渲染，未运行输出资产验收；用户已要求先跳过，本轮不加渲染依赖或改正式反馈 |
 | CASE-PCD-001-004/005 | T-PCD-001-A04/A05 | rendering race/failure | blocked | `app/postcard/index.tsx` | 未运行：缺少实际渲染结果/输入版本协议；用户已要求先跳过该实现；失败/完成回调没有可验证目标 |
 | CASE-MAT-004-001 | T-MAT-004-A01 | app test | passed | `app/library/index.tsx` / `app/__tests__/library-screen-inspiration.spec.tsx` | `npx jest --runInBand app/__tests__/library-screen-inspiration.spec.tsx`（3 prompts × 3 blank inputs）/ `npm test -- --silent`（41 suites / 316 tests）/ `npm run typecheck` | 三张灵感卡分别显示对应问题；空/纯空白/换行回答保持提交禁用，会话消息、作品和路由不变 |
-| CASE-MAT-004-002～005 | T-MAT-004-A02/A03 | PET-001 provider unavailable | blocked | `app/library/index.tsx` / `src/store/create-app-store.ts` / `app/__tests__/library-screen-inspiration.spec.tsx` | 未运行真实服务 CASE：当前灵感提交仍调用本地 `sendChat(...)`，PET-001 真实异步服务未接通 | 未将本地关键词回复记作真实回复证据；需 PET-001 真实隔离服务及请求/消息关联能力后执行 |
+| CASE-MAT-004-002～005 | T-MAT-004-A02/A03 | PET-001 provider/页面接线缺失 | blocked | `app/library/index.tsx` / `src/store/create-app-store.ts` / `src/repositories/http-pet-chat-repository.ts` / `app/__tests__/library-screen-inspiration.spec.tsx` | 未运行真实服务 CASE：PET-001 持久会话 API/client repository 已在 DEV-3 建立，但灵感提交仍调用本地 `sendChat(...)`；请求尚未携带 question+answer 契约，正式入口/失败恢复未接线且真实 provider 未配置 | 未将本地 mock 或未运行 API 代码记为真实回复证据；迁移未应用，需先补获授权的入口接线与可信 provider 环境后执行 |
 | CASE-MAT-004-006 | T-MAT-004-A04 | app state test | passed | `app/library/index.tsx` / `app/__tests__/library-screen-inspiration.spec.tsx` | `npx jest --runInBand app/__tests__/library-screen-inspiration.spec.tsx` / `npm test -- --silent`（41 suites / 316 tests）/ `npm run typecheck` | 输入回答但未提交后关闭弹层，不新增消息/日记，不改变 D1/D2，也不导航 |
 | CASE-MAT-002-001 | T-MAT-002-A01 | app test + full frontend regression + tsc | passed | `app/library/index.tsx` / `src/store/create-app-store.ts` / `app/__tests__/library-screen-material-apply.spec.tsx` | `npx jest --runInBand app/__tests__/library-screen-material-apply.spec.tsx`（1 suite / 5 tests）/ `npm test -- --silent`（42 suites / 322 tests）/ `npm run typecheck` | 已验证 store 注册的非 mock P4 经素材预览进入同一 D1 编辑草稿，追加到首段及整篇照片集合并导航；已保存 D1/D2 不变。`file://` fixture 不代表真实设备导入或文件可读。 |
 | CASE-MAT-002-003 | T-MAT-002-A03 | app test + full frontend regression + tsc | passed | `app/library/index.tsx` / `src/store/create-app-store.ts` / `app/__tests__/library-screen-material-apply.spec.tsx` | `npx jest --runInBand app/__tests__/library-screen-material-apply.spec.tsx`（1 suite / 5 tests）/ `npm test -- --silent`（42 suites / 322 tests）/ `npm run typecheck` | 已验证再次应用 P4 会复用原 `draftId`，首段与整篇照片集合均只保留一个该 ID；本地确定性证据不替代真实媒体文件验收。 |
@@ -191,3 +213,220 @@
 - 2026-10-15 BAS-002-A04 / CASE-DIA-005-008 增量复验：API/repository 3 suites / 30 tests、建单/保存超时追认领域用例 2 项、完整前端 37 suites / 298 项、typecheck、backend build 和隔离 MySQL backend e2e 39/39 通过。新建 e2e 使用临时 schema 并清理完成；开发库 `ai_diary.Diary` 仍为 2 行。A04 已通过；DIA-005 仍只受 Q-001/Q-008 待决策 CASE 阻塞。
 - CASE-DIA-005-008 transport 补充：repository 返回 retryable timeout 时，store 查询原保存幂等键并追认已提交结果；未查到结果时保留草稿且不自动重发。领域测试覆盖 “save timeout + getSaveResult success” 并断言同一 `diaryId`、单次列表新增及 saving 状态清理；Q-001/Q-008 范围未变。
 - 本轮回归：`npx jest --runInBand app/__tests__/album-select-screen.spec.tsx src/services/__tests__/photo-library.spec.ts`（CRE-002 2 suites / 14 tests）、`npx jest --runInBand app/__tests__/library-screen-material-apply.spec.tsx`（MAT-002 1 suite / 5 tests）、`npm run test:domain -- --testNamePattern="MAT-002 material photo references are included in the existing diary save request"`（1 passed）、完整 `npm test -- --silent`（42 suites / 322 tests）、`npm run typecheck`、`git diff --check` 均通过。CRE-002 两个 CASE 的 `console.warn` 来自显式分页失败/权限拒绝场景；真实模拟器 `E_NO_PERMISSIONS` 阻塞仍未解除。
+
+### 2026-10-16 DEV-3 BAS-002 身份优先级增量
+
+`/photos/capabilities` 与 `/health` 已增加 `x-device-id` 校验；discovery/chat/anchor/sharing 路由的身份解析位于 query/body 业务校验之前。health e2e、photos/sharing/chat/anchor correction/read-model controller regression 已新增，discovery 对应回归已存在；这些 Jest/e2e 均未运行，列入集中 TEST，不作为通过证据。未操作数据库；验收矩阵及 CASE 结果不变，仍为 96/225（42.7%）。
+
+### 2026-10-16 DEV-3 PET-001 客户端契约增量
+
+`src/contracts/pet-chat-contract.ts` 现 fail closed 校验消息关联、稳定顺序、状态/助手回复和来源元数据一致性；`HttpPetChatRepository.failTurn(...)` 在请求前拒绝未知 failure code。contract/repository regression 尚未运行。typecheck/backend build 为静态检查，不代表 CASE 通过。未接正式页面、未应用 migration、未调用 provider；PET-001 CASE 状态及 96/225（42.7%）不变。
+
+### 2026-10-16 DEV-3 GRW-003 并发取消增量
+
+相同来源快照的提取请求仍合并为一个 provider 工作；caller AbortSignal 现在只取消对应 waiter，所有 waiter 都离开后才取消共享 provider operation。单 waiter 与多 waiter regression 已写、未运行。`npm run typecheck`、`git diff --check` 通过；backend 未改，未重跑 build。未调用真实 provider、未做数据库操作或页面接线；CASE-GRW-003 状态及 96/225（42.7%）不变。
+
+### 2026-10-16 DEV-3 GRW-004 幂等重放保护增量
+
+同一 command key 重放时，如果其记录版本仍为当前 correction version，仍返回原结果；若纠正已被后续 command 更新，则返回 `version_conflict`，不把当前新值伪装成旧 command 结果。新增 backend service regression 未运行。`npm run typecheck`、backend build、`git diff --check` 通过；未新增历史纠正正文副本、schema/migration 或数据库操作；CASE-GRW-004 与 96/225（42.7%）不变。
+
+### 2026-10-16 DEV-3 DSC-003 点赞事务增量
+
+服务对每个当前 published 且未撤回的故事先执行 `SELECT ... FOR UPDATE`，再检查点赞启用状态、写 target state 和计算服务端计数。新增行锁顺序及不可见故事不落关系的 service regression，尚未运行。typecheck/backend build/diff check 通过。未应用 migration、未操作数据库、未接列表/详情页面；Q-007/Q-001 保持开放，CASE-DSC-003 与验收 96/225（42.7%）不变。
+
+### 2026-10-16 DEV-3 GRW-006 旧来源失败回调增量
+
+Store 失败分支现将 sourceVersion 已变化或请求已被替代的回调归为 `stale`；用户显式取消仍为 `cancelled`，当前来源上的 provider failure 才为 `failed`。等待 provider 时与 AbortSignal 竞速，即使 provider 不响应取消，本地 action 也可结束，迟到结果由 stale guard 丢弃。新增 regression 尚未运行，typecheck/diff check 通过。未接正式报告页、未调用模型、未实现持久化；Q 门控、CASE 与验收 96/225（42.7%）不变。
+
+### 2026-10-16 DEV-3 BAS-003 草稿快照写入顺序增量
+
+`src/store/create-app-store.ts` 现按调用顺序串行执行草稿快照 `save/clear`，避免较早的慢操作在新快照之后完成并覆盖新状态；失败操作不会阻断队列，后台写失败会记录 issue log。新增延迟首写 regression 尚未运行；`npm run typecheck` 与 `git diff --check` 通过。本增量不是 CASE 通过证据，验收仍为 96/225（42.7%）。
+
+### 2026-10-16 DEV-3 BAS-001 / MAT-005 配图契约增量
+
+新增 `docs/reference/delivery/contracts/ai-image-generation-v1.md` 与 `src/contracts/ai-image-generation-contract.ts`，Provider 请求/结果现在带版本号；Store 在确认 request ID、attempt、描述、资产来源关联与可读性后才登记。新增 contract regression、更新 MAT-005 provider fixtures，均未运行 Jest；typecheck/diff check 通过。真实 provider、质量阈值、超时/重试及资产留存仍分别受 Q-002/Q-001/Q-015 限制。未增加验收通过项，矩阵仍为 96/225（42.7%）。
+
+### 2026-10-16 DEV-3 DIA-005 保存期间编辑修订保护
+
+草稿新增持久 `editRevision`；save idempotency key 现区分 source diary/version、generation round 和本地修订。保存期间有更新修订时，只把请求快照写入作品列表，并保留新草稿、rebase 到返回的 ID/version；Store 返回既有 `pending` 结果，避免编辑页按旧快照成功跳走。新增 deferred Store regression 与快照恢复 revision 断言，Jest 尚未运行；`npm run typecheck` 及 `git diff --check` 通过，不新增 CASE passed。
+
+### 2026-10-16 DEV-3 DIA-006 非法日期过滤
+
+`core-diary-v1` 现要求月筛选为有效 `YYYY-MM`、日筛选为真实 Gregorian `YYYY-MM-DD`；回忆页内部点分隔筛选会序列化为标准 wire format，contract validator 和 HTTP repository 在发请求前拒绝非法值，后端 memories controller 先校验再读取数据，避免误拒绝正常筛选或把无效输入映射为普通空列表。新增 contract、repository、controller、Store/UI regression 尚未运行；不决定时区/跨日/月归属，不改变 Q-004 阻塞，不新增通过项。
+
+静态检查：`npm run typecheck`、`npm --prefix backend run build`、`git diff --check` 通过。所有新增日期校验 Jest 尚未运行。
+
+### 2026-10-16 DEV-3 SHR-003 匿名产物可读性增量
+
+默认匿名 renderer 输出现须为本地文件地址；服务会实际读取并校验 PNG signature、IHDR 与非零尺寸，未经确认的网络、`data:`、媒体库和损坏文件都会 fail closed。新增 URI/损坏 PNG regression 尚未运行；本增量不改变 CASE 通过状态、Q-013 语义或正式页面接线。
+
+### 2026-10-16 DEV-3 GRW-006 报告 contract 增量
+
+新增 `insight-report-v1` 文档/runtime contract；provider request/result 增加版本，Store 接受前检查 request/source 绑定、三种维度完整唯一、来源 ID 属于请求快照。新增 contract/Store regression 未运行，typecheck/diff check 待本轮确认；报告页仍未接线，无真实 provider、质量评估或报告留存。
+
+`npm run typecheck` 与 `git diff --check` 通过；新增 Jest 仍留待集中 TEST。
+
+静态检查：`npm run typecheck` 与 `git diff --check` 通过。
+
+### 2026-10-16 DEV-3 BAS-003 损坏文件快照隔离
+
+`src/services/draft-snapshot-storage.ts` 不再把 localStorage 的空值或已有文件的空内容、文件读取/JSON 解析失败转换为 `undefined`；Store 可识别读取失败、记录 issue 并保留原始快照，避免后续草稿写入覆盖不可恢复数据。新增 `src/services/__tests__/draft-snapshot-storage.spec.ts` 覆盖 localStorage/文件空值、损坏 JSON 和文件读取失败，未运行；`npm run typecheck` 与 `git diff --check` 通过。没有更改 CASE 状态、验收通过数、migration 或数据库。
+
+### 2026-10-16 DEV-3 BAS-003 正文快照读取完整性
+
+`isDiaryContentContract(...)` 现拒绝空 blocks、仅图片 blocks、重复块 ID 及无效来源块关联；新增 `isDiaryContentContractForPhotoIds(...)` 检查封面、海报、正文图片和人物照片均属于同一日记照片集合。详情 repository 在畸形快照时 fail closed；回忆 Store 记录损坏快照 issue 并隔离该条正文，不阻断其他有效作品，也不生成替代正文或照片。新增 contract/repository/Store Jest 未运行；本轮 typecheck/diff check 通过。CASE 与验收矩阵状态不变。
+
+数据库正文 JSON 若为非 null scalar/array，后端 mapper 现将正文内容隔离并添加 `contentSnapshotStatus: invalid`，以区别合法的 metadata-only legacy NULL；客户端保留记录 metadata 并将损坏正文计入 issue log。新增隔离 MySQL e2e 和 Store regression 未运行；e2e 文件单独 `tsc --noEmit` 通过，未操作数据库或用户数据。
+
+### 2026-10-16 DEV-3 BAS-003-A06 公开选段恢复
+
+Store `buildMemoryDiaryItem(...)` 现在传递后端 `DiaryContract.publicBlockIds`，覆盖启动 hydration 与筛选结果；对 private + 无选段的权威响应设置 `undefined`，避免保留先前状态。新增 regression 从 public-comments 选段恢复、投影只保留授权段落，再切至 private 后清空选段；未运行，无 CASE passed 变化。
+
+### 2026-10-16 DEV-3 BAS-003-A03 release 样例隔离
+
+默认 fixtures 现只在开发 runtime/Jest 使用；非开发默认 photos/diaries 为空、`currentDiaryId` 为空，Store 的月份分组由当前日记计算。无种子作品时 `beginCreation()` 使用空白日记模板，不再克隆 mock diary。新增 runtime regression 未运行；Q-005/Q-016/Q-012 限制的统计、锚点及资料/VIP 样例语义仍未收口，因此 CASE partial、未新增 passed。
+
+### 2026-10-16 DEV-3 BAS-001 generation create request
+
+共享 contract/client repository 现验证 `draftId` 与 `idempotencyKey` 非空、`draftVersion` 为正安全整数；非法值发包前返回 `invalid_input`。后端 generation controller 先 `resolveDeviceId` 再校验 body，因此缺身份和畸形 body 并存仍返回 `device_identity_required`；invalid body 不调用 Store。新 contract/repository/controller tests 未运行；未触碰数据库/provider，CASE/passed 状态不变。
+
+### 2026-10-16 DEV-3 BAS-001 generation request 校验
+
+客户端 `createGenerationJob(...)` 现发包前校验 request；`draftVersion` 必须为正安全整数，`draftId` 和幂等键必须非空。后端 controller 先 `resolveDeviceId(...)`，再检查 body；缺身份优先返回 `device_identity_required`，非法 body 以 `invalid_input` 拒绝且不会调用 Store。generation response validator 同步拒绝非正/非安全整数版本。新增 contract/repository/controller tests 未运行，CASE 状态和验收通过数不变。
+
+当前继续 DEV-3 BAS-001/CRE-005 generation 幂等保护：服务仅复用同设备同键且 `draftId + draftVersion` 一致的任务；同键异载荷返回 `version_conflict`，并发唯一键冲突后重新读取赢家并校验。request/response contract、客户端、controller 与持久层改动完成；contract/repository/controller regression 及隔离 MySQL e2e 未运行，待集中 TEST。最新 `npm run typecheck`、backend build、`git diff --check` 通过；未访问数据库/provider，验收仍为 96/225（42.7%）。MAT-002 跨栈集成测试的独立 harness 仍待 TEST 阶段设计，不作覆盖/通过依据。
+
+DEV-3 新增 DIA-005/BAS-002 保存命令保护：保存请求在幂等查找前运行时校验；`SaveCommand` 同设备 key 绑定 `draftId + sourceDiaryId + sourceDiaryVersion`，跨草稿或来源版本重用映射为 `version_conflict`。同身份重试原有首次结果语义保持。新增隔离 MySQL e2e 未运行；`npm run typecheck`、backend build、diff check 通过，未访问数据库/provider，验收保持 96/225（42.7%）。
+
+DEV-3 新增 CRE-003/BAS-002 草稿建单边界：服务层在持久化前校验可选 ID、类型/角色、照片 ID 数组、隐私和正安全整数版本；畸形输入返回 `invalid_input`。不增加照片数量/去重或来源日记必须存在的规则。新增隔离 e2e 未运行；静态 typecheck/backend build/diff check 通过，CASE 与总 passed 仍不变。
+
+DEV-3 新增 SHR-001/BAS-002 sharing body guard：controller 先验证设备身份，再校验请求对象、diary ID、privacy 与选段数组；Store 增加第二层验证。畸形 body 以 `invalid_input` 拒绝且不调用 Store。新增 controller regression 未运行；静态 backend build/typecheck/diff check 通过，未操作数据库，验收保持 96/225（42.7%）。
+
+DEV-3 新增 DIA-002 rewrite body guard：`POST /generation/rewrite` 先校验 `x-device-id`，再验证草稿/块/角色 ID、正安全整数版本、正文/引用类型、非空原文和照片数组；Store 二次验证。畸形 body 返回 `invalid_input`，不调用 rewrite provider。新增 controller tests 未运行；backend build/diff check 通过，未调用 AI provider，验收仍为 96/225（42.7%）。
+
+DEV-3 新增 DIA-006 query encoding guard：`page/pageSize` 只接受十进制整数字符串，重复参数和非字符串 keyword 返回 `invalid_input`，身份检查优先；既有 e2e 日期筛选 fixture 更新为 `YYYY-MM` / `YYYY-MM-DD`，成功断言保持。新增 controller regression 未运行；Q-004、CASE 状态和 passed 96/225（42.7%）不变。
+
+DEV-3 新增 BAS-004 direct Jest e2e setup guard：配置在 e2e 测试模块加载前验证 `E2E_DATABASE_URL` 为允许的本机 test/e2e schema，且与 `DATABASE_URL` 完全相同；标准 runner 同时传递两个值。`run-e2e-tests.spec.ts` 定向单测 4/4 通过；未启动 e2e 验证 Jest setup guard，也未连接数据库。CASE-BAS-004-001 既有 evidence 保持，验收仍为 96/225（42.7%）。
+
+DEV-3 新增 DSC-001 query guard：discovery list endpoint 现在验证 page/pageSize 为十进制整数文本、keyword 为单值字符串；service 重复校验 query 对象/keyword。无身份仍优先，category 仍只允许 `latest`。controller/service regression 未运行；未改 Q-007 类别规则、未接正式页面、未查询数据库，验收仍为 96/225（42.7%）。
+
+DEV-3 新增 PET-001 conversation pagination guard：controller 在设备身份校验后拒绝重复及非十进制 `page/pageSize`，service 在 Prisma 前校验分页对象、数值类型和范围。controller/service regression 未运行，CASE/passed 不变；未改页面、数据库或外部服务，验收仍为 96/225（42.7%）。
+
+DEV-3 PET-002 复核：锚点 repository 需明确 `tagId`，统计聚合 repository 尚无；Q-005/Q-016 未确认，正式统计/默认集合不能安全接线。本轮无独立可开发项，已登记延期；CASE 未运行，验收仍为 96/225（42.7%）。
+
+DEV-3 DSC-002 响应绑定：详情 repository 现拒绝与请求 ID 不一致的响应，服务端查询前验证 story ID；新增回归未运行。正式详情页和 published DB fixture 未接，CASE/passed 不变，验收仍为 96/225（42.7%）。
+
+DEV-3 DSC-003 点赞绑定：运行时拒绝畸形 story/owner/target 并绑定 response storyId 与请求目标；controller/service/client regression 尚未运行。无 migration/页面接线/数据库操作，CASE/passed 不变，验收仍为 96/225（42.7%）。
+
+DEV-3 GRW-001 复核：三个概览页面共用统计函数，但它含 `SAMPLE_BASELINE`；Q-005 统计口径、Q-012 资料范围、Q-001 恢复未确认。本轮无独立可开发项，CASE 未运行，验收仍为 96/225（42.7%）。
+
+DEV-3 GRW-002 复核：稳定 tagId 导航/花朵入口源码已存在；动态读模型待 Q-016/Q-006/Q-005。未知 tag 仍回落静态 friends 组，默认/失效行为不在未确认前改动；CASE 未执行，passed 不变。
+
+DEV-3 GRW-003 读取 query guard：controller/service/client 已加 decimal/single-value 和 response-pagination binding regression，尚未运行；不触发 DB/provider、未接正式 UI。CASE/passed 不变，验收仍为 96/225（42.7%）。
+
+DEV-3 GRW-004 correction binding：纠正 GET strict decimal query、service/repository runtime guard 与 client response target binding 已实现；新增 controller/service/client regression 未运行。无数据库/page/provider 操作，CASE/passed 不变，验收仍为 96/225（42.7%）。
+
+DEV-3 GRW-005/006 复核：成长授予/报告访问、更新和持久存储仍受 Q-005/Q-006/Q-001/Q-002/Q-016；GRW-006 provider/contract/mock 边界已建但无真实 provider/报告 repository。没有独立可开发项，CASE 未执行，验收仍为 96/225（42.7%）。
+
+DEV-3 INT-001 复核：J-01～J-06 缺少完整真实前置；跨栈 harness 留待 TEST 轮隔离设计。CASE-INT-001-001～008 未执行，没有创建假通过数据，验收仍为 96/225（42.7%）。
+
+DEV-3 BAS-002 route audit：当前 12 个 controller 的 protected routes 均有身份校验；这是静态盘点而非 CASE 证据。无新增实现或通过项，验收仍为 96/225（42.7%）。
+
+DEV-3 BAS-003/DIA-001：文件快照 clear 异常不再被吞，详情 repository 拒绝无效 ID 和返回 ID 串线；新增 regression 未运行。未更改 CASE/passed，验收仍为 96/225（42.7%）。
+
+DEV-3 CRE-005：生成建单/轮询/取消响应现在绑定请求标识，Store 二次核验活动草稿轮次；新增 repository/Store regression 未运行，CASE/passed 不变。
+
+DEV-3 CRE-006：provider、client contract 与后端保存边界现拒绝单个生成结果/作品内重复 `person.id`；service regression 和隔离 generation-job/save e2e 已新增、均未运行。没有新增 passed，验收仍为 96/225（42.7%）；本轮未调用真实 AI provider、未操作数据库，Q-003/Q-010 与正式 UI/UX 边界不变。
+
+DEV-3 DIA-001：详情读取缓存现绑定 `diaryId`，路由切换在所有 effect 分支使旧读取回调失效；新增页面 regression 未运行。CASE/矩阵无新增 passed，验收仍为 96/225（42.7%）；正式视觉、反馈和路由未改变。
+
+DEV-3 DIA-002：rewrite 去重/应用现绑定轮次、角色、目标文本与照片上下文；HTTP repository 和 Store 绑定返回 draft/block/version/type，contract 要求正安全整数版本。新增 contract/repository/Store regression 已写但未运行。本快照最后已知 `npm run typecheck` 早于该批修改；恢复代码工作时须重跑静态检查。集中测试尚未开始，本次未连接数据库/provider。
+
+2026-10-16 用户新增执行规则：依赖图优先；依赖就绪后按 `S → M → L` 由易到难。初次开发之外最多两轮合并修复，每轮后复测；仍未通过则标“达到返工上限，暂跳”，保留原任务、CASE、缺陷与恢复条件。当前轮次仍为 DEV-3，不重置历史；现有 42/42 源码盘点、22/7/13 主状态快照与 96/225 验收记录均须按最新事实复核后再使用。复杂度队列尚待下一次代码推进前建立；返工计数只能依据可追溯的任务/CASE历史，不能猜测或清零。
+
+## 最新轮次快照：TEST-5 / DEV-4 / TEST-6（2026-10-16）
+
+DEV-4 对 TEST-5 的两项发现实施修复后，集中复测结果如下：
+
+| 执行项 | 实际结果 | 结论 |
+| --- | --- | --- |
+| 前端 `npm test -- --silent` | TEST-5 在 GRW-003 cancellation rejection 处异常终止；TEST-6 为 50/55 suites、429/443 tests 通过，5 suites / 14 tests 失败 | 缺陷归属与 S/M 修复顺序已列入 `development-progress.md`；前端全量需 DEV-5 修复后再集中复测 |
+| 后端 `npm --prefix backend run test -- --silent` | TEST-5 为 16/17 suites、197/198 tests；TEST-6 为 17/17 suites、198/198 tests 全通过 | DSC-002 identity-first empty story ID guard 经 DEV-4 修复并复测通过 |
+| 前端 TypeScript | `npm run typecheck` 通过 | 静态检查，不计 CASE passed |
+| 后端编译 | `npm --prefix backend run build` 通过 | 静态检查，不计 CASE passed |
+| 差异检查 | `git diff --check` 通过 | 格式检查通过 |
+| 数据库 e2e / migration | 未运行 | `E2E_DATABASE_URL` 未配置；未触碰数据库，禁止回退至开发库 |
+
+当前进入 DEV-5，优先队列为 S：MAT-001 导入冲突前后状态快照、DIA-001 完整详情响应 fixture；M：MAT-002 诊断目标点击后路由/草稿未推进的原因并捕获应用前快照、CRE-005 动态 request-bound generation fixtures、GRW-003 provider-start cancellation synchronization。GRW-003 已记录 1/2 修复轮；其他首次集中失败项为 0/2。42 项源码盘点历史不重置，验收矩阵无新增 passed，仍为 96/225（42.7%）。真实 AI、相册、系统分享、文件和 iOS 设备 CASE 仍待各自外部/决策条件。
+
+## TEST-7 / DEV-6 最新状态（2026-10-16）
+
+| 执行项 | TEST-7 实际结果 | DEV-6 动作 |
+| --- | --- | --- |
+| 前端全量 Jest | 53/55 suites、439/443 tests 通过；MAT-002 3 项与 GRW-003 1 项失败 | MAT-002 在 `beginEdit` 后重读最新 store snapshot；GRW-003 在 cancellation promise 收口后断言 provider signal |
+| 前端类型检查 | TS2322：retry generation Jest mock 将 `ok: true` 推断为 `boolean` | 为 mock 明确标注 `RemoteResult<GenerationJobContract>` 返回类型 |
+| `git diff --check` | 通过 | 继续保留 |
+| 后端 unit/build | TEST-7 未重复运行；TEST-6 后 backend 源码未变，最近 backend unit 17 suites / 198 tests 与 build 均通过 | 不重复跑未变化的 backend suite |
+| 数据库 e2e / migration | 未运行 | `E2E_DATABASE_URL` 未配置，不触碰开发库 |
+
+DEV-5 本地子集复测已确认 MAT-001、DIA-001、CRE-005 回归套件通过，各计 `1/2`。MAT-002 计 `1/2`、GRW-003 计 `2/2`，DEV-6 是两条缺陷线最后允许的修复/集中复测机会。CASE passed 与有效分母均未变化，仍为 96/225（42.7%）。
+
+## TEST-8 / DEV-7 最新状态（2026-10-16）
+
+| 执行项 | TEST-8 实际结果 | 处理 |
+| --- | --- | --- |
+| 前端完整 Jest | 55/55 suites、443/443 tests 通过 | DEV-6 MAT-002 与 GRW-003 修复均通过 |
+| 前端 typecheck | 通过 | CRE-005 retry mock 返回类型已收窄到契约 |
+| `git diff --check` | 通过 | 台账与代码差异格式有效 |
+| BAS-004 legacy runner 正常/反向顺序 | 两个命令均以 `MODULE_NOT_FOUND: ../contracts/core-diary-contract` 退出，未执行任何场景 | DEV-7 在 `tools/run-domain-tests.js` 转译清单加入 contract 后，各跑一次当前版本正常/反向 |
+| backend unit/build | 未重复运行；backend source 自 TEST-6 后未变 | 最近证据仍为 17 suites / 198 tests 与 build 通过 |
+| DB e2e / migration | 未运行 | `E2E_DATABASE_URL` 缺失；不接触开发库 |
+
+CASE-BAS-004-002 当前未通过；此前同 runner 15/15 正/反序结果保留为旧版本历史。验收通过数按 95/225（42.2%）重算，DEV-7 修复轮数 `0/2`。其他任务 CASE 没有新增 passed。
+
+## TEST-9 / DEV-8 当前快照
+
+DEV-7 增加 core diary contract 后复跑正常/反向 runner，二者仍在 E01～E15 启动前因 `ai-image-generation-contract` 缺失而失败。该结果说明临时编译清单仍遗漏 Store runtime imports；当前无任何领域场景执行。BAS-004-A02 修复轮计数为 `1/2`，DEV-8 将按完整依赖清单转译本地纯 TS contract/provider，并隔离 MediaLibrary 与 backend adapters。验收仍 95/225（42.2%），未配置 `E2E_DATABASE_URL`，未触碰数据库。
+
+## TEST-10 / DEV-8 修复复测（2026-10-16）
+
+DEV-8 补齐 contract/provider 转译并为 MediaLibrary/backend HTTP adapters 建立隔离 stubs 后，`node tools/run-domain-tests.js` 与 `DIARY_DOMAIN_TEST_ORDER=reverse node tools/run-domain-tests.js` 均在当前 worktree 执行 15/15 场景通过。未改领域断言、未连接网络/数据库/设备。CASE-BAS-004-002 当前恢复通过，修复轮 `2/2` 已闭环；CASE-BAS-004-001 仍因当前 `E2E_DATABASE_URL` 缺失未验证 Jest setup guard 成功启动，保持 partial。验收保持 95/225（42.2%）。其他真实设备、AI provider、文件出口及 E2E 未因本地 runner 通过而扩大。
+
+## TEST-11 最新执行结果（2026-10-16）
+
+| 执行项 | 实际结果 | 结论 |
+| --- | --- | --- |
+| 前端全量 Jest | 55/55 suites、443/443 tests 通过 | 当前本地前端回归通过 |
+| 后端 unit Jest | 17/17 suites、198/198 tests 通过 | 当前本地后端回归通过，不代表 MySQL e2e |
+| 前端类型检查 | `npm run typecheck` 通过 | 静态检查 |
+| 后端编译 | `npm --prefix backend run build` 通过 | 静态检查 |
+| 差异检查 | `git diff --check` 通过 | 格式检查 |
+| domain runner | 未重复运行 | TEST-10 后 runner 源码未变，normal/reverse 各 15/15 的当前证据仍适用 |
+| MySQL e2e / migration / direct Jest setup guard | 未运行 | `E2E_DATABASE_URL` 缺失；未连接开发数据库 |
+| 真实设备 / 文件 / provider / 平台 CASE | 未运行 | 对应权限、Q 决策、凭据和授权缺口继续保留 |
+
+TEST-11 无本地回归失败，不增加缺陷修复轮，也不改变任何 CASE 结果。coverage 有效总数 225、明确 passed 95（42.2%）；BAS-004-A01 保持 partial，BAS-004-A02 维持 TEST-10 当前 worktree 通过。完整业务闭环仍有产品决策、真实外部能力、设备及数据库证据缺口。
+
+## TEST-12 / DEV-11 / TEST-13 最新执行结果（2026-10-16）
+
+| 执行项 | TEST-12 首轮实际结果 | DEV-11 与 TEST-13 复测 |
+| --- | --- | --- |
+| Prisma migrations | fresh deploy 于 discovery 长索引名失败；扫描后发现 anchor correction 唯一索引名也超 64 字符 | 两个名称在 schema/SQL 同步映射短名；全新隔离 schema 6/6 migrations 成功，migrate status up-to-date，schema diff 无 drift |
+| Direct Jest setup guard / MySQL e2e | setup guard 启动成功；46 条中 45 通过、1 个 malformed draft body 错误 envelope 失败；suite 结束后取消中的后台 provider 仍触碰已断开的 Prisma，进程非零退出 | JSON primitive 交给 controller identity-first validation；generation cancel AbortSignal 传至 provider、活动 job 去重且 reset/shutdown 等待任务。当前 direct config e2e 46/46，进程正常退出 |
+| 后端 unit | TEST-11 17 suites / 198 tests 为修复前证据 | 当前 17/17 suites、199/199 tests 通过，包含 provider cancel/timeout 分类 |
+| 构建与类型 | - | `npm --prefix backend run build`、`npm run typecheck`、`git diff --check` 通过 |
+| 临时数据库 | 仅用本轮新建且符合 guard 的 `ai_diary_test_*` schema | 完成验证后核对并删除本轮创建的三个临时 schema；未指向/清理开发库 `ai_diary` |
+
+TEST-12 的失败作为历史保留。DSC-001、GRW-004 migration，BAS-002/CRE-003 malformed body 与 CRE-005 cancellation lifecycle 的首轮缺陷修复计数各 `1/2`，TEST-13 复测通过；BAS-004-A01 当前通过。验收矩阵有效分母 225、passed 96（42.7%）。migration deploy 不替代 discovery/anchor 业务 CASE；未调用真实 AI provider、设备媒体库、文件出口或平台渠道。
+
+## DEV-12 / TEST-14 服务层 MySQL 集成
+
+| 执行项 | 实际结果 | 结论 |
+| --- | --- | --- |
+| Discovery published reads/likes | synthetic published fixture；latest 顺序、keyword、withdrawn/unpublished 过滤、detail fields、target-state like 幂等、disabled gate、不同设备状态 | e2e 子集通过；无发布写入、页面路由或 Q-007 结论 |
+| Pet chat persistence | begin turn、同 request replay、固定失败码、显式 retry attempt 2、`source: mock` reply、history order 与 device isolation | e2e 子集通过；不计真实 AI/长期留存/页面反馈通过 |
+| Anchor read/correction persistence | saved diary fixture、begin/complete/replay、JSON_TABLE tag query、device isolation、correction PUT/GET | 首轮 query 错误返回空集；DEV-12 改为 JSON_TABLE join 与 distinct count/page 后定向及完整 e2e 复测通过。provider 是 test-only fixture，不是真实模型 |
+| Test DB cleanup | `MemoryStoreService.reset()` 覆盖 discovery/chat/anchor/correction tables | 每个 CASE 用例前/集成 flow 后按依赖顺序清理；临时 schema 完成测试后已删除 |
+| Full checks | backend e2e 49/49；backend unit 17 suites / 199 tests；root typecheck、backend build、Prisma status/diff、`git diff --check` | 通过；没有新增完整 CASE passed，矩阵仍 96/225（42.7%） |
+
+DEV-12 新增 MySQL integration 子集分别使 CASE-DSC-001-001/002/005、DSC-002-001/003、DSC-003-001/003/004/006、PET-001-005/007、GRW-003-005/006、GRW-004-003/007/009 达到部分执行；正式页面、真实 provider、重启留存及未决 Q 仍缺证据，因此不将任何一个 case 从 partial 提升为 passed。历史 DEV 明细中“migration 未应用”描述当时未对持久目标部署；TEST-13/14 只在本轮 disposable schema 验证，开发/生产库未迁移。

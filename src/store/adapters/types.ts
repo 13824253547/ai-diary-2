@@ -1,4 +1,8 @@
 import type { CoreDiaryRepository } from '../../repositories/core-diary-repository';
+import type { DiscoveryRepository } from '../../repositories/discovery-repository';
+import type { AnchorCorrectionRepository } from '../../repositories/anchor-correction-repository';
+import type { AnchorReadRepository } from '../../repositories/anchor-read-model-repository';
+import type { PetChatRepository } from '../../repositories/pet-chat-repository';
 import type { DiaryDraft } from '../../types/diary';
 
 export type PersistedDraftsSnapshot = {
@@ -16,5 +20,9 @@ export type DraftSnapshotStore = {
 export type AppStoreAdapters = {
   diaryRepository?: CoreDiaryRepository;
   memoriesRepository?: CoreDiaryRepository;
+  discoveryRepository?: DiscoveryRepository;
+  anchorCorrectionRepository?: AnchorCorrectionRepository;
+  anchorReadRepository?: AnchorReadRepository;
+  petChatRepository?: PetChatRepository;
   draftSnapshotStore?: DraftSnapshotStore;
 };

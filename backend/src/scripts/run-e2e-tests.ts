@@ -31,6 +31,17 @@ export function validateE2eDatabaseUrl(value: string | undefined) {
   return value;
 }
 
+export function validateE2eDatabaseEnvironment(
+  e2eDatabaseUrl: string | undefined,
+  databaseUrl: string | undefined,
+) {
+  const safeDatabaseUrl = validateE2eDatabaseUrl(e2eDatabaseUrl);
+  if (databaseUrl !== safeDatabaseUrl) {
+    throw new Error('DATABASE_URL must match the validated E2E_DATABASE_URL.');
+  }
+  return safeDatabaseUrl;
+}
+
 export function runE2eTests(args: string[], databaseUrl = process.env.E2E_DATABASE_URL) {
   const safeDatabaseUrl = validateE2eDatabaseUrl(databaseUrl);
   const jestPath = require.resolve('jest/bin/jest', { paths: [backendRoot] });
@@ -41,6 +52,7 @@ export function runE2eTests(args: string[], databaseUrl = process.env.E2E_DATABA
       cwd: backendRoot,
       env: {
         ...process.env,
+        E2E_DATABASE_URL: safeDatabaseUrl,
         DATABASE_URL: safeDatabaseUrl,
         REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:36379',
       },

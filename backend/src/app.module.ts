@@ -8,7 +8,10 @@ import { GenerationModule } from './modules/generation/generation.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { MemoriesModule } from './modules/memories/memories.module';
 import { PhotosModule } from './modules/photos/photos.module';
+import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { SharingModule } from './modules/sharing/sharing.module';
+import { AnchorCorrectionsModule } from './modules/anchors/anchor-corrections.module';
+import { ChatSessionsModule } from './modules/chat/chat-sessions.module';
 
 @Module({
   imports: [
@@ -22,7 +25,10 @@ import { SharingModule } from './modules/sharing/sharing.module';
     GenerationModule,
     DiariesModule,
     MemoriesModule,
+    DiscoveryModule,
     SharingModule,
+    AnchorCorrectionsModule,
+    ChatSessionsModule,
   ],
   controllers: [HealthController],
 })

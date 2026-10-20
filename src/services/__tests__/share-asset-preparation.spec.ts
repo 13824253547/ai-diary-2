@@ -87,6 +87,7 @@ describe('share asset preparation', () => {
     const renderer = jest.fn(async ({ cacheKey }: { cacheKey: string }) => `file://${cacheKey}.svg`);
     const service = createShareAssetPreparationService({
       renderAnonymousAsset: renderer,
+      isPreparedAssetReadable: async () => true,
     });
     const photo = createPhoto({
       faceRects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.4 }],
@@ -226,6 +227,63 @@ describe('share asset preparation', () => {
       message: '匿名资源准备失败，请稍后重试。',
     });
     expect(renderer).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    'https://example.invalid/unverified-mask.png',
+    'data:image/png;base64,AA==',
+    'ph://unverified-mask',
+  ])('rejects rendered anonymous assets without a locally readable file URI: %s', async uri => {
+    const renderer = jest.fn(async () => uri);
+    const service = createShareAssetPreparationService({
+      renderAnonymousAsset: renderer,
+    });
+
+    const result = await service.prepareDiaryShareAssets({
+      diary: createDiary(),
+      target: 'save',
+      getPhotoById: () => createPhoto({
+        faceRects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.4 }],
+        personIds: ['person-friend'],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'render_failed',
+    });
+    expect(renderer).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects a local anonymous asset that cannot be read as a PNG', async () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-asset-invalid-'));
+    const filePath = path.join(tempRoot, 'invalid.png');
+    fs.writeFileSync(filePath, 'not a png');
+    const renderer = jest.fn(async () => `file://${filePath}`);
+    const service = createShareAssetPreparationService({
+      renderAnonymousAsset: renderer,
+    });
+
+    try {
+      const result = await service.prepareDiaryShareAssets({
+        diary: createDiary(),
+        target: 'save',
+        getPhotoById: () => createPhoto({
+          faceRects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.4 }],
+          personIds: ['person-friend'],
+        }),
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        reason: 'render_failed',
+      });
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   test('renders a masked png asset without mutating the source image', async () => {

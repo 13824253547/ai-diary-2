@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DiaryGenerationProviderError, DiaryGenerationService, type GenerationInputSnapshot, type GenerationResultRecord, type RewriteInputSnapshot, type RewriteResultRecord } from './diary-generation.service';
 import { PrismaService } from './prisma.service';
@@ -24,6 +24,7 @@ export type DiaryRecord = {
   photoIds: string[];
   publicBlockIds?: string[];
   contentSnapshot?: DiaryContentSnapshotRecord;
+  contentSnapshotStatus?: 'invalid';
   version: number;
 };
 
@@ -46,7 +47,7 @@ export type SaveDiaryCommandResult = {
 };
 
 type SaveErrorCode = 'not_found' | 'version_conflict' | 'invalid_input';
-type GenerationJobErrorCode = 'not_found';
+type GenerationJobErrorCode = 'not_found' | 'version_conflict';
 type DraftInputErrorCode = 'invalid_input';
 type RewriteDraftErrorCode = 'not_found' | 'invalid_input' | 'version_conflict';
 
@@ -85,6 +86,27 @@ export class SaveDiaryError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+function assertSaveCommandIdentity(
+  existing: {
+    draftId: string;
+    sourceDiaryId: string | null;
+    sourceDiaryVersion: number | null;
+  },
+  input: {
+    draftId: string;
+    sourceDiaryId?: string;
+    sourceDiaryVersion?: number;
+  },
+) {
+  if (
+    existing.draftId !== input.draftId
+    || (existing.sourceDiaryId ?? undefined) !== input.sourceDiaryId
+    || (existing.sourceDiaryVersion ?? undefined) !== input.sourceDiaryVersion
+  ) {
+    throw new SaveDiaryError('version_conflict', '保存幂等键已绑定到其他草稿版本。');
   }
 }
 
@@ -197,6 +219,7 @@ function assertDiaryContentSnapshot(
   if (rawPosterPhotoIds !== undefined
     && !(rawPosterPhotoIds as unknown[]).every(photoId => isNonEmptyString(photoId) && allowedPhotos.has(photoId))) invalid();
   if (rawPeople !== undefined) {
+    const personIds = new Set<string>();
     for (const person of rawPeople as unknown[]) {
       if (!isRecord(person)
         || !isNonEmptyString(person.id)
@@ -208,6 +231,10 @@ function assertDiaryContentSnapshot(
         || !person.photoIds.includes(person.avatarPhotoId)
         || (person.aliases !== undefined
           && (!Array.isArray(person.aliases) || !(person.aliases as unknown[]).every(isNonEmptyString)))) invalid();
+      const validPerson = person as Record<string, unknown>;
+      const personId = validPerson.id as string;
+      if (personIds.has(personId)) invalid();
+      personIds.add(personId);
     }
   }
   if (paragraphIds.size === 0) invalid();
@@ -236,8 +263,12 @@ type StoredGenerationJobRecord = GenerationJobRecord & {
 };
 
 @Injectable()
-export class MemoryStoreService {
-  private readonly processingGenerationJobs = new Set<string>();
+export class MemoryStoreService implements OnModuleDestroy {
+  private readonly logger = new Logger(MemoryStoreService.name);
+  private readonly processingGenerationJobs = new Map<string, {
+    controller: AbortController;
+    promise: Promise<void>;
+  }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -245,6 +276,18 @@ export class MemoryStoreService {
   ) {}
 
   async createDraft(input: Omit<DraftRecord, 'id'> & { id?: string }, ownerDeviceId: string) {
+    if (!isRecord(input)
+      || (input.id !== undefined && !isNonEmptyString(input.id))
+      || (input.sourceDiaryId !== undefined && !isNonEmptyString(input.sourceDiaryId))
+      || !isNonEmptyString(input.type)
+      || !isNonEmptyString(input.characterId)
+      || !Array.isArray(input.selectedPhotoIds)
+      || !input.selectedPhotoIds.every(isNonEmptyString)
+      || !SUPPORTED_DIARY_PRIVACY_SETTINGS.includes(input.privacy as typeof SUPPORTED_DIARY_PRIVACY_SETTINGS[number])
+      || !Number.isSafeInteger(input.version)
+      || input.version <= 0) {
+      throw new DraftInputError('invalid_input', '草稿请求参数无效。');
+    }
     if (!isSupportedDiaryType(input.type)) {
       throw new DraftInputError('invalid_input', 'unsupported diary type');
     }
@@ -393,6 +436,35 @@ export class MemoryStoreService {
     idempotencyKey: string;
     contentSnapshot: DiaryContentSnapshotRecord;
   }, ownerDeviceId: string): Promise<SaveDiaryCommandResult> {
+    if (!isRecord(input)
+      || !isNonEmptyString(input.draftId)
+      || !isNonEmptyString(input.idempotencyKey)
+      || (input.id !== undefined && !isNonEmptyString(input.id))
+      || (input.sourceDiaryId !== undefined && !isNonEmptyString(input.sourceDiaryId))
+      || (input.sourceDiaryVersion !== undefined
+        && (!Number.isSafeInteger(input.sourceDiaryVersion) || input.sourceDiaryVersion <= 0))
+      || (input.sourceDiaryId !== undefined && input.sourceDiaryVersion === undefined)
+      || (input.sourceDiaryId === undefined && input.sourceDiaryVersion !== undefined)
+      || typeof input.title !== 'string'
+      || typeof input.summary !== 'string'
+      || typeof input.location !== 'string'
+      || typeof input.date !== 'string'
+      || !input.date.trim()
+      || !SUPPORTED_DIARY_PRIVACY_SETTINGS.includes(input.privacy as typeof SUPPORTED_DIARY_PRIVACY_SETTINGS[number])
+      || !Number.isSafeInteger(input.version)
+      || input.version <= 0) {
+      throw new SaveDiaryError('invalid_input', 'diary save request is invalid');
+    }
+    if (!Array.isArray(input.publicBlockIds ?? [])
+      || !(input.publicBlockIds ?? []).every(isNonEmptyString)) {
+      throw new SaveDiaryError('invalid_input', 'public block ids are invalid');
+    }
+    assertDiaryContentSnapshot(input.contentSnapshot, input.photoIds);
+    const date = this.normalizeDateInput(input.date);
+    if (!Number.isFinite(date.getTime())) {
+      throw new SaveDiaryError('invalid_input', 'diary date is invalid');
+    }
+
     const sourceDiaryVersion = input.sourceDiaryVersion;
     const existingCommand = await this.prisma.saveCommand.findUnique({
       where: {
@@ -403,6 +475,7 @@ export class MemoryStoreService {
       },
     });
     if (existingCommand) {
+      assertSaveCommandIdentity(existingCommand, input);
       const existingDiary = await this.getDiary(existingCommand.diaryId, ownerDeviceId);
       if (existingDiary) {
         return {
@@ -446,8 +519,6 @@ export class MemoryStoreService {
       }
     }
 
-    assertDiaryContentSnapshot(input.contentSnapshot, input.photoIds);
-    const date = this.normalizeDateInput(input.date);
     try {
       const result = await this.prisma.$transaction(async prisma => {
         let savedDiary: Awaited<ReturnType<typeof prisma.diary.create>>;
@@ -482,6 +553,7 @@ export class MemoryStoreService {
               },
             });
             if (racedCommand) {
+              assertSaveCommandIdentity(racedCommand, input);
               const racedDiary = await prisma.diary.findUnique({ where: { id: racedCommand.diaryId } });
               if (racedDiary?.ownerDeviceId === ownerDeviceId) {
                 return {
@@ -549,6 +621,7 @@ export class MemoryStoreService {
           },
         });
         if (racedCommand) {
+          assertSaveCommandIdentity(racedCommand, input);
           const racedDiary = await this.getDiary(racedCommand.diaryId, ownerDeviceId);
           if (racedDiary) {
             return {
@@ -597,6 +670,13 @@ export class MemoryStoreService {
     privacy: string;
     publicBlockIds?: string[];
   }, ownerDeviceId: string) {
+    if (!isRecord(input)
+      || !isNonEmptyString(input.diaryId)
+      || typeof input.privacy !== 'string'
+      || (input.publicBlockIds !== undefined
+        && (!Array.isArray(input.publicBlockIds) || !input.publicBlockIds.every(isNonEmptyString)))) {
+      throw new SaveDiaryError('invalid_input', 'sharing request is invalid');
+    }
     const diary = await this.prisma.diary.findUnique({
       where: { id: input.diaryId },
     });
@@ -646,11 +726,19 @@ export class MemoryStoreService {
   }
 
   async rewriteDraftBlock(input: RewriteInputSnapshot, ownerDeviceId: string): Promise<RewriteResultRecord> {
-    if (input.blockType !== 'text' && input.blockType !== 'quote') {
-      throw new RewriteDraftError('invalid_input', 'unsupported block type');
-    }
-    if (!input.content.trim()) {
-      throw new RewriteDraftError('invalid_input', 'rewrite source content is empty');
+    if (!isRecord(input)
+      || !isNonEmptyString(input.draftId)
+      || !isNonEmptyString(input.blockId)
+      || !Number.isSafeInteger(input.draftVersion)
+      || input.draftVersion <= 0
+      || !isNonEmptyString(input.characterId)
+      || (input.blockType !== 'text' && input.blockType !== 'quote')
+      || !isNonEmptyString(input.content)
+      || !Array.isArray(input.selectedPhotoIds)
+      || !input.selectedPhotoIds.every(isNonEmptyString)
+      || (input.photoIds !== undefined
+        && (!Array.isArray(input.photoIds) || !input.photoIds.every(isNonEmptyString)))) {
+      throw new RewriteDraftError('invalid_input', 'rewrite request is invalid');
     }
 
     const draft = await this.getDraft(input.draftId, ownerDeviceId);
@@ -675,7 +763,7 @@ export class MemoryStoreService {
   async listDiaries(ownerDeviceId: string) {
     const diaries = await this.prisma.diary.findMany({
       where: { ownerDeviceId },
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
     });
     return diaries.map(diary => this.mapDiaryRecord(diary));
   }
@@ -685,44 +773,58 @@ export class MemoryStoreService {
     draftVersion: number;
     idempotencyKey: string;
   }, ownerDeviceId: string) {
-    const existing = await this.prisma.generationJob.findUnique({
-      where: {
-        ownerDeviceId_idempotencyKey: {
-          ownerDeviceId,
-          idempotencyKey: input.idempotencyKey,
+    const restoreIdempotentJob = async () => {
+      const existing = await this.prisma.generationJob.findUnique({
+        where: {
+          ownerDeviceId_idempotencyKey: {
+            ownerDeviceId,
+            idempotencyKey: input.idempotencyKey,
+          },
         },
-      },
-    });
-    if (existing) {
-      const restored = await this.getGenerationJob(existing.jobId, ownerDeviceId);
-      if (restored) return restored;
-    }
+      });
+      if (!existing) return undefined;
+      if (existing.draftId !== input.draftId || existing.draftVersion !== input.draftVersion) {
+        throw new GenerationJobError('version_conflict', '生成任务幂等键已绑定到其他草稿版本。');
+      }
+      return this.getGenerationJob(existing.jobId, ownerDeviceId);
+    };
+
+    const restored = await restoreIdempotentJob();
+    if (restored) return restored;
 
     const draft = await this.getDraft(input.draftId, ownerDeviceId);
     if (!draft) {
       throw new GenerationJobError('not_found', 'draft not found');
     }
     const inputSnapshot = this.buildGenerationInputSnapshot(draft, input.draftVersion);
-    const job = await this.prisma.generationJob.create({
-      data: {
-        ownerDeviceId,
-        draftId: input.draftId,
-        draftVersion: input.draftVersion,
-        idempotencyKey: input.idempotencyKey,
-        status: 'queued',
-        stage: 'queued',
-        progressPercent: 0,
-        attemptCount: 0,
-        maxAttempts: this.resolveGenerationMaxAttempts(),
-        errorCode: null,
-        errorMessage: null,
-        retryable: null,
-        inputSnapshot: inputSnapshot as Prisma.InputJsonValue,
-        result: Prisma.JsonNull,
-      },
-    });
-    void this.ensureGenerationJobProcessing(job.jobId);
-    return this.toPublicGenerationJob(this.mapGenerationJobRecord(job));
+    try {
+      const job = await this.prisma.generationJob.create({
+        data: {
+          ownerDeviceId,
+          draftId: input.draftId,
+          draftVersion: input.draftVersion,
+          idempotencyKey: input.idempotencyKey,
+          status: 'queued',
+          stage: 'queued',
+          progressPercent: 0,
+          attemptCount: 0,
+          maxAttempts: this.resolveGenerationMaxAttempts(),
+          errorCode: null,
+          errorMessage: null,
+          retryable: null,
+          inputSnapshot: inputSnapshot as Prisma.InputJsonValue,
+          result: Prisma.JsonNull,
+        },
+      });
+      void this.ensureGenerationJobProcessing(job.jobId);
+      return this.toPublicGenerationJob(this.mapGenerationJobRecord(job));
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const raced = await restoreIdempotentJob();
+        if (raced) return raced;
+      }
+      throw error;
+    }
   }
 
   async getGenerationJob(jobId: string, ownerDeviceId: string) {
@@ -765,16 +867,29 @@ export class MemoryStoreService {
         progressPercent: cancelled.progressPercent,
       },
     });
-    this.processingGenerationJobs.delete(jobId);
+    this.processingGenerationJobs.get(jobId)?.controller.abort();
     return this.toPublicGenerationJob(cancelled);
   }
 
   async reset() {
-    this.processingGenerationJobs.clear();
+    await this.abortAndWaitForGenerationJobs();
     await this.prisma.generationJob.deleteMany();
+    await this.prisma.discoveryLike.deleteMany();
+    await this.prisma.discoveryStory.deleteMany();
+    await this.prisma.chatMessage.deleteMany();
+    await this.prisma.chatTurn.deleteMany();
+    await this.prisma.chatConversation.deleteMany();
+    await this.prisma.diaryAnchor.deleteMany();
+    await this.prisma.diaryAnchorExtraction.deleteMany();
+    await this.prisma.anchorCorrectionCommand.deleteMany();
+    await this.prisma.anchorCorrection.deleteMany();
     await this.prisma.saveCommand.deleteMany();
     await this.prisma.diary.deleteMany();
     await this.prisma.draft.deleteMany();
+  }
+
+  async onModuleDestroy() {
+    await this.abortAndWaitForGenerationJobs();
   }
 
   private readStringArray(value: Prisma.JsonValue) {
@@ -814,6 +929,8 @@ export class MemoryStoreService {
     contentSnapshot: Prisma.JsonValue | null;
     version: number;
   }) {
+    const invalidContentSnapshot = diary.contentSnapshot !== null
+      && (typeof diary.contentSnapshot !== 'object' || Array.isArray(diary.contentSnapshot));
     return {
       id: diary.id,
       draftId: diary.draftId,
@@ -829,6 +946,7 @@ export class MemoryStoreService {
         && !Array.isArray(diary.contentSnapshot)
         ? diary.contentSnapshot as unknown as DiaryContentSnapshotRecord
         : undefined,
+      contentSnapshotStatus: invalidContentSnapshot ? 'invalid' as const : undefined,
       version: diary.version,
     } satisfies DiaryRecord;
   }
@@ -930,12 +1048,28 @@ export class MemoryStoreService {
     } satisfies GenerationInputSnapshot;
   }
 
-  private async ensureGenerationJobProcessing(jobId: string) {
+  private ensureGenerationJobProcessing(jobId: string) {
     if (this.processingGenerationJobs.has(jobId)) return;
-    this.processingGenerationJobs.add(jobId);
-    void this.processGenerationJob(jobId).finally(() => {
-      this.processingGenerationJobs.delete(jobId);
-    });
+    const active = {
+      controller: new AbortController(),
+      promise: Promise.resolve(),
+    };
+    this.processingGenerationJobs.set(jobId, active);
+    active.promise = this.processGenerationJob(jobId, active.controller.signal)
+      .catch(() => {
+        this.logger.error('Generation job processing stopped before reaching a terminal state.');
+      })
+      .finally(() => {
+        if (this.processingGenerationJobs.get(jobId) === active) {
+          this.processingGenerationJobs.delete(jobId);
+        }
+      });
+  }
+
+  private async abortAndWaitForGenerationJobs() {
+    const activeJobs = [...this.processingGenerationJobs.values()];
+    activeJobs.forEach(active => active.controller.abort());
+    await Promise.all(activeJobs.map(active => active.promise));
   }
 
   private resolveGenerationMaxAttempts() {
@@ -944,9 +1078,10 @@ export class MemoryStoreService {
     return parsed;
   }
 
-  private async processGenerationJob(jobId: string) {
+  private async processGenerationJob(jobId: string, signal: AbortSignal) {
+    if (signal.aborted) return;
     const queued = await this.prisma.generationJob.findUnique({ where: { jobId } });
-    if (!queued) return;
+    if (!queued || signal.aborted) return;
     const current = this.mapGenerationJobRecord(queued);
     if (current.status === 'cancelled' || current.status === 'failed' || current.status === 'succeeded') {
       return;
@@ -972,9 +1107,9 @@ export class MemoryStoreService {
     let attempt = current.attemptCount;
     const maxAttempts = current.maxAttempts > 0 ? current.maxAttempts : this.resolveGenerationMaxAttempts();
 
-    while (attempt < maxAttempts) {
+    while (attempt < maxAttempts && !signal.aborted) {
       const beforeAttempt = await this.prisma.generationJob.findUnique({ where: { jobId } });
-      if (!beforeAttempt) return;
+      if (!beforeAttempt || signal.aborted) return;
       const latestBeforeAttempt = this.mapGenerationJobRecord(beforeAttempt);
       if (
         latestBeforeAttempt.status === 'cancelled'
@@ -1000,11 +1135,13 @@ export class MemoryStoreService {
         },
       });
       await new Promise(resolve => setTimeout(resolve, 50));
+      if (signal.aborted) return;
 
       try {
-        const result = await this.diaryGenerationService.generate(current.inputSnapshot);
+        const result = await this.diaryGenerationService.generate(current.inputSnapshot, { signal });
+        if (signal.aborted) return;
         const beforeFinalize = await this.prisma.generationJob.findUnique({ where: { jobId } });
-        if (!beforeFinalize) return;
+        if (!beforeFinalize || signal.aborted) return;
         const latest = this.mapGenerationJobRecord(beforeFinalize);
         if (latest.status === 'cancelled' || latest.status === 'failed' || latest.status === 'succeeded') {
           return;
@@ -1044,8 +1181,10 @@ export class MemoryStoreService {
         });
         return;
       } catch (error) {
+        if (signal.aborted
+          || (error instanceof DiaryGenerationProviderError && error.code === 'cancelled')) return;
         const existing = await this.prisma.generationJob.findUnique({ where: { jobId } });
-        if (!existing) return;
+        if (!existing || signal.aborted) return;
         const latest = this.mapGenerationJobRecord(existing);
         if (latest.status === 'cancelled' || latest.status === 'succeeded') {
           return;

@@ -11,11 +11,11 @@ import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
 import type { DiaryItem } from '../../src/types/diary';
 
-const groups: Record<string, string[]> = {
-  '珍视旧友': ['diary-1', 'diary-2', 'diary-4'],
-  '追光的人': ['diary-5', 'diary-6', 'diary-1'],
-  '山与海': ['diary-7', 'diary-2', 'diary-5'],
-  '深夜食堂': ['diary-4', 'diary-1'],
+const groupsByTagId = {
+  friends: { label: '珍视旧友', diaryIds: ['diary-1', 'diary-2', 'diary-4'] },
+  light: { label: '追光的人', diaryIds: ['diary-5', 'diary-6', 'diary-1'] },
+  mountains: { label: '山与海', diaryIds: ['diary-7', 'diary-2', 'diary-5'] },
+  food: { label: '深夜食堂', diaryIds: ['diary-4', 'diary-1'] },
 };
 
 // An anchor is a short excerpt of its linked diary, rather than its entire paragraph.
@@ -33,13 +33,16 @@ function anchorExcerpt(diary: DiaryItem, tag: string) {
 export default function AnchorsScreen() {
   const router = useRouter();
   const { tag } = useLocalSearchParams<{ tag?: string }>();
-  const label = tag && groups[tag] ? tag : '珍视旧友';
+  const group = (tag ? groupsByTagId[tag as keyof typeof groupsByTagId] : undefined)
+    ?? Object.values(groupsByTagId).find(item => item.label === tag)
+    ?? groupsByTagId.friends;
+  const label = group.label;
   const diaries = useAppStore(s => s.diaries);
   const corrected = useAppStore(s => s.correctedAnchors);
   const correct = useAppStore(s => s.correctAnchor);
   const [editing, setEditing] = useState<string | null>(null);
   const [text, setText] = useState('');
-  const anchors = groups[label].map(id => diaries.find(diary => diary.id === id)).filter(diary => diary !== undefined);
+  const anchors = group.diaryIds.map(id => diaries.find(diary => diary.id === id)).filter(diary => diary !== undefined);
   const beginCorrection = (diary: DiaryItem) => {
     setEditing(diary.id);
     setText(corrected[`${label}-${diary.id}`] ?? anchorExcerpt(diary, label));

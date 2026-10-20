@@ -8,18 +8,43 @@ type ProjectSharingBody = {
   publicBlockIds?: string[];
 };
 
+const privacySettings = ['private', 'anonymous', 'public-likes', 'public-comments'] as const;
+
+function isProjectSharingBody(value: unknown): value is ProjectSharingBody {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const body = value as Record<string, unknown>;
+  return typeof body.diaryId === 'string'
+    && body.diaryId.trim().length > 0
+    && typeof body.privacy === 'string'
+    && privacySettings.includes(body.privacy as typeof privacySettings[number])
+    && (body.publicBlockIds === undefined
+      || (Array.isArray(body.publicBlockIds)
+        && body.publicBlockIds.every(item => typeof item === 'string' && item.trim().length > 0)));
+}
+
 @Controller('sharing')
 export class SharingController {
   constructor(private readonly store: MemoryStoreService) {}
 
   @Post('project')
-  async project(@Body() body: ProjectSharingBody, @Headers('x-device-id') deviceId?: string) {
+  async project(@Body() body: unknown, @Headers('x-device-id') deviceId?: string) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    if (!isProjectSharingBody(body)) {
+      throw new BadRequestException({
+        ok: false,
+        error: {
+          code: 'invalid_input',
+          message: '公开范围请求参数无效。',
+          retryable: false,
+        },
+      });
+    }
     try {
       const saved = await this.store.updateDiaryVisibility({
         diaryId: body.diaryId,
         privacy: body.privacy,
         publicBlockIds: body.publicBlockIds,
-      }, resolveDeviceId(deviceId));
+      }, ownerDeviceId);
       return {
         ok: true,
         data: {

@@ -22,8 +22,127 @@ model Diary {
   version   Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
   @@index([ownerDeviceId, date])
+}
+
+model DiaryAnchorExtraction {
+  id                 String        @id @default(cuid())
+  ownerDeviceId      String
+  diaryId            String
+  diaryVersion       Int
+  requestId          String
+  sourceHash         String
+  resultHash         String?
+  attempt            Int            @default(1)
+  status             String
+  failureCode        String?
+  source             String?
+  anchors            DiaryAnchor[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([ownerDeviceId, diaryId, diaryVersion])
+  @@unique([ownerDeviceId, requestId])
+  @@index([ownerDeviceId, diaryId, status])
+}
+
+model DiaryAnchor {
+  id                 String               @id @default(cuid())
+  anchorId           String
+  ownerDeviceId      String
+  diaryId            String
+  diaryVersion       Int
+  extractionId       String
+  tagId              String
+  sourceBlockId      String
+  excerpt            String               @db.LongText
+  source             String
+  extraction         DiaryAnchorExtraction @relation(fields: [extractionId], references: [id])
+  createdAt          DateTime             @default(now())
+
+  @@unique([extractionId, anchorId])
+  @@index([ownerDeviceId, tagId, diaryVersion])
+  @@index([ownerDeviceId, diaryId, diaryVersion])
+}
+
+model AnchorCorrection {
+  id                 String   @id @default(cuid())
+  ownerDeviceId      String
+  diaryId            String
+  anchorId           String
+  sourceBlockId      String
+  sourceDiaryVersion Int
+  correction         String   @db.LongText
+  version            Int      @default(1)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  @@unique([ownerDeviceId, diaryId, anchorId, sourceDiaryVersion], map: "AnchorCorrection_owner_diary_anchor_version_key")
+  @@index([ownerDeviceId, diaryId, sourceDiaryVersion])
+}
+
+model AnchorCorrectionCommand {
+  id                String   @id @default(cuid())
+  ownerDeviceId     String
+  idempotencyKey    String
+  requestHash       String
+  correctionId      String
+  correctionVersion Int
+  createdAt         DateTime @default(now())
+
+  @@unique([ownerDeviceId, idempotencyKey])
+}
+
+model ChatConversation {
+  id               String        @id
+  ownerDeviceId    String
+  nextTurnSequence Int           @default(1)
+  messages         ChatMessage[]
+  turns            ChatTurn[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([ownerDeviceId, updatedAt])
+}
+
+model ChatTurn {
+  id                 String          @id @default(cuid())
+  ownerDeviceId      String
+  conversationId     String
+  requestId          String
+  requestHash        String
+  sequence           Int
+  userMessageId      String
+  assistantMessageId String?
+  attempt            Int             @default(1)
+  status             String
+  failureCode        String?
+  source             String?
+  providerRequestId  String?
+  resultHash         String?
+  conversation       ChatConversation @relation(fields: [conversationId], references: [id])
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  @@unique([ownerDeviceId, conversationId, requestId])
+  @@unique([conversationId, sequence])
+  @@index([ownerDeviceId, conversationId, status])
+}
+
+model ChatMessage {
+  id                String          @id
+  conversationId    String
+  turnSequence      Int
+  order             Int
+  requestId         String
+  role              String
+  text              String          @db.LongText
+  source            String?
+  providerRequestId String?
+  conversation      ChatConversation @relation(fields: [conversationId], references: [id])
+  createdAt         DateTime        @default(now())
+
+  @@unique([conversationId, order])
+  @@index([conversationId, turnSequence])
 }
 
 model Draft {
@@ -76,5 +195,36 @@ model GenerationJob {
   updatedAt        DateTime @updatedAt
 
   @@unique([ownerDeviceId, idempotencyKey])
+  @@index([ownerDeviceId, createdAt])
+}
+
+model DiscoveryStory {
+  id                String           @id @default(cuid())
+  ownerDeviceId     String
+  publicationStatus String
+  title             String
+  authorDisplayName String
+  coverUri          String
+  date              DateTime
+  location          String
+  body              String           @db.Text
+  likesEnabled      Boolean          @default(false)
+  publishedAt       DateTime?
+  withdrawnAt       DateTime?
+  likes             DiscoveryLike[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([publicationStatus, publishedAt, withdrawnAt, date, id], map: "DiscoveryStory_visible_latest_idx")
+  @@index([ownerDeviceId, createdAt])
+}
+
+model DiscoveryLike {
+  storyId       String
+  ownerDeviceId String
+  createdAt     DateTime       @default(now())
+  story         DiscoveryStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
+
+  @@id([storyId, ownerDeviceId])
   @@index([ownerDeviceId, createdAt])
 }

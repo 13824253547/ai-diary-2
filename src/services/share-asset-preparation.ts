@@ -132,6 +132,23 @@ async function doesFileExist(uri: string) {
   }
 }
 
+async function isReadablePngFile(uri: string) {
+  if (!uri.startsWith('file://') && !uri.startsWith('/')) return false;
+  try {
+    const { Buffer } = require('buffer');
+    const base64 = await readBase64File(normalizeReadableUri(uri));
+    const bytes = Buffer.from(base64, 'base64');
+    const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    return bytes.length >= 24
+      && bytes.subarray(0, 8).equals(signature)
+      && bytes.toString('ascii', 12, 16) === 'IHDR'
+      && bytes.readUInt32BE(16) > 0
+      && bytes.readUInt32BE(20) > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function renderAnonymousAssetToPng(input: AssetRendererInput, getCacheDirectory: () => string | undefined) {
   const cacheDirectory = getCacheDirectory();
   if (!cacheDirectory) {
@@ -174,10 +191,7 @@ export function createShareAssetPreparationService(deps: ShareAssetPreparationDe
   const getCacheDirectory = deps.getCacheDirectory ?? (() => FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? undefined);
   const getPhotoSourceUri = deps.getPhotoSourceUri ?? getFallbackSourceUri;
   const renderAnonymousAsset = deps.renderAnonymousAsset ?? (input => renderAnonymousAssetToPng(input, getCacheDirectory));
-  const isPreparedAssetReadable = deps.isPreparedAssetReadable ?? (async uri => {
-    if (!uri.startsWith('file://') && !uri.startsWith('/')) return true;
-    return doesFileExist(uri);
-  });
+  const isPreparedAssetReadable = deps.isPreparedAssetReadable ?? isReadablePngFile;
   const assetCache = new Map<string, Promise<string>>();
 
   async function getAnonymousAsset(photo: DiaryPhoto, diary: DiaryItem, target: ShareMode): Promise<PreparedShareAsset> {

@@ -10,7 +10,7 @@ The current handoff document already exists at repository root:
 
 For now, treat that file as the active handoff source for this project.
 
-Development-first goal prompt: [Current startup prompt](gpt-5.4-start.md). The filename is retained for compatibility; the prompt is model-independent.
+Development-first goal prompt: [Current startup prompt](gpt-5.4-start.md). The filename is retained for compatibility; the prompt is model-independent. The 2026-10-16 revision records the current DEV-3 baseline, dependency-first S/M/L ordering, and a two-repair-round cap per task.
 
 Execution policy and external-provider classification: [Development strategy](../reference/delivery/development-strategy.md), [External dependencies](../reference/delivery/external-dependencies.md), and [Development ledger](../reference/delivery/reports/development-progress.md).
 

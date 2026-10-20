@@ -12,7 +12,8 @@ export type FaceRect = { x: number; y: number; width: number; height: number };
 export type DiaryPhoto = {
   id: string; title: string; location: string; emoji: string; color: string; date: string;
   image?: number; uri?: string; localUri?: string; albumId?: string; albumTitle?: string;
-  width?: number; height?: number; filename?: string; source?: 'mock' | 'device';
+  width?: number; height?: number; filename?: string; source?: 'mock' | 'device' | 'generated';
+  generationRequestId?: string; generationPrompt?: string; generationSource?: 'mock' | 'provider';
   selected?: boolean; personIds?: string[]; faceRects?: FaceRect[];
 };
 export type DiaryCharacter = {
@@ -48,6 +49,24 @@ export type GenerationState = {
 };
 export type DiaryDraft = {
   id: string; sourceDiaryId?: string; diary: DiaryItem; selectedPhotoIds: string[];
-  people: DiaryPerson[]; generation: GenerationState; dirty: boolean; savedDiaryId?: string;
+  people: DiaryPerson[]; generation: GenerationState; dirty: boolean; editRevision?: number; savedDiaryId?: string;
 };
-export type ChatMessage = { id: string; role: 'assistant' | 'user'; text: string };
+export type ChatMessage = {
+  id: string;
+  role: 'assistant' | 'user';
+  text: string;
+  conversationId?: string;
+  requestId?: string;
+  providerRequestId?: string;
+  source?: 'welcome' | 'mock' | 'provider';
+};
+export type ChatTurnRequest = {
+  id: string;
+  conversationId: string;
+  userMessageId: string;
+  attempt: number;
+  status: 'pending' | 'completed' | 'failed' | 'stale';
+  source?: 'mock' | 'provider';
+  providerRequestId?: string;
+  error?: string;
+};

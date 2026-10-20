@@ -52,12 +52,20 @@ export default function LibraryScreen() {
     if (!preview?.photoId) return;
     const store = useAppStore.getState();
     if (!store.photos.some(photo => photo.id === preview.photoId)) return;
-    const diary = store.diaries.find(item => item.id === diaryId);
-    const block = diary?.blocks.find(item => item.type === 'text');
-    if (!block || block.type !== 'text') return;
+    const savedDiary = store.diaries.find(item => item.id === diaryId);
+    if (!savedDiary) return;
+    const existingDraft = Object.values(store.drafts)
+      .find(draft => draft.sourceDiaryId === diaryId && !draft.savedDiaryId);
+    const sourceBlocks = existingDraft?.diary.blocks ?? savedDiary.blocks;
+    if (!sourceBlocks.some(item => item.type === 'text')) return;
     const id = store.beginEdit(diaryId);
     if (!id) return;
-    store.setDraftBlockPhotos(id, block.id, [...(block.photoIds ?? []), preview.photoId]);
+      const currentStore = useAppStore.getState();
+      const draft = currentStore.drafts[id];
+    const block = draft?.diary.blocks.find(item => item.type === 'text');
+    if (!draft || !block || block.type !== 'text') return;
+    const photoIds = [...new Set([...(block.photoIds ?? []), preview.photoId])];
+      currentStore.setDraftBlockPhotos(id, block.id, photoIds);
     close();
     router.push({ pathname: '/diary/[id]/edit', params: { id: diaryId, draftId: id } });
   };

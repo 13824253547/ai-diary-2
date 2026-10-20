@@ -57,6 +57,7 @@ export type DiaryContract = {
   publicBlockIds?: string[];
   version: number;
   contentSnapshot?: DiaryContentContract;
+  contentSnapshotStatus?: 'invalid';
 };
 
 export type GenerationBlockContract =
@@ -130,6 +131,12 @@ export type GenerationJobContract = {
   result?: GenerationResultContract;
 };
 
+export type CreateGenerationJobRequestContract = {
+  draftId: string;
+  draftVersion: number;
+  idempotencyKey: string;
+};
+
 export type RewriteJobContract = {
   jobId: string;
   draftId: string;
@@ -179,6 +186,8 @@ export type MemoriesQuery = {
   page: number;
   pageSize: number;
 };
+
+export const MEMORIES_PAGE_SIZES = [10, 20, 50, 100] as const;
 
 export type MemoriesQueryResult = {
   items: DiaryContract[];
@@ -232,7 +241,7 @@ function isNonEmptyString(value: unknown) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isStringArray(value: unknown) {
+function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isNonEmptyString);
 }
 
@@ -272,6 +281,16 @@ function isGenerationPersonContract(value: unknown): value is GenerationPersonCo
     && (value.aliases === undefined || isStringArray(value.aliases));
 }
 
+function isUniqueGenerationPersonArray(value: unknown): value is GenerationPersonContract[] {
+  if (!Array.isArray(value)) return false;
+  const ids = new Set<string>();
+  for (const person of value) {
+    if (!isGenerationPersonContract(person) || ids.has(person.id)) return false;
+    ids.add(person.id);
+  }
+  return true;
+}
+
 export function isGenerationResultContract(value: unknown): value is GenerationResultContract {
   if (!isRecord(value)) return false;
   if (
@@ -288,28 +307,76 @@ export function isGenerationResultContract(value: unknown): value is GenerationR
   ) {
     return false;
   }
-  return value.people === undefined || (Array.isArray(value.people) && value.people.every(isGenerationPersonContract));
+  return value.people === undefined || isUniqueGenerationPersonArray(value.people);
 }
 
 export function isDiaryContentContract(value: unknown): value is DiaryContentContract {
   if (!isRecord(value)) return false;
-  return isDiaryType(value.type)
-    && typeof value.subtitle === 'string'
-    && typeof value.helperMessage === 'string'
-    && isNonEmptyString(value.characterId)
-    && isNonEmptyString(value.companionName)
-    && typeof value.coverPhotoId === 'string'
-    && Array.isArray(value.blocks)
-    && value.blocks.every(isGenerationBlockContract)
-    && (value.posterPhotoIds === undefined || isStringArray(value.posterPhotoIds))
-    && (value.people === undefined || (Array.isArray(value.people) && value.people.every(isGenerationPersonContract)));
+  if (!isDiaryType(value.type)
+    || typeof value.subtitle !== 'string'
+    || typeof value.helperMessage !== 'string'
+    || !isNonEmptyString(value.characterId)
+    || !isNonEmptyString(value.companionName)
+    || !isNonEmptyString(value.coverPhotoId)
+    || !Array.isArray(value.blocks)
+    || value.blocks.length === 0
+    || !value.blocks.every(isGenerationBlockContract)
+    || (value.posterPhotoIds !== undefined && !isStringArray(value.posterPhotoIds))
+    || (value.people !== undefined && !isUniqueGenerationPersonArray(value.people))) {
+    return false;
+  }
+
+  const blockIds = new Set<string>();
+  const paragraphIds = new Set<string>();
+  for (const block of value.blocks as GenerationBlockContract[]) {
+    if (blockIds.has(block.id)) return false;
+    blockIds.add(block.id);
+    if (block.type === 'text' || block.type === 'quote') paragraphIds.add(block.id);
+  }
+  if (paragraphIds.size === 0) return false;
+
+  return (value.blocks as GenerationBlockContract[]).every(block =>
+    !('relatedBlockId' in block)
+    || block.relatedBlockId === undefined
+    || paragraphIds.has(block.relatedBlockId),
+  );
+}
+
+export function isDiaryContentContractForPhotoIds(
+  value: unknown,
+  photoIds: unknown,
+): value is DiaryContentContract {
+  if (!isDiaryContentContract(value)
+    || !isStringArray(photoIds)
+    || photoIds.length === 0
+    || new Set(photoIds).size !== photoIds.length) {
+    return false;
+  }
+
+  const allowedPhotoIds = new Set(photoIds);
+  if (
+    !allowedPhotoIds.has(value.coverPhotoId)
+    || (value.posterPhotoIds ?? []).some(id => !allowedPhotoIds.has(id))
+    || (value.people ?? []).some(person =>
+      !person.photoIds.every(id => allowedPhotoIds.has(id))
+      || !allowedPhotoIds.has(person.avatarPhotoId)
+      || !person.photoIds.includes(person.avatarPhotoId),
+    )
+  ) {
+    return false;
+  }
+
+  return value.blocks.every(block => block.type === 'photo'
+    ? allowedPhotoIds.has(block.photoId)
+    : (block.photoIds ?? []).every(id => allowedPhotoIds.has(id)));
 }
 
 export function isRewriteBlockResultContract(value: unknown): value is RewriteBlockResultContract {
   if (!isRecord(value)) return false;
   return isNonEmptyString(value.draftId)
     && isNonEmptyString(value.blockId)
-    && typeof value.draftVersion === 'number'
+    && Number.isSafeInteger(value.draftVersion)
+    && (value.draftVersion as number) > 0
     && (value.blockType === 'text' || value.blockType === 'quote')
     && isNonEmptyString(value.content)
     && (value.photoIds === undefined || isStringArray(value.photoIds));
@@ -343,7 +410,8 @@ export function isGenerationJobContract(value: unknown): value is GenerationJobC
   const maxAttempts = typeof value.maxAttempts === 'number' ? value.maxAttempts : undefined;
   return isNonEmptyString(value.jobId)
     && isNonEmptyString(value.draftId)
-    && typeof value.draftVersion === 'number'
+    && Number.isSafeInteger(value.draftVersion)
+    && (value.draftVersion as number) > 0
     && isNonEmptyString(value.idempotencyKey)
     && isGenerationStatusStagePairValid(value.status, value.stage)
     && isValidGenerationProgress(value.progressPercent)
@@ -364,11 +432,44 @@ export function isGenerationJobContract(value: unknown): value is GenerationJobC
     );
 }
 
+export function isCreateGenerationJobRequestContract(value: unknown): value is CreateGenerationJobRequestContract {
+  if (!isRecord(value)) return false;
+  return isNonEmptyString(value.draftId)
+    && Number.isSafeInteger(value.draftVersion)
+    && (value.draftVersion as number) > 0
+    && isNonEmptyString(value.idempotencyKey);
+}
+
+export function isValidMemoriesMonth(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  return year > 0 && month >= 1 && month <= 12;
+}
+
+export function isValidMemoriesDay(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysPerMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysPerMonth[month - 1];
+}
+
 export function isMemoriesQuery(value: unknown): value is MemoriesQuery {
   if (!isRecord(value)) return false;
   return typeof value.page === 'number'
+    && Number.isSafeInteger(value.page)
+    && value.page > 0
     && typeof value.pageSize === 'number'
-    && (value.month === undefined || isNonEmptyString(value.month))
-    && (value.day === undefined || isNonEmptyString(value.day))
+    && MEMORIES_PAGE_SIZES.includes(value.pageSize as typeof MEMORIES_PAGE_SIZES[number])
+    && (value.month === undefined || isValidMemoriesMonth(value.month))
+    && (value.day === undefined || isValidMemoriesDay(value.day))
     && (value.keyword === undefined || typeof value.keyword === 'string');
 }

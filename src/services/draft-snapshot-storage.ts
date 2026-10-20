@@ -10,20 +10,16 @@ function getDraftSnapshotFileUri() {
 async function readDraftSnapshot() {
   if (typeof localStorage !== 'undefined') {
     const stored = localStorage.getItem(DRAFT_SNAPSHOT_FILE_NAME);
-    return stored ? JSON.parse(stored) : undefined;
+    return stored === null ? undefined : JSON.parse(stored);
   }
 
   const fileUri = getDraftSnapshotFileUri();
   if (!fileUri) return undefined;
 
-  try {
-    const info = await FileSystem.getInfoAsync(fileUri);
-    if (!info.exists) return undefined;
-    const stored = await FileSystem.readAsStringAsync(fileUri);
-    return stored ? JSON.parse(stored) : undefined;
-  } catch {
-    return undefined;
-  }
+  const info = await FileSystem.getInfoAsync(fileUri);
+  if (!info.exists) return undefined;
+  const stored = await FileSystem.readAsStringAsync(fileUri);
+  return JSON.parse(stored);
 }
 
 async function persistDraftSnapshot(snapshot: PersistedDraftsSnapshot) {
@@ -47,12 +43,8 @@ async function clearDraftSnapshot() {
   const fileUri = getDraftSnapshotFileUri();
   if (!fileUri) return;
 
-  try {
-    const info = await FileSystem.getInfoAsync(fileUri);
-    if (info.exists) await FileSystem.deleteAsync(fileUri, { idempotent: true });
-  } catch {
-    // Ignore cleanup failures and let the next load attempt decide how to recover.
-  }
+  const info = await FileSystem.getInfoAsync(fileUri);
+  if (info.exists) await FileSystem.deleteAsync(fileUri, { idempotent: true });
 }
 
 export function createLocalDraftSnapshotStore(): DraftSnapshotStore {

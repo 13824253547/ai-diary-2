@@ -9,10 +9,11 @@ describe('AppModule', () => {
     }).compile();
 
     const controller = moduleRef.get(HealthController);
-    expect(controller.getHealth()).toEqual({
+    expect(controller.getHealth('device-1')).toEqual({
       ok: true,
       service: 'orange-glow-ai-diary-backend',
       version: '0.1.0',
     });
+    expect(() => controller.getHealth(undefined)).toThrow();
   });
 });

@@ -2,17 +2,39 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import { companionCandidates } from '../mocks/companions';
 import { diaryTypeOptions, generationPhases } from '../mocks/creation';
 import { mockCharacters } from '../mocks/characters';
-import { mockDiaries, historyGroups } from '../mocks/diaries';
+import { mockDiaries } from '../mocks/diaries';
 import { mockPhotos } from '../mocks/photos';
 import { appConfig } from '../config/app-config';
-import type { DiaryContentContract, GenerationJobContract, MemoriesQuery, RewriteBlockRequestContract } from '../contracts/core-diary-contract';
+import { isDiaryContentContractForPhotoIds, type GenerationJobContract, type MemoriesQuery, type RewriteBlockRequestContract } from '../contracts/core-diary-contract';
+import {
+  AI_IMAGE_GENERATION_CONTRACT_VERSION,
+  isAIImageGenerationRequest,
+  isAIImageGenerationResultForRequest,
+} from '../contracts/ai-image-generation-contract';
+import {
+  INSIGHT_REPORT_CONTRACT_VERSION,
+  isInsightReportRequest,
+  isInsightReportResultForRequest,
+} from '../contracts/insight-report-contract';
 import { createBackendCoreDiaryRepository } from './adapters/backend-core-diary-adapter';
+import { createBackendDiscoveryRepository } from './adapters/backend-discovery-adapter';
+import { createBackendAnchorCorrectionRepository } from './adapters/backend-anchor-correction-adapter';
+import { createBackendAnchorReadModelRepository } from './adapters/backend-anchor-read-model-adapter';
+import { createBackendPetChatRepository } from './adapters/backend-pet-chat-adapter';
 import type { AppStoreAdapters, PersistedDraftsSnapshot } from './adapters/types';
 import { shareOptions } from '../mocks/share-options';
 import type { GenerationPhase, DiaryTypeOption } from '../types/creation';
-import type { ChatMessage, DiaryCharacter, DiaryDraft, DiaryItem, DiaryPerson, DiaryPhoto, DiaryPrivacy, DiaryType, GenerationStage, ShareMode } from '../types/diary';
+import type { ChatMessage, ChatTurnRequest, DiaryCharacter, DiaryDraft, DiaryItem, DiaryPerson, DiaryPhoto, DiaryPrivacy, DiaryType, GenerationStage, ShareMode } from '../types/diary';
 import { buildGeneratedDiary, buildGeneratedDiaryFromResult, canGenerate, cloneDiary, getDiaryStatistics, getHistoryGroups, getPeopleForPhotos, MIN_SELECTED_PHOTOS, normalizeDiaryPhotos, publicParagraphs, sanitizePhotoIds } from './diary-domain';
 import { createLocalDraftSnapshotStore } from '../services/draft-snapshot-storage';
+import {
+  importDevicePhotoAssets,
+  type DevicePhotoAssetImportResult,
+  type DevicePhotoAssetImporter,
+} from '../services/photo-library';
+import { createMockChatReplyProvider, createUnconfiguredChatReplyProvider, type ChatReply, type ChatReplyProvider } from '../services/chat-reply-provider';
+import { AIImageGenerationError, createMockAIImageGenerationProvider, createUnconfiguredAIImageGenerationProvider, hasReadableImageSource, type AIImageGenerationProvider } from '../services/ai-image-generation-provider';
+import { InsightReportProviderError, createMockInsightReportProvider, createUnconfiguredInsightReportProvider, type InsightReportProvider, type InsightReportResult } from '../services/insight-report-provider';
 import { getPhotoPermissionStatus, type PhotoPermissionStatus } from '../services/photo-permission';
 import { exportMonthlyCollection, MonthlyExportAbortedError, type MonthlyExportResult, type MonthlyExportService, type MonthlyExportSnapshot } from '../services/monthly-export';
 import { canSelectCharacterId, isSupportedCharacterId } from '../types/character-capabilities';
@@ -30,6 +52,10 @@ export type AppStoreDeps = {
   generationPhases?: GenerationPhase[];
   adapters?: AppStoreAdapters;
   monthlyExporter?: MonthlyExportService;
+  chatReplyProvider?: ChatReplyProvider;
+  aiImageGenerationProvider?: AIImageGenerationProvider;
+  insightReportProvider?: InsightReportProvider;
+  devicePhotoImporter?: DevicePhotoAssetImporter;
 };
 
 type DiaryVisibilitySaveResult =
@@ -55,6 +81,40 @@ type MonthlyExportActionResult =
       message: string;
     };
 
+type AIImageGenerationRequestState = {
+  id: string;
+  description: string;
+  attempt: number;
+  status: 'pending' | 'succeeded' | 'failed' | 'cancelled' | 'stale';
+  source?: 'mock' | 'provider';
+  photoId?: string;
+  errorCode?: 'invalid_input' | 'cancelled' | 'provider_failed';
+};
+
+type AIImageGenerationActionResult =
+  | { ok: true; requestId: string; photoId: string; source: 'mock' | 'provider' }
+  | { ok: false; requestId?: string; reason: 'invalid_input' | 'cancelled' | 'provider_failed'; message: string };
+
+type InsightReportGenerationState = {
+  status: 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'stale';
+  requestId?: string;
+  sourceVersion?: string;
+  report?: InsightReportResult;
+  errorCode?: 'not_unlocked' | 'no_sources' | 'cancelled' | 'provider_failed' | 'stale';
+};
+
+type InsightReportActionResult =
+  | { ok: true; requestId: string; report: InsightReportResult }
+  | { ok: false; requestId?: string; reason: 'not_unlocked' | 'no_sources' | 'cancelled' | 'provider_failed' | 'stale'; message: string };
+
+type MaterialPhotoImportActionResult =
+  | { ok: true; photoIds: string[] }
+  | {
+      ok: false;
+      reason: 'invalid_input' | 'permission_unavailable' | 'permission_denied' | 'asset_unreadable' | 'identity_conflict' | 'provider_failed';
+      message: string;
+    };
+
 export type AppStore = {
   currentStep: CreationStep;
   hasPhotoPermission: boolean;
@@ -72,8 +132,12 @@ export type AppStore = {
   activeDraftId?: string;
   drafts: Record<string, DiaryDraft>;
   chatMessages: ChatMessage[];
+  chatConversationId?: string;
+  chatTurnRequests: ChatTurnRequest[];
   likedDiscoveryIds: string[];
   materialPhotoIds: string[];
+  aiImageGenerationRequests: AIImageGenerationRequestState[];
+  insightReportGeneration: InsightReportGenerationState;
   correctedAnchors: Record<string, string>;
   flowerUnlocked: boolean;
   hydratedPhotoPermission: boolean;
@@ -119,8 +183,14 @@ export type AppStore = {
   recordShareDemo: (diaryId: string, mode: ShareMode) => boolean;
   confirmShareDelivery: (input: { diaryId: string; mode: ShareMode; operationId: string; version: number }) => boolean;
   sendChat: (text: string) => void;
+  retryChat: (requestId: string) => void;
   toggleDiscoveryLike: (id: string) => void;
   addMaterialPhoto: (id: string) => void;
+  importDevicePhotosToMaterials: (photoIds: string[]) => Promise<MaterialPhotoImportActionResult>;
+  generateMaterialImage: (description: string) => Promise<AIImageGenerationActionResult>;
+  cancelMaterialImageGeneration: (requestId: string) => void;
+  generateInsightReport: () => Promise<InsightReportActionResult>;
+  cancelInsightReport: (requestId: string) => void;
   correctAnchor: (id: string, text: string) => void;
   setFlowerUnlocked: (value: boolean) => void;
   setCurrentStep: (step: CreationStep) => void;
@@ -164,6 +234,13 @@ type CreationStep = import('../types/creation').CreationStep;
 
 const platforms: ShareMode[] = ['wechat', 'moments', 'xiaohongshu', 'weibo', 'x'];
 
+function canUseDevelopmentMocks() {
+  if (appConfig.mode !== 'hybrid-dev') return false;
+  if (process.env.JEST_WORKER_ID) return true;
+  if (typeof __DEV__ !== 'undefined') return __DEV__;
+  return process.env.NODE_ENV !== 'production';
+}
+
 function clonePhotoAsset(photo: DiaryPhoto): DiaryPhoto {
   return {
     ...photo,
@@ -172,26 +249,73 @@ function clonePhotoAsset(photo: DiaryPhoto): DiaryPhoto {
   };
 }
 
+function createBlankDiary(now: number, characterId: string): DiaryItem {
+  return {
+    id: '',
+    type: 'travel',
+    status: 'draft',
+    title: '',
+    subtitle: '',
+    location: '',
+    date: new Date(now).toISOString().slice(0, 10).replace(/-/g, '.'),
+    summary: '',
+    helperMessage: '',
+    characterId,
+    companionName: '',
+    privacy: 'private',
+    photoIds: [],
+    coverPhotoId: '',
+    blocks: [],
+    exportedImage: false,
+    exportedPdf: false,
+    shareModes: [],
+    exportModes: [],
+    version: 1,
+  };
+}
+
 export function createDefaultAppStoreDeps(overrides: AppStoreDeps = {}): Required<AppStoreDeps> {
   const now = overrides.now ?? (() => Date.now());
   let nextSequence = 1;
+  const useDevelopmentMocks = canUseDevelopmentMocks();
   const backendRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID ? createBackendCoreDiaryRepository() : undefined;
+  const backendDiscoveryRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID ? createBackendDiscoveryRepository() : undefined;
+  const backendAnchorCorrectionRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID
+    ? createBackendAnchorCorrectionRepository()
+    : undefined;
+  const backendAnchorReadRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID
+    ? createBackendAnchorReadModelRepository()
+    : undefined;
+  const backendPetChatRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID
+    ? createBackendPetChatRepository()
+    : undefined;
   const draftSnapshotStore = !process.env.JEST_WORKER_ID ? createLocalDraftSnapshotStore() : undefined;
 
   return {
     now,
     createId: overrides.createId ?? ((prefix: string) => `${prefix}-${now()}-${nextSequence++}`),
-    photos: overrides.photos ?? mockPhotos,
-    diaries: overrides.diaries ?? mockDiaries,
+    photos: overrides.photos ?? (useDevelopmentMocks ? mockPhotos : []),
+    diaries: overrides.diaries ?? (useDevelopmentMocks ? mockDiaries : []),
     characters: overrides.characters ?? mockCharacters,
     companions: overrides.companions ?? companionCandidates,
     shareOptions: overrides.shareOptions ?? shareOptions,
     diaryTypeOptions: overrides.diaryTypeOptions ?? diaryTypeOptions,
     generationPhases: overrides.generationPhases ?? generationPhases,
     monthlyExporter: overrides.monthlyExporter ?? exportMonthlyCollection,
+    chatReplyProvider: overrides.chatReplyProvider
+      ?? (useDevelopmentMocks ? createMockChatReplyProvider() : createUnconfiguredChatReplyProvider()),
+    aiImageGenerationProvider: overrides.aiImageGenerationProvider
+      ?? (useDevelopmentMocks ? createMockAIImageGenerationProvider() : createUnconfiguredAIImageGenerationProvider()),
+    insightReportProvider: overrides.insightReportProvider
+      ?? (useDevelopmentMocks ? createMockInsightReportProvider() : createUnconfiguredInsightReportProvider()),
+    devicePhotoImporter: overrides.devicePhotoImporter ?? importDevicePhotoAssets,
     adapters: overrides.adapters ?? {
       diaryRepository: backendRepository,
       memoriesRepository: backendRepository,
+      discoveryRepository: backendDiscoveryRepository,
+      anchorCorrectionRepository: backendAnchorCorrectionRepository,
+      anchorReadRepository: backendAnchorReadRepository,
+      petChatRepository: backendPetChatRepository,
       draftSnapshotStore,
     },
   };
@@ -216,6 +340,47 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
   const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
   const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
   const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+  const awaitImageOperation = <T>(operation: () => Promise<T>, signal: AbortSignal) => {
+    if (signal.aborted) {
+      return Promise.reject(new AIImageGenerationError('cancelled', 'image generation cancelled'));
+    }
+    let removeAbortListener: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      const onAbort = () => reject(new AIImageGenerationError('cancelled', 'image generation cancelled'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+      if (signal.aborted) onAbort();
+    });
+    if (signal.aborted) {
+      return aborted.finally(() => removeAbortListener?.());
+    }
+    let work: Promise<T>;
+    try {
+      work = Promise.resolve(operation());
+    } catch (error) {
+      work = Promise.reject(error);
+    }
+    return Promise.race([work, aborted]).finally(() => removeAbortListener?.());
+  };
+  const awaitInsightReportOperation = <T>(operation: () => Promise<T>, signal: AbortSignal) => {
+    if (signal.aborted) {
+      return Promise.reject(new InsightReportProviderError('cancelled', 'insight report generation cancelled'));
+    }
+    let removeAbortListener: (() => void) | undefined;
+    const aborted = new Promise<never>((_, reject) => {
+      const onAbort = () => reject(new InsightReportProviderError('cancelled', 'insight report generation cancelled'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+      if (signal.aborted) onAbort();
+    });
+    let work: Promise<T>;
+    try {
+      work = Promise.resolve(operation());
+    } catch (error) {
+      work = Promise.reject(error);
+    }
+    return Promise.race([work, aborted]).finally(() => removeAbortListener?.());
+  };
 
   const restoreDraftFromSnapshot = (value: unknown, photos: DiaryPhoto[]): DiaryDraft | undefined => {
     if (!isRecord(value) || !isRecord(value.diary) || !isRecord(value.generation)) return undefined;
@@ -290,6 +455,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         errorMessage: typeof value.generation.errorMessage === 'string' ? value.generation.errorMessage : undefined,
       },
       dirty: value.dirty,
+      editRevision: Number.isSafeInteger(value.editRevision) && (value.editRevision as number) >= 0
+        ? value.editRevision as number
+        : 0,
       savedDiaryId: typeof value.savedDiaryId === 'string' ? value.savedDiaryId : undefined,
     };
   };
@@ -298,6 +466,17 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     let memoriesRequestVersion = 0;
     let nextMonthlyExportRequestId = 1;
     let activeMonthlyExportController: AbortController | undefined;
+    const pendingImageGenerations = new Map<string, {
+      requestId: string;
+      promise: Promise<AIImageGenerationActionResult>;
+    }>();
+    const imageGenerationControllers = new Map<string, AbortController>();
+    const pendingInsightReports = new Map<string, {
+      requestId: string;
+      promise: Promise<InsightReportActionResult>;
+    }>();
+    const insightReportControllers = new Map<string, AbortController>();
+    let activeInsightReportRequestId: string | undefined;
     const pendingDiscardDraftIds = new Set<string>();
     const pendingVisibilityRequests = new Map<string, Promise<DiaryVisibilitySaveResult>>();
     const confirmedShareOperations = new Map<string, string>();
@@ -305,6 +484,24 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     const pendingRewriteFingerprints = new Map<string, string>();
     let nextRewriteRequestId = 1;
     let draftSnapshotHydrationFailed = false;
+    let draftSnapshotWriteQueue: Promise<void> = Promise.resolve();
+    const buildInsightReportSourceSnapshot = () => {
+      const sourceDiaries = get().diaries
+        .map(diary => ({
+          id: diary.id,
+          version: diary.version ?? 0,
+          title: diary.title,
+          summary: diary.summary,
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id));
+      const sourceVersion = JSON.stringify(sourceDiaries.map(diary => [
+        diary.id,
+        diary.version,
+        diary.title,
+        diary.summary,
+      ]));
+      return { sourceDiaries, sourceVersion };
+    };
     const applyPhotoPermissionStatus = (
       status: PhotoPermissionStatus,
       options?: { hydrated?: boolean; advanceToAlbum?: boolean },
@@ -339,9 +536,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     };
     const getConfirmedShareScope = (input: { diaryId: string; mode: ShareMode; version: number }) => `${input.diaryId}::${input.version}::${input.mode}`;
 
-    const buildMemoryDiaryItem = (input: { id: string; title: string; summary: string; location: string; date: string; privacy: DiaryPrivacy; photoIds: string[]; version: number; contentSnapshot?: DiaryContentContract }) => {
+    const buildMemoryDiaryItem = (input: { id: string; title: string; summary: string; location: string; date: string; privacy: DiaryPrivacy; photoIds: string[]; publicBlockIds?: string[]; version: number; contentSnapshot?: unknown; contentSnapshotStatus?: 'invalid' }) => {
       const existing = get().diaries.find(item => item.id === input.id);
-      const content = input.contentSnapshot;
+      const content = isDiaryContentContractForPhotoIds(input.contentSnapshot, input.photoIds)
+        ? input.contentSnapshot
+        : undefined;
+      if (input.contentSnapshotStatus === 'invalid'
+        || (input.contentSnapshot !== undefined && input.contentSnapshot !== null && !content)) {
+        get().logIssue(`回忆正文快照损坏，已隔离内容：${input.id}`);
+      }
       const photos = get().photos;
       const coverPhotoId = content?.coverPhotoId ?? input.photoIds[0] ?? existing?.coverPhotoId ?? photos[0]?.id ?? '';
       return normalizeDiaryPhotos({
@@ -368,7 +571,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         createdInSession: existing?.createdInSession ?? false,
         people: content?.people ?? existing?.people,
         posterPhotoIds: content?.posterPhotoIds ?? existing?.posterPhotoIds,
-        publicBlockIds: existing?.publicBlockIds,
+        publicBlockIds: input.publicBlockIds,
       }, input.photoIds);
     };
 
@@ -417,7 +620,28 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       }));
     };
 
-    const applyGenerationSnapshot = (draftId: string, round: number, snapshot: GenerationJobContract) => {
+    const applyGenerationSnapshot = (
+      draftId: string,
+      round: number,
+      snapshot: GenerationJobContract,
+      expectedJobId?: string,
+    ) => {
+      const current = get().drafts[draftId];
+      if (!current
+        || current.generation.round !== round
+        || (expectedJobId !== undefined && current.generation.remoteJobId !== expectedJobId)) return;
+      if (snapshot.draftId !== draftId
+        || snapshot.draftVersion !== round
+        || snapshot.idempotencyKey !== `${draftId}-round-${round}`
+        || (expectedJobId !== undefined && snapshot.jobId !== expectedJobId)) {
+        applyGenerationFailure(draftId, round, {
+          status: 'failed',
+          stage: 'failed',
+          message: expectedJobId ? '生成失败，请稍后重试。' : '生成结果异常，请稍后重试。',
+        });
+        get().logIssue('生成任务响应与当前草稿或任务不匹配。');
+        return;
+      }
       mutateDraft(draftId, draft => {
         if (draft.generation.round !== round) return draft;
         if (draft.generation.status === 'idle' || draft.generation.status === 'failed' || draft.generation.status === 'cancelled' || draft.generation.status === 'complete') {
@@ -619,15 +843,43 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       }
     };
 
-    const syncRewriteToRemote = async (input: RewriteBlockRequestContract & { requestId: number }) => {
+    const buildRewriteFingerprint = (
+      draft: DiaryDraft,
+      block: DiaryDraft['diary']['blocks'][number],
+    ) => {
+      if (block.type === 'photo') return undefined;
+      return JSON.stringify({
+        draftVersion: draft.generation.round,
+        characterId: draft.diary.characterId,
+        blockId: block.id,
+        blockType: block.type,
+        content: block.content,
+        selectedPhotoIds: draft.selectedPhotoIds,
+        photoIds: block.photoIds ?? [],
+      });
+    };
+
+    const syncRewriteToRemote = async (
+      input: RewriteBlockRequestContract & { requestId: number; fingerprint: string },
+    ) => {
       const repository = resolved.adapters.diaryRepository;
       const key = rewriteRequestKey(input.draftId, input.blockId);
       if (!repository?.rewriteBlock) {
         clearPendingRewriteRequest(input.draftId, input.blockId);
         return;
       }
+      const request: RewriteBlockRequestContract = {
+        draftId: input.draftId,
+        blockId: input.blockId,
+        draftVersion: input.draftVersion,
+        characterId: input.characterId,
+        blockType: input.blockType,
+        content: input.content,
+        selectedPhotoIds: input.selectedPhotoIds,
+        photoIds: input.photoIds,
+      };
       try {
-        const result = await repository.rewriteBlock(input);
+        const result = await repository.rewriteBlock(request);
         if (!result.ok) {
           if (pendingRewriteRequestIds.get(key) === input.requestId) {
             clearPendingRewriteRequest(input.draftId, input.blockId);
@@ -636,13 +888,26 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           return;
         }
         if (pendingRewriteRequestIds.get(key) !== input.requestId) return;
+        if (
+          result.data.draftId !== input.draftId
+          || result.data.blockId !== input.blockId
+          || result.data.draftVersion !== input.draftVersion
+          || result.data.blockType !== input.blockType
+        ) {
+          clearPendingRewriteRequest(input.draftId, input.blockId);
+          get().logIssue('段落重写结果与当前请求不匹配。');
+          return;
+        }
         const currentDraft = get().drafts[input.draftId];
         const currentBlock = currentDraft?.diary.blocks.find(block => block.id === input.blockId);
         if (!currentDraft || !currentBlock || currentBlock.type === 'photo') {
           clearPendingRewriteRequest(input.draftId, input.blockId);
           return;
         }
-        if (currentBlock.content !== input.content) {
+        if (
+          currentBlock.content !== input.content
+          || buildRewriteFingerprint(currentDraft, currentBlock) !== input.fingerprint
+        ) {
           clearPendingRewriteRequest(input.draftId, input.blockId);
           return;
         }
@@ -659,14 +924,16 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     const mutateDraft = (draftId: string, transform: (draft: DiaryDraft) => DiaryDraft) => {
       const draft = get().drafts[draftId];
       if (!draft || draft.savedDiaryId) return;
-      const nextDraft = transform(draft);
-      if (nextDraft === draft) return;
+      const transformedDraft = transform(draft);
+      if (transformedDraft === draft) return;
+      const nextDraft = { ...transformedDraft, editRevision: (draft.editRevision ?? 0) + 1 };
       set(state => ({ drafts: { ...state.drafts, [draftId]: nextDraft } }));
-      void persistDraftSnapshot();
+      persistDraftSnapshotInBackground();
       void syncDraftToRemote(nextDraft);
     };
 
-    const rewriteRequestKey = (draftId: string, blockId: string) => `${draftId}:${blockId}`;
+    const rewriteRequestKey = (draftId: string, blockId: string) =>
+      `${encodeURIComponent(draftId)}:${encodeURIComponent(blockId)}`;
 
     const clearPendingRewriteRequest = (draftId: string, blockId: string) => {
       const key = rewriteRequestKey(draftId, blockId);
@@ -675,7 +942,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     };
 
     const clearPendingRewriteRequests = (draftId: string) => {
-      const prefix = `${draftId}:`;
+      const prefix = `${encodeURIComponent(draftId)}:`;
       for (const key of [...pendingRewriteRequestIds.keys()]) {
         if (key.startsWith(prefix)) {
           pendingRewriteRequestIds.delete(key);
@@ -704,9 +971,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       const state = get();
       const selectedMonth = state.memoriesFilterMonth === '全部'
         ? undefined
-        : state.memoriesFilterMonth;
+        : state.memoriesFilterMonth.replaceAll('.', '-');
       const selectedDay = state.memoriesFilterDay && selectedMonth
-        ? `${selectedMonth}.${String(state.memoriesFilterDay).padStart(2, '0')}`
+        ? `${selectedMonth}-${String(state.memoriesFilterDay).padStart(2, '0')}`
         : undefined;
       const keyword = state.memoriesSearchKeyword.trim() || undefined;
       return {
@@ -742,9 +1009,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       };
     };
 
-    const persistDraftSnapshot = async () => {
+    const persistDraftSnapshot = () => {
       const snapshotStore = resolved.adapters.draftSnapshotStore;
-      if (!snapshotStore || !get().hydratedDrafts || draftSnapshotHydrationFailed) return;
+      if (!snapshotStore || !get().hydratedDrafts || draftSnapshotHydrationFailed) return Promise.resolve();
 
       const persistedDrafts: Record<string, DiaryDraft> = Object.fromEntries(
         Object.entries(get().drafts).filter(([draftId, draft]) => !draft.savedDiaryId && !pendingDiscardDraftIds.has(draftId)),
@@ -752,17 +1019,136 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       const currentActiveDraftId = get().activeDraftId;
       const activeDraftId = currentActiveDraftId && persistedDrafts[currentActiveDraftId] ? currentActiveDraftId : undefined;
 
-      if (Object.keys(persistedDrafts).length === 0) {
-        await snapshotStore.clear();
+      const snapshot = Object.keys(persistedDrafts).length > 0
+        ? {
+            version: DRAFT_SNAPSHOT_VERSION,
+            activeDraftId,
+            drafts: persistedDrafts,
+          } satisfies PersistedDraftsSnapshot
+        : undefined;
+      const operation = draftSnapshotWriteQueue.catch(() => undefined).then(async () => {
+        if (snapshot) {
+          await snapshotStore.save(snapshot);
+        } else {
+          await snapshotStore.clear();
+        }
+      });
+      draftSnapshotWriteQueue = operation.catch(() => undefined);
+      return operation;
+    };
+
+    const persistDraftSnapshotInBackground = () => {
+      void persistDraftSnapshot().catch(error => {
+        get().logIssue(`本地草稿快照保存失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      });
+    };
+
+    const applyChatReply = (requestId: string, attempt: number, result: ChatReply) => {
+      const request = get().chatTurnRequests.find(item => item.id === requestId);
+      if (!request || request.attempt !== attempt || request.status !== 'pending') return;
+      if (get().chatConversationId !== request.conversationId) {
+        set(state => ({
+          chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
+            ? { ...item, status: 'stale' }
+            : item),
+        }));
         return;
       }
 
-      const snapshot: PersistedDraftsSnapshot = {
-        version: DRAFT_SNAPSHOT_VERSION,
-        activeDraftId,
-        drafts: persistedDrafts,
+      const assistantMessage: ChatMessage = {
+        id: resolved.createId('chat'),
+        conversationId: request.conversationId,
+        requestId,
+        providerRequestId: result.providerRequestId,
+        role: 'assistant',
+        source: result.source,
+        text: result.text,
       };
-      await snapshotStore.save(snapshot);
+      set(state => {
+        if (state.chatMessages.some(message => message.role === 'assistant' && message.requestId === requestId)) {
+          return {
+            chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
+              ? { ...item, status: 'completed', source: result.source, providerRequestId: result.providerRequestId }
+              : item),
+          };
+        }
+
+        const userIndex = state.chatMessages.findIndex(message => message.id === request.userMessageId);
+        if (userIndex < 0) {
+          return {
+            chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
+              ? { ...item, status: 'stale' }
+              : item),
+          };
+        }
+
+        const chatMessages = [...state.chatMessages];
+        chatMessages.splice(userIndex + 1, 0, assistantMessage);
+        return {
+          chatMessages,
+          chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
+            ? { ...item, status: 'completed', source: result.source, providerRequestId: result.providerRequestId }
+            : item),
+        };
+      });
+    };
+
+    const failChatReply = (requestId: string, attempt: number, _error: unknown) => {
+      const request = get().chatTurnRequests.find(item => item.id === requestId);
+      if (!request || request.attempt !== attempt || request.status !== 'pending') return;
+      const message = 'provider_failed';
+      set(state => ({
+        chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
+          ? { ...item, status: 'failed', error: message }
+          : item),
+        issueLog: [...state.issueLog, `聊天回复失败：${message}`],
+      }));
+    };
+
+    const receiveChatReply = (requestId: string, attempt: number, value: unknown) => {
+      if (
+        !isRecord(value)
+        || typeof value.text !== 'string'
+        || !value.text.trim()
+        || (value.source !== 'mock' && value.source !== 'provider')
+        || (value.providerRequestId !== undefined && typeof value.providerRequestId !== 'string')
+      ) {
+        failChatReply(requestId, attempt, new Error('invalid provider response'));
+        return;
+      }
+      applyChatReply(requestId, attempt, {
+        text: value.text,
+        source: value.source,
+        providerRequestId: value.providerRequestId as string | undefined,
+      });
+    };
+
+    const requestChatReply = (requestId: string) => {
+      const chatRequest = get().chatTurnRequests.find(item => item.id === requestId);
+      const userMessage = chatRequest
+        ? get().chatMessages.find(item => item.id === chatRequest.userMessageId)
+        : undefined;
+      if (!chatRequest || !userMessage || chatRequest.status !== 'pending') return;
+
+      const attempt = chatRequest.attempt;
+      try {
+        const result = resolved.chatReplyProvider.reply({
+          conversationId: chatRequest.conversationId,
+          requestId,
+          attempt,
+          text: userMessage.text,
+        });
+        if (result && typeof (result as Promise<ChatReply>).then === 'function') {
+          void Promise.resolve(result).then(
+            reply => receiveChatReply(requestId, attempt, reply),
+            error => failChatReply(requestId, attempt, error),
+          );
+        } else {
+          receiveChatReply(requestId, attempt, result);
+        }
+      } catch (error) {
+        failChatReply(requestId, attempt, error);
+      }
     };
 
     return {
@@ -773,16 +1159,20 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       selectedType: 'travel',
       selectedCharacterId: initialCharacter,
       selectedPhotoIds: [],
-      currentDiaryId: 'diary-1',
+      currentDiaryId: resolved.diaries[0]?.id ?? '',
       generationPhaseIndex: 0,
       companionName: '',
       photos: [...resolved.photos],
       diaries: resolved.diaries.map(cloneDiary),
       issueLog: [],
       drafts: {},
-      chatMessages: [{ id: 'chat-welcome', role: 'assistant', text: '嘿，今天过得怎么样？\n我一直在这里，想听听你的小故事。' }],
+      chatMessages: [{ id: 'chat-welcome', role: 'assistant', source: 'welcome', text: '嘿，今天过得怎么样？\n我一直在这里，想听听你的小故事。' }],
+      chatConversationId: undefined,
+      chatTurnRequests: [],
       likedDiscoveryIds: [],
       materialPhotoIds: resolved.photos.slice(0, 6).map(photo => photo.id),
+      aiImageGenerationRequests: [],
+      insightReportGeneration: { status: 'idle' },
       correctedAnchors: {},
       flowerUnlocked: false,
       hydratedPhotoPermission: false,
@@ -805,7 +1195,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       beginCreation: () => {
         const id = resolved.createId('draft');
         const photoIds: string[] = [];
-        const diary = cloneDiary(resolved.diaries[0]);
+        const diary = resolved.diaries[0]
+          ? cloneDiary(resolved.diaries[0])
+          : createBlankDiary(resolved.now(), initialCharacter);
         const people = getPeopleForPhotos(photoIds, get().photos);
         const draft: DiaryDraft = {
           id,
@@ -829,6 +1221,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           people,
           generation: { round: 0, progress: 0, status: 'idle' },
           dirty: false,
+          editRevision: 0,
         };
         set(state => ({
           activeDraftId: id,
@@ -840,7 +1233,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           generationPhaseIndex: 0,
           currentStep: state.hasPhotoPermission ? 'album' : 'permission',
         }));
-        void persistDraftSnapshot();
+        persistDraftSnapshotInBackground();
         void syncDraftToRemote(draft);
         return id;
       },
@@ -855,7 +1248,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             selectedType: existing.diary.type,
             selectedCharacterId: existing.diary.characterId,
           });
-          void persistDraftSnapshot();
+          persistDraftSnapshotInBackground();
           return existing.id;
         }
         const id = resolved.createId('draft');
@@ -868,6 +1261,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           people,
           generation: { round: 0, progress: 100, status: 'complete' },
           dirty: false,
+          editRevision: 0,
         };
         set(state => ({
           activeDraftId: id,
@@ -878,7 +1272,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           selectedType: diary.type,
           drafts: { ...state.drafts, [id]: draft },
         }));
-        void persistDraftSnapshot();
+        persistDraftSnapshotInBackground();
         void syncDraftToRemote(draft);
         return id;
       },
@@ -982,13 +1376,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const key = rewriteRequestKey(id, blockId);
         const sourceContent = block.content;
         if (!sourceContent.trim()) return;
-        const fingerprint = `${draft.generation.round}:${sourceContent}`;
+        const fingerprint = buildRewriteFingerprint(draft, block);
+        if (!fingerprint) return;
         if (pendingRewriteFingerprints.get(key) === fingerprint) return;
         const requestId = nextRewriteRequestId++;
         pendingRewriteRequestIds.set(key, requestId);
         pendingRewriteFingerprints.set(key, fingerprint);
         void syncRewriteToRemote({
           requestId,
+          fingerprint,
           draftId: id,
           blockId,
           draftVersion: draft.generation.round,
@@ -1073,7 +1469,8 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           return;
         }
         try {
-          const result = await repository.getGenerationJob(draft.generation.remoteJobId);
+          const expectedJobId = draft.generation.remoteJobId;
+          const result = await repository.getGenerationJob(expectedJobId);
           if (!result.ok) {
             if (result.error.code === 'not_found') {
               applyGenerationFailure(id, round, {
@@ -1118,7 +1515,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             get().logIssue(`生成任务同步失败：${result.error.message}`);
             return;
           }
-          applyGenerationSnapshot(id, round, result.data);
+          applyGenerationSnapshot(id, round, result.data, expectedJobId);
         } catch (error) {
           applyGenerationFailure(id, round, {
             status: 'failed',
@@ -1192,24 +1589,49 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           });
           clearPendingRewriteRequests(id);
           const shouldDropDraft = pendingDiscardDraftIds.has(id);
+          const latestDraft = get().drafts[id];
+          const hasNewerEdits = Boolean(
+            latestDraft
+            && !shouldDropDraft
+            && (latestDraft.editRevision ?? 0) > (draft.editRevision ?? 0),
+          );
           if (shouldDropDraft) pendingDiscardDraftIds.delete(id);
           set(state => {
             const { [id]: discardedDraft, ...remainingDrafts } = state.drafts;
             void discardedDraft;
+            const rebasedDraft = hasNewerEdits && latestDraft
+              ? {
+                  ...latestDraft,
+                  sourceDiaryId: savedDiaryId,
+                  diary: cloneDiary({ ...latestDraft.diary, id: savedDiaryId, version: savedVersion }),
+                  dirty: true,
+                  savedDiaryId: undefined,
+                }
+              : undefined;
             return {
               diaries: draft.sourceDiaryId ? state.diaries.map(item => item.id === savedDiaryId ? diary : item) : [diary, ...state.diaries],
               memoriesSourceItems: draft.sourceDiaryId
                 ? state.memoriesSourceItems.map(item => item.id === savedDiaryId ? diary : item)
                 : [diary, ...state.memoriesSourceItems],
-              currentDiaryId: shouldDropDraft ? state.currentDiaryId : savedDiaryId,
-              currentStep: shouldDropDraft ? state.currentStep : 'detail',
-              activeDraftId: state.activeDraftId === id ? undefined : state.activeDraftId,
+              currentDiaryId: shouldDropDraft || hasNewerEdits ? state.currentDiaryId : savedDiaryId,
+              currentStep: shouldDropDraft || hasNewerEdits ? state.currentStep : 'detail',
+              activeDraftId: !hasNewerEdits && state.activeDraftId === id ? undefined : state.activeDraftId,
               drafts: shouldDropDraft
                 ? remainingDrafts
-                : { ...state.drafts, [id]: { ...draft, diary, dirty: false, savedDiaryId: savedDiaryId } },
+                : {
+                    ...state.drafts,
+                    [id]: rebasedDraft ?? { ...draft, diary, dirty: false, savedDiaryId },
+                  },
             };
           });
-          void persistDraftSnapshot();
+          persistDraftSnapshotInBackground();
+          if (hasNewerEdits && !shouldDropDraft) {
+            return {
+              ok: false as const,
+              reason: 'pending' as const,
+              message: '较早版本已保存，新的修改仍保留在草稿中。',
+            };
+          }
           return {
             ok: true as const,
             diaryId: savedDiaryId,
@@ -1222,7 +1644,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         }
 
         set(state => ({ savingDraftIds: [...new Set([...state.savingDraftIds, id])] }));
-        const idempotencyKey = `${draft.id}-save-${draft.generation.round}`;
+        const idempotencyKey = `${draft.id}-save-${draft.sourceDiaryId ?? 'new'}-${sourceDiaryVersion ?? 0}-${draft.generation.round}-${draft.editRevision ?? 0}`;
         try {
           const result = await repository.saveDiary({
             id: targetDiaryId,
@@ -1314,7 +1736,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
                 activeDraftId: state.activeDraftId === id ? undefined : state.activeDraftId,
               };
             });
-            void persistDraftSnapshot();
+            persistDraftSnapshotInBackground();
           }
         }
       },
@@ -1329,7 +1751,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           set(state => ({
             activeDraftId: state.activeDraftId === id ? undefined : state.activeDraftId,
           }));
-          void persistDraftSnapshot();
+          persistDraftSnapshotInBackground();
           return;
         }
         set(state => {
@@ -1337,7 +1759,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         void discarded;
         return { drafts, activeDraftId: state.activeDraftId === id ? undefined : state.activeDraftId };
         });
-        void persistDraftSnapshot();
+        persistDraftSnapshotInBackground();
       },
       savePrivacy: (diaryId, privacy, publicBlockIds) => {
         const normalized = normalizeDiaryVisibility(diaryId, privacy, publicBlockIds);
@@ -1430,20 +1852,431 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       sendChat: text => {
         const message = text.trim();
         if (!message) return;
-        const reply = /累|难过|伤心|烦|压力/.test(message)
-          ? '辛苦啦。先停下来，深呼吸一下吧。我会陪着你，慢慢说就好。🍊'
-          : /旅行|台南|照片|日记/.test(message)
-            ? '听起来是一段值得收藏的回忆！把照片和小故事放进日记，下次翻开时，快乐还会再来一次。🍊'
-            : /谢谢|开心|快乐|喜欢/.test(message)
-              ? '听到你这样说，我也好开心。把这份小小的幸福记下来吧！🍊'
-              : '嗯嗯，我在认真听。今天还有哪个瞬间，让你想多停留一会儿呢？🍊';
-        set(state => ({ chatMessages: [...state.chatMessages, { id: resolved.createId('chat'), role: 'user', text: message }, { id: resolved.createId('chat'), role: 'assistant', text: reply }] }));
+        const state = get();
+        const conversationId = state.chatConversationId ?? resolved.createId('chat-session');
+        const requestId = resolved.createId('chat-request');
+        const userMessageId = resolved.createId('chat');
+        set(current => ({
+          chatConversationId: conversationId,
+          chatMessages: [...current.chatMessages, {
+            id: userMessageId,
+            conversationId,
+            requestId,
+            role: 'user',
+            text: message,
+          }],
+          chatTurnRequests: [...current.chatTurnRequests, {
+            id: requestId,
+            conversationId,
+            userMessageId,
+            attempt: 1,
+            status: 'pending',
+          }],
+        }));
+        requestChatReply(requestId);
+      },
+      retryChat: requestId => {
+        const current = get().chatTurnRequests.find(item => item.id === requestId);
+        if (!current || current.status !== 'failed' || current.conversationId !== get().chatConversationId) return;
+        set(state => ({
+          chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
+            ? { ...item, attempt: item.attempt + 1, status: 'pending', error: undefined }
+            : item),
+        }));
+        requestChatReply(requestId);
       },
       toggleDiscoveryLike: id => set(state => ({ likedDiscoveryIds: state.likedDiscoveryIds.includes(id) ? state.likedDiscoveryIds.filter(item => item !== id) : [...state.likedDiscoveryIds, id] })),
       addMaterialPhoto: id => {
         if (get().photos.some(photo => photo.id === id)) {
           set(state => ({ materialPhotoIds: [...new Set([...state.materialPhotoIds, id])] }));
         }
+      },
+      importDevicePhotosToMaterials: async photoIds => {
+        if (!Array.isArray(photoIds) || photoIds.length === 0
+          || photoIds.some(id => typeof id !== 'string' || !id.trim())) {
+          return { ok: false, reason: 'invalid_input', message: '请选择有效的照片。' };
+        }
+        const requestedIds = [...new Set(photoIds.map(id => id.trim()))];
+        let result: DevicePhotoAssetImportResult;
+        try {
+          result = await resolved.devicePhotoImporter(requestedIds);
+        } catch {
+          return { ok: false, reason: 'provider_failed', message: '照片导入失败，请稍后重试。' };
+        }
+        if (!result || typeof result !== 'object' || typeof result.ok !== 'boolean') {
+          return { ok: false, reason: 'provider_failed', message: '照片导入服务返回的数据无效。' };
+        }
+        if (!result.ok) return result;
+        if (!Array.isArray(result.photos)) {
+          return { ok: false, reason: 'asset_unreadable', message: '无法确认所选照片，请重新选择后再试。' };
+        }
+        if (result.photos.some(photo =>
+          !photo
+          || typeof photo !== 'object'
+          || typeof photo.id !== 'string'
+          || !photo.id.trim()
+          || photo.source !== 'device'
+          || typeof photo.title !== 'string'
+          || typeof photo.location !== 'string'
+          || typeof photo.date !== 'string'
+          || typeof (photo.localUri ?? photo.uri) !== 'string'
+          || !(photo.localUri ?? photo.uri)?.trim())) {
+          return { ok: false, reason: 'asset_unreadable', message: '无法确认所选照片，请重新选择后再试。' };
+        }
+
+        const importedIds = result.photos.map(photo => photo.id);
+        if (result.photos.length !== requestedIds.length
+          || new Set(importedIds).size !== requestedIds.length
+          || importedIds.some(id => !requestedIds.includes(id))
+          || result.photos.some(photo =>
+            photo.source !== 'device'
+            || !(photo.localUri ?? photo.uri)?.trim()
+            || !photo.id.trim())) {
+          return { ok: false, reason: 'asset_unreadable', message: '无法确认所选照片，请重新选择后再试。' };
+        }
+
+        const currentPhotos = get().photos;
+        const currentById = new Map(currentPhotos.map(photo => [photo.id, photo]));
+        if (result.photos.some(photo => {
+          const current = currentById.get(photo.id);
+          return current && current.source !== 'device';
+        })) {
+          return { ok: false, reason: 'identity_conflict', message: '照片标识与现有素材冲突，未导入任何照片。' };
+        }
+
+        set(state => {
+          const photosById = new Map(state.photos.map(photo => [photo.id, photo]));
+          let catalogChanged = false;
+          for (const photo of result.photos) {
+            const existing = photosById.get(photo.id);
+            const refreshed = existing ? { ...existing, ...photo } : photo;
+            const unchanged = existing
+              && existing.uri === refreshed.uri
+              && existing.localUri === refreshed.localUri
+              && existing.title === refreshed.title
+              && existing.location === refreshed.location
+              && existing.date === refreshed.date
+              && existing.width === refreshed.width
+              && existing.height === refreshed.height
+              && existing.filename === refreshed.filename;
+            if (unchanged) continue;
+            photosById.set(photo.id, clonePhotoAsset(refreshed));
+            catalogChanged = true;
+          }
+          const materialPhotoIds = [...new Set([...state.materialPhotoIds, ...requestedIds])];
+          return {
+            ...(catalogChanged
+              ? { photos: [...photosById.values()], photoCatalogVersion: state.photoCatalogVersion + 1 }
+              : {}),
+            materialPhotoIds,
+          };
+        });
+        return { ok: true, photoIds: requestedIds };
+      },
+      generateMaterialImage: description => {
+        const normalizedDescription = description.trim();
+        if (!normalizedDescription) {
+          return Promise.resolve({
+            ok: false,
+            reason: 'invalid_input',
+            message: '请先描述想生成的画面。',
+          });
+        }
+        const inflight = pendingImageGenerations.get(normalizedDescription);
+        if (inflight) return inflight.promise;
+
+        const requestId = resolved.createId('image-generation');
+        const controller = new AbortController();
+        imageGenerationControllers.set(requestId, controller);
+        set(state => {
+          const completed = state.aiImageGenerationRequests
+            .filter(item => item.status !== 'pending')
+            .slice(-19);
+          const pending = state.aiImageGenerationRequests.filter(item => item.status === 'pending');
+          return {
+            aiImageGenerationRequests: [
+              ...completed,
+              ...pending,
+              { id: requestId, description: normalizedDescription, attempt: 1, status: 'pending' },
+            ],
+          };
+        });
+
+        const promise: Promise<AIImageGenerationActionResult> = (async () => {
+          await Promise.resolve();
+          const isCancelled = () => controller.signal.aborted
+            || get().aiImageGenerationRequests.find(item => item.id === requestId)?.status !== 'pending';
+          if (isCancelled()) {
+            imageGenerationControllers.delete(requestId);
+            if (pendingImageGenerations.get(normalizedDescription)?.requestId === requestId) {
+              pendingImageGenerations.delete(normalizedDescription);
+            }
+            return {
+              ok: false,
+              requestId,
+              reason: 'cancelled',
+              message: '本次配图生成已取消。',
+            };
+          }
+          try {
+            const request = {
+              version: AI_IMAGE_GENERATION_CONTRACT_VERSION,
+              requestId,
+              attempt: 1,
+              description: normalizedDescription,
+              generatedAt: new Date(resolved.now()).toISOString(),
+              signal: controller.signal,
+            };
+            if (!isAIImageGenerationRequest(request)) {
+              throw new AIImageGenerationError('provider_failed', '配图请求格式无效');
+            }
+            const result = await awaitImageOperation(
+              () => resolved.aiImageGenerationProvider.generate(request),
+              controller.signal,
+            );
+            const currentRequest = get().aiImageGenerationRequests.find(item => item.id === requestId);
+            if (controller.signal.aborted || currentRequest?.status !== 'pending') {
+              return {
+                ok: false,
+                requestId,
+                reason: 'cancelled',
+                message: '本次配图生成已取消。',
+              };
+            }
+
+            const photo = result?.photo;
+            if (
+              !isAIImageGenerationResultForRequest(result, request)
+              || !hasReadableImageSource(photo)
+            ) {
+              throw new AIImageGenerationError('provider_failed', '生成结果无效');
+            }
+
+            const assetReadable = await awaitImageOperation(
+              () => resolved.aiImageGenerationProvider.isAssetReadable(photo),
+              controller.signal,
+            );
+            const latestRequest = get().aiImageGenerationRequests.find(item => item.id === requestId);
+            if (controller.signal.aborted || latestRequest?.status !== 'pending') {
+              return {
+                ok: false,
+                requestId,
+                reason: 'cancelled',
+                message: '本次配图生成已取消。',
+              };
+            }
+            if (!assetReadable) {
+              throw new AIImageGenerationError('provider_failed', '生成图片不可读取');
+            }
+
+            const existingPhoto = get().photos.find(item => item.id === photo.id);
+            if (existingPhoto && existingPhoto.generationRequestId !== requestId) {
+              throw new AIImageGenerationError('provider_failed', '生成图片标识冲突');
+            }
+
+            get().registerPhotos([photo]);
+            get().addMaterialPhoto(photo.id);
+            set(state => ({
+              aiImageGenerationRequests: state.aiImageGenerationRequests.map(item => item.id === requestId
+                ? { ...item, status: 'succeeded', source: result.source, photoId: photo.id }
+                : item),
+            }));
+            return { ok: true, requestId, photoId: photo.id, source: result.source };
+          } catch (error) {
+            const reason = error instanceof AIImageGenerationError && error.code === 'cancelled'
+              ? 'cancelled'
+              : 'provider_failed';
+            const currentRequest = get().aiImageGenerationRequests.find(item => item.id === requestId);
+            if (currentRequest?.status === 'pending') {
+              set(state => ({
+                aiImageGenerationRequests: state.aiImageGenerationRequests.map(item => item.id === requestId
+                  ? { ...item, status: reason === 'cancelled' ? 'cancelled' : 'failed', errorCode: reason }
+                  : item),
+              }));
+            }
+            return {
+              ok: false,
+              requestId,
+              reason,
+              message: reason === 'cancelled' ? '本次配图生成已取消。' : '配图暂时无法生成，请稍后重试。',
+            };
+          } finally {
+            imageGenerationControllers.delete(requestId);
+            if (pendingImageGenerations.get(normalizedDescription)?.requestId === requestId) {
+              pendingImageGenerations.delete(normalizedDescription);
+            }
+          }
+        })();
+        pendingImageGenerations.set(normalizedDescription, { requestId, promise });
+        return promise;
+      },
+      cancelMaterialImageGeneration: requestId => {
+        const currentRequest = get().aiImageGenerationRequests.find(item => item.id === requestId);
+        if (!currentRequest || currentRequest.status !== 'pending') return;
+        imageGenerationControllers.get(requestId)?.abort();
+        set(state => ({
+          aiImageGenerationRequests: state.aiImageGenerationRequests.map(item => item.id === requestId
+            ? { ...item, status: 'cancelled', errorCode: 'cancelled' }
+            : item),
+        }));
+      },
+      generateInsightReport: () => {
+        if (!get().flowerUnlocked) {
+          return Promise.resolve({
+            ok: false,
+            reason: 'not_unlocked',
+            message: '专属洞察报告尚未解锁。',
+          });
+        }
+        const { sourceDiaries, sourceVersion } = buildInsightReportSourceSnapshot();
+        if (sourceDiaries.length === 0) {
+          return Promise.resolve({
+            ok: false,
+            reason: 'no_sources',
+            message: '目前还没有可用于整理报告的日记。',
+          });
+        }
+
+        const existing = pendingInsightReports.get(sourceVersion);
+        if (existing && get().insightReportGeneration.status === 'running'
+          && get().insightReportGeneration.requestId === existing.requestId) {
+          return existing.promise;
+        }
+
+        const previousRequestId = activeInsightReportRequestId;
+        if (previousRequestId) insightReportControllers.get(previousRequestId)?.abort();
+        const requestId = resolved.createId('insight-report');
+        const request = {
+          version: INSIGHT_REPORT_CONTRACT_VERSION,
+          requestId,
+          sourceVersion,
+          sourceDiaries,
+        };
+        const controller = new AbortController();
+        activeInsightReportRequestId = requestId;
+        insightReportControllers.set(requestId, controller);
+        set({
+          insightReportGeneration: {
+            status: 'running',
+            requestId,
+            sourceVersion,
+          },
+        });
+
+        const promise: Promise<InsightReportActionResult> = (async () => {
+          await Promise.resolve();
+          try {
+            if (!isInsightReportRequest(request)) {
+              throw new InsightReportProviderError('provider_failed', '报告请求结构无效');
+            }
+            const result = await awaitInsightReportOperation(
+              () => resolved.insightReportProvider.generate({ ...request, signal: controller.signal }),
+              controller.signal,
+            );
+            const current = get().insightReportGeneration;
+            if (
+              controller.signal.aborted
+              || activeInsightReportRequestId !== requestId
+              || current.requestId !== requestId
+              || current.status !== 'running'
+            ) {
+              return {
+                ok: false,
+                requestId,
+                reason: current.status === 'cancelled' ? 'cancelled' : 'stale',
+                message: current.status === 'cancelled' ? '本次报告生成已取消。' : '报告来源已更新，请重新生成。',
+              };
+            }
+            if (buildInsightReportSourceSnapshot().sourceVersion !== sourceVersion) {
+              set({
+                insightReportGeneration: {
+                  status: 'stale',
+                  requestId,
+                  sourceVersion,
+                  errorCode: 'stale',
+                },
+              });
+              return {
+                ok: false,
+                requestId,
+                reason: 'stale',
+                message: '报告来源已更新，请重新生成。',
+              };
+            }
+
+            if (!isInsightReportResultForRequest(result, request)) {
+              throw new InsightReportProviderError('provider_failed', '报告结果结构无效');
+            }
+
+            set({
+              insightReportGeneration: {
+                status: 'succeeded',
+                requestId,
+                sourceVersion,
+                report: result,
+              },
+            });
+            return { ok: true, requestId, report: result };
+          } catch (error) {
+            const current = get().insightReportGeneration;
+            const sourceChanged = buildInsightReportSourceSnapshot().sourceVersion !== sourceVersion;
+            const requestSuperseded = activeInsightReportRequestId !== requestId
+              || current.requestId !== requestId;
+            const explicitlyCancelled = current.requestId === requestId
+              && current.status === 'cancelled';
+            const providerCancelled = error instanceof InsightReportProviderError
+              && error.code === 'cancelled';
+            const reason = explicitlyCancelled || (providerCancelled && !sourceChanged && !requestSuperseded)
+              ? 'cancelled'
+              : sourceChanged || requestSuperseded
+                ? 'stale'
+                : 'provider_failed';
+            if (activeInsightReportRequestId === requestId
+              && current.requestId === requestId
+              && current.status === 'running') {
+              set({
+                insightReportGeneration: {
+                  status: reason === 'cancelled' ? 'cancelled' : reason === 'stale' ? 'stale' : 'failed',
+                  requestId,
+                  sourceVersion,
+                  errorCode: reason,
+                },
+              });
+            }
+            return {
+              ok: false,
+              requestId,
+              reason,
+              message: reason === 'cancelled'
+                ? '本次报告生成已取消。'
+                : reason === 'stale'
+                  ? '报告来源已更新，请重新生成。'
+                  : '专属洞察报告暂时无法生成，请稍后重试。',
+            };
+          } finally {
+            insightReportControllers.delete(requestId);
+            if (activeInsightReportRequestId === requestId) activeInsightReportRequestId = undefined;
+            if (pendingInsightReports.get(sourceVersion)?.requestId === requestId) {
+              pendingInsightReports.delete(sourceVersion);
+            }
+          }
+        })();
+        pendingInsightReports.set(sourceVersion, { requestId, promise });
+        return promise;
+      },
+      cancelInsightReport: requestId => {
+        const current = get().insightReportGeneration;
+        if (current.requestId !== requestId || current.status !== 'running') return;
+        insightReportControllers.get(requestId)?.abort();
+        activeInsightReportRequestId = undefined;
+        set({
+          insightReportGeneration: {
+            status: 'cancelled',
+            requestId,
+            sourceVersion: current.sourceVersion,
+            errorCode: 'cancelled',
+          },
+        });
       },
       correctAnchor: (id, text) => { if (text.trim()) set(state => ({ correctedAnchors: { ...state.correctedAnchors, [id]: text.trim() } })); },
       setFlowerUnlocked: flowerUnlocked => set({ flowerUnlocked }),
@@ -1617,7 +2450,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           return;
         }
         try {
-          const result = await repository.listMemories({ page: 1, pageSize: 100 });
+          const query = { page: 1, pageSize: 100 };
+          const result = repository.listAllMemories
+            ? await repository.listAllMemories(query)
+            : await repository.listMemories(query);
           if (!result.ok) {
             get().logIssue(`回忆同步失败：${result.error.message}`);
             return;
@@ -1630,8 +2466,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             date: item.date,
             privacy: item.privacy,
             photoIds: item.photoIds,
+            publicBlockIds: item.publicBlockIds,
             version: item.version,
             contentSnapshot: item.contentSnapshot,
+            contentSnapshotStatus: item.contentSnapshotStatus,
           }));
           set(state => {
             const merged = [...state.diaries];
@@ -1835,7 +2673,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         }
 
         try {
-          const result = await repository.listMemories(query);
+          const result = repository.listAllMemories
+            ? await repository.listAllMemories(query)
+            : await repository.listMemories(query);
           if (requestVersion !== memoriesRequestVersion) return;
           if (!result.ok) {
             set({
@@ -1853,8 +2693,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             date: item.date,
             privacy: item.privacy,
             photoIds: item.photoIds,
+            publicBlockIds: item.publicBlockIds,
             version: item.version,
             contentSnapshot: item.contentSnapshot,
+            contentSnapshotStatus: item.contentSnapshotStatus,
           }));
           set({
             memoriesSourceItems: query.month || query.day || query.keyword ? get().memoriesSourceItems : items,
@@ -1889,7 +2731,7 @@ export function createAppSelectors(store: AppStoreHook, deps: AppStoreDeps = cre
     availableCharacters,
     companions: resolved.companions,
     get photos() { return store.getState().photos; },
-    historyGroups,
+    get historyGroups() { return getHistoryGroups(store.getState().diaries); },
     generationPhases: resolved.generationPhases,
     shareOptions: resolved.shareOptions,
     minSelectedPhotos: MIN_SELECTED_PHOTOS,

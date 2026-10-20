@@ -56,7 +56,7 @@ export type RewriteResultRecord = {
 
 export class DiaryGenerationProviderError extends Error {
   constructor(
-    readonly code: 'timeout' | 'provider_failed',
+    readonly code: 'timeout' | 'provider_failed' | 'cancelled',
     message: string,
     readonly retryable: boolean,
   ) {
@@ -163,6 +163,11 @@ function normalizePeople(value: unknown, selectedPhotoIds: string[]) {
       } satisfies GenerationPersonRecord;
     })
     .filter((person): person is GenerationPersonRecord => Boolean(person));
+  const personIds = new Set<string>();
+  for (const person of people) {
+    if (personIds.has(person.id)) throw new Error('provider people contain duplicate person IDs');
+    personIds.add(person.id);
+  }
   return people.length ? people : undefined;
 }
 
@@ -423,19 +428,25 @@ function isRetryableStatus(status: number) {
 
 @Injectable()
 export class DiaryGenerationService {
-  async generate(input: GenerationInputSnapshot): Promise<GenerationResultRecord> {
-    const provider = (process.env.AI_PROVIDER ?? 'deterministic').trim();
+  async generate(
+    input: GenerationInputSnapshot,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<GenerationResultRecord> {
+    if (options.signal?.aborted) {
+      throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
+    }
+    const provider = this.resolveProvider();
     if (provider === 'deterministic') {
       return this.buildDeterministicGenerationResult(input);
     }
     if (provider === 'openai-compatible') {
-      return this.generateWithOpenAICompatible(input);
+      return this.generateWithOpenAICompatible(input, options.signal);
     }
     throw new DiaryGenerationProviderError('provider_failed', `unsupported AI provider: ${provider}`, false);
   }
 
   async rewriteBlock(input: RewriteInputSnapshot): Promise<RewriteResultRecord> {
-    const provider = (process.env.AI_PROVIDER ?? 'deterministic').trim();
+    const provider = this.resolveProvider();
     if (provider === 'deterministic') {
       return this.buildDeterministicRewriteResult(input);
     }
@@ -445,7 +456,22 @@ export class DiaryGenerationService {
     throw new DiaryGenerationProviderError('provider_failed', `unsupported AI provider: ${provider}`, false);
   }
 
-  private async generateWithOpenAICompatible(input: GenerationInputSnapshot) {
+  private resolveProvider() {
+    const configuredProvider = process.env.AI_PROVIDER?.trim();
+    if (
+      process.env.NODE_ENV === 'production'
+      && (!configuredProvider || configuredProvider === 'deterministic')
+    ) {
+      throw new DiaryGenerationProviderError(
+        'provider_failed',
+        'AI provider is not configured for production',
+        false,
+      );
+    }
+    return configuredProvider || 'deterministic';
+  }
+
+  private async generateWithOpenAICompatible(input: GenerationInputSnapshot, signal?: AbortSignal) {
     const baseUrl = process.env.AI_PROVIDER_BASE_URL?.trim();
     const model = process.env.AI_PROVIDER_MODEL?.trim();
     const apiKey = process.env.AI_PROVIDER_API_KEY?.trim();
@@ -456,7 +482,15 @@ export class DiaryGenerationService {
     const timeoutMs = parsePositiveInt(process.env.AI_PROVIDER_TIMEOUT_MS, 15000);
     const temperature = parseTemperature(process.env.AI_PROVIDER_GENERATION_TEMPERATURE, 0.7);
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const onAbort = () => controller.abort();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+    if (signal?.aborted) {
+      clearTimeout(timeout);
+      throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
       const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -495,6 +529,9 @@ export class DiaryGenerationService {
         })),
         signal: controller.signal,
       });
+      if (signal?.aborted) {
+        throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
+      }
 
       if (!response.ok) {
         throw new DiaryGenerationProviderError(
@@ -505,10 +542,16 @@ export class DiaryGenerationService {
       }
 
       const json = await response.json() as unknown;
+      if (signal?.aborted) {
+        throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
+      }
       const parsed = parseJsonObject(extractTextFromChatCompletion(json));
       return normalizeResult(parsed, input);
     } catch (error) {
       if (error instanceof DiaryGenerationProviderError) throw error;
+      if (signal?.aborted) {
+        throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
+      }
       if (isAbortError(error)) {
         throw new DiaryGenerationProviderError('timeout', `AI provider request timed out after ${timeoutMs}ms`, true);
       }
@@ -521,6 +564,7 @@ export class DiaryGenerationService {
       throw new DiaryGenerationProviderError('provider_failed', 'AI provider request failed', false);
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener('abort', onAbort);
     }
   }
 

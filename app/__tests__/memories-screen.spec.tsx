@@ -370,6 +370,31 @@ describe('Memories screen', () => {
     expect(useAppStore.getState().memoriesFilterDay).toBeNull();
   });
 
+  test('serializes display-format month and day filters to the query contract', async () => {
+    const searchMemories = jest.fn();
+    useAppStore.setState({
+      memoriesSourceItems: [buildDiary({ id: 'diary-filter-date', date: '2026.02.03' })],
+      memoriesItems: [buildDiary({ id: 'diary-filter-date', date: '2026.02.03' })],
+      memoriesStatus: 'ready',
+      memoriesFilterMonth: '2026.02',
+      memoriesFilterDay: 3,
+      memoriesSearchKeyword: '厦门',
+      searchMemories,
+    });
+
+    await render(<MemoriesScreen />);
+
+    await waitFor(() => {
+      expect(searchMemories).toHaveBeenCalledWith({
+        month: '2026-02',
+        day: '2026-02-03',
+        keyword: '厦门',
+        page: 1,
+        pageSize: 100,
+      });
+    });
+  });
+
   test('reselecting a month clears the previous day filter', async () => {
     useAppStore.setState({
       memoriesSourceItems: [
