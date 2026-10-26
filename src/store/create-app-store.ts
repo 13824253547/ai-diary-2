@@ -1,11 +1,8 @@
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
-import { companionCandidates } from '../mocks/companions';
 import { diaryTypeOptions, generationPhases } from '../mocks/creation';
 import { mockCharacters } from '../mocks/characters';
-import { mockDiaries } from '../mocks/diaries';
-import { mockPhotos } from '../mocks/photos';
 import { appConfig } from '../config/app-config';
-import { isDiaryContentContractForPhotoIds, type GenerationJobContract, type MemoriesQuery, type RewriteBlockRequestContract } from '../contracts/core-diary-contract';
+import { isDiaryContentContractForPhotoIds, isGenerationProgressMilestoneHistory, isGenerationResultForSelectedPhotoIds, type GenerationJobContract, type MemoriesQuery, type RewriteBlockRequestContract } from '../contracts/core-diary-contract';
 import {
   AI_IMAGE_GENERATION_CONTRACT_VERSION,
   isAIImageGenerationRequest,
@@ -22,23 +19,47 @@ import { createBackendAnchorCorrectionRepository } from './adapters/backend-anch
 import { createBackendAnchorReadModelRepository } from './adapters/backend-anchor-read-model-adapter';
 import { createBackendPetChatRepository } from './adapters/backend-pet-chat-adapter';
 import type { AppStoreAdapters, PersistedDraftsSnapshot } from './adapters/types';
+import type { PetChatConversation } from '../contracts/pet-chat-contract';
+import { PetChatRepositoryError } from '../repositories/pet-chat-repository';
 import { shareOptions } from '../mocks/share-options';
 import type { GenerationPhase, DiaryTypeOption } from '../types/creation';
-import type { ChatMessage, ChatTurnRequest, DiaryCharacter, DiaryDraft, DiaryItem, DiaryPerson, DiaryPhoto, DiaryPrivacy, DiaryType, GenerationStage, ShareMode } from '../types/diary';
+import type { ChatMessage, ChatTurnRequest, DiaryCharacter, DiaryDraft, DiaryItem, DiaryPerson, DiaryPhoto, DiaryPrivacy, DiaryType, GenerationProgressMilestone, GenerationStage, ShareMode } from '../types/diary';
 import { buildGeneratedDiary, buildGeneratedDiaryFromResult, canGenerate, cloneDiary, getDiaryStatistics, getHistoryGroups, getPeopleForPhotos, MIN_SELECTED_PHOTOS, normalizeDiaryPhotos, publicParagraphs, sanitizePhotoIds } from './diary-domain';
 import { createLocalDraftSnapshotStore } from '../services/draft-snapshot-storage';
+import { logDevDiagnostic } from '../services/dev-diagnostics';
+import { PROVIDER_REQUEST_CLIENT_TIMEOUT_MS } from '../services/api-client';
 import {
   importDevicePhotoAssets,
   type DevicePhotoAssetImportResult,
   type DevicePhotoAssetImporter,
 } from '../services/photo-library';
-import { createMockChatReplyProvider, createUnconfiguredChatReplyProvider, type ChatReply, type ChatReplyProvider } from '../services/chat-reply-provider';
-import { AIImageGenerationError, createMockAIImageGenerationProvider, createUnconfiguredAIImageGenerationProvider, hasReadableImageSource, type AIImageGenerationProvider } from '../services/ai-image-generation-provider';
-import { InsightReportProviderError, createMockInsightReportProvider, createUnconfiguredInsightReportProvider, type InsightReportProvider, type InsightReportResult } from '../services/insight-report-provider';
+import { createUnconfiguredChatReplyProvider, type ChatReply, type ChatReplyProvider } from '../services/chat-reply-provider';
+import { AIImageGenerationError, createUnconfiguredAIImageGenerationProvider, hasReadableImageSource, type AIImageGenerationProvider } from '../services/ai-image-generation-provider';
+import { createHttpAIImageGenerationProvider } from '../services/http-ai-image-generation-provider';
+import { InsightReportProviderError, createUnconfiguredInsightReportProvider, type InsightReportProvider, type InsightReportResult } from '../services/insight-report-provider';
 import { getPhotoPermissionStatus, type PhotoPermissionStatus } from '../services/photo-permission';
+import { listSavedDiaryPhotoAssets } from '../services/material-photo-api';
+import {
+  MAX_MATERIAL_LIBRARY_PHOTOS,
+  MAX_MATERIAL_PHOTOS_PER_UPLOAD,
+} from '../contracts/material-photo-contract';
+import { cleanupDiaryPhotoUploads, prepareDiaryPhotoUploads } from '../services/diary-photo-upload';
 import { exportMonthlyCollection, MonthlyExportAbortedError, type MonthlyExportResult, type MonthlyExportService, type MonthlyExportSnapshot } from '../services/monthly-export';
 import { canSelectCharacterId, isSupportedCharacterId } from '../types/character-capabilities';
 import { canCreateDiaryType } from '../types/diary-capabilities';
+import type { GenerationPhotoUpload } from '../repositories/core-diary-repository';
+
+type DiaryPhotoUploadPreparer = (
+  photoIds: string[],
+  catalog: DiaryPhoto[],
+) => Promise<GenerationPhotoUpload[]>;
+
+function getRewriteContextBlocks(draft: DiaryDraft, excludedBlockId: string) {
+  return draft.diary.blocks
+    .filter((block): block is Extract<typeof block, { type: 'text' | 'quote' }> =>
+      (block.type === 'text' || block.type === 'quote') && block.id !== excludedBlockId)
+    .map(block => ({ id: block.id, type: block.type, content: block.content }));
+}
 
 export type AppStoreDeps = {
   now?: () => number;
@@ -46,7 +67,6 @@ export type AppStoreDeps = {
   photos?: DiaryPhoto[];
   diaries?: DiaryItem[];
   characters?: DiaryCharacter[];
-  companions?: typeof companionCandidates;
   shareOptions?: typeof shareOptions;
   diaryTypeOptions?: DiaryTypeOption[];
   generationPhases?: GenerationPhase[];
@@ -56,6 +76,7 @@ export type AppStoreDeps = {
   aiImageGenerationProvider?: AIImageGenerationProvider;
   insightReportProvider?: InsightReportProvider;
   devicePhotoImporter?: DevicePhotoAssetImporter;
+  diaryPhotoUploadPreparer?: DiaryPhotoUploadPreparer;
 };
 
 type DiaryVisibilitySaveResult =
@@ -144,6 +165,7 @@ export type AppStore = {
   hydratedDrafts: boolean;
   hydratedMemories: boolean;
   savingDraftIds: string[];
+  rewritingDraftBlockKeys: string[];
   memoriesSourceItems: DiaryItem[];
   memoriesItems: DiaryItem[];
   memoriesTotal: number;
@@ -159,6 +181,7 @@ export type AppStore = {
   updateDraft: (draftId: string, patch: Partial<DiaryItem>) => void;
   setDraftPhotos: (draftId: string, photoIds: string[]) => void;
   setDraftCharacter: (draftId: string, characterId: string, options?: { preserveContent?: boolean }) => void;
+  restartGenerationWithCharacter: (draftId: string, characterId: string) => Promise<boolean>;
   setDraftPersonName: (draftId: string, personId: string, name: string) => void;
   finalizeDraftPeopleNaming: (draftId: string) => Promise<
     | { ok: true }
@@ -180,12 +203,13 @@ export type AppStore = {
   discardDraft: (draftId: string) => void;
   savePrivacy: (diaryId: string, privacy: DiaryPrivacy, publicBlockIds?: string[]) => boolean;
   setDiaryVisibility: (diaryId: string, privacy: DiaryPrivacy, publicBlockIds?: string[]) => Promise<DiaryVisibilitySaveResult>;
-  recordShareDemo: (diaryId: string, mode: ShareMode) => boolean;
   confirmShareDelivery: (input: { diaryId: string; mode: ShareMode; operationId: string; version: number }) => boolean;
   sendChat: (text: string) => void;
   retryChat: (requestId: string) => void;
   toggleDiscoveryLike: (id: string) => void;
   addMaterialPhoto: (id: string) => void;
+  syncMaterialPhotos: (photos: DiaryPhoto[]) => boolean;
+  removeMaterialPhotos: (photoIds: string[]) => void;
   importDevicePhotosToMaterials: (photoIds: string[]) => Promise<MaterialPhotoImportActionResult>;
   generateMaterialImage: (description: string) => Promise<AIImageGenerationActionResult>;
   cancelMaterialImageGeneration: (requestId: string) => void;
@@ -202,7 +226,6 @@ export type AppStore = {
   setCompanionName: (name: string) => void;
   resetCreation: () => void;
   advanceGeneration: () => void;
-  completeGeneration: () => void;
   setCurrentDiaryId: (diaryId: string) => void;
   updateDiaryText: (diaryId: string, content: string) => Promise<string | undefined>;
   setDiaryPrivacy: (diaryId: string, privacy: DiaryPrivacy) => void;
@@ -233,13 +256,6 @@ export type AppStoreHook = UseBoundStore<StoreApi<AppStore>>;
 type CreationStep = import('../types/creation').CreationStep;
 
 const platforms: ShareMode[] = ['wechat', 'moments', 'xiaohongshu', 'weibo', 'x'];
-
-function canUseDevelopmentMocks() {
-  if (appConfig.mode !== 'hybrid-dev') return false;
-  if (process.env.JEST_WORKER_ID) return true;
-  if (typeof __DEV__ !== 'undefined') return __DEV__;
-  return process.env.NODE_ENV !== 'production';
-}
 
 function clonePhotoAsset(photo: DiaryPhoto): DiaryPhoto {
   return {
@@ -277,7 +293,6 @@ function createBlankDiary(now: number, characterId: string): DiaryItem {
 export function createDefaultAppStoreDeps(overrides: AppStoreDeps = {}): Required<AppStoreDeps> {
   const now = overrides.now ?? (() => Date.now());
   let nextSequence = 1;
-  const useDevelopmentMocks = canUseDevelopmentMocks();
   const backendRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID ? createBackendCoreDiaryRepository() : undefined;
   const backendDiscoveryRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID ? createBackendDiscoveryRepository() : undefined;
   const backendAnchorCorrectionRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID
@@ -294,21 +309,23 @@ export function createDefaultAppStoreDeps(overrides: AppStoreDeps = {}): Require
   return {
     now,
     createId: overrides.createId ?? ((prefix: string) => `${prefix}-${now()}-${nextSequence++}`),
-    photos: overrides.photos ?? (useDevelopmentMocks ? mockPhotos : []),
-    diaries: overrides.diaries ?? (useDevelopmentMocks ? mockDiaries : []),
+    photos: overrides.photos ?? [],
+    diaries: overrides.diaries ?? [],
     characters: overrides.characters ?? mockCharacters,
-    companions: overrides.companions ?? companionCandidates,
     shareOptions: overrides.shareOptions ?? shareOptions,
     diaryTypeOptions: overrides.diaryTypeOptions ?? diaryTypeOptions,
     generationPhases: overrides.generationPhases ?? generationPhases,
     monthlyExporter: overrides.monthlyExporter ?? exportMonthlyCollection,
     chatReplyProvider: overrides.chatReplyProvider
-      ?? (useDevelopmentMocks ? createMockChatReplyProvider() : createUnconfiguredChatReplyProvider()),
+      ?? createUnconfiguredChatReplyProvider(),
     aiImageGenerationProvider: overrides.aiImageGenerationProvider
-      ?? (useDevelopmentMocks ? createMockAIImageGenerationProvider() : createUnconfiguredAIImageGenerationProvider()),
+      ?? (appConfig.backendEnabled && !process.env.JEST_WORKER_ID
+        ? createHttpAIImageGenerationProvider()
+        : createUnconfiguredAIImageGenerationProvider()),
     insightReportProvider: overrides.insightReportProvider
-      ?? (useDevelopmentMocks ? createMockInsightReportProvider() : createUnconfiguredInsightReportProvider()),
+      ?? createUnconfiguredInsightReportProvider(),
     devicePhotoImporter: overrides.devicePhotoImporter ?? importDevicePhotoAssets,
+    diaryPhotoUploadPreparer: overrides.diaryPhotoUploadPreparer ?? prepareDiaryPhotoUploads,
     adapters: overrides.adapters ?? {
       diaryRepository: backendRepository,
       memoriesRepository: backendRepository,
@@ -326,10 +343,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
   const availableCharacters = resolved.characters.filter(character => canSelectCharacterId(character.id));
   const initialCharacter = availableCharacters[0]?.id ?? resolved.characters[0]?.id ?? 'character-blue';
   const fallbackProgressByStage: Record<GenerationJobContract['stage'], number> = {
-    queued: 5,
-    'analyzing-photos': 18,
-    drafting: 48,
-    structuring: 82,
+    queued: 0,
+    'analyzing-photos': 0,
+    drafting: 25,
+    structuring: 80,
     completed: 100,
     failed: 0,
     cancelled: 0,
@@ -452,6 +469,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         status: value.generation.status as DiaryDraft['generation']['status'],
         remoteJobId: typeof value.generation.remoteJobId === 'string' ? value.generation.remoteJobId : undefined,
         remoteStage: typeof value.generation.remoteStage === 'string' ? value.generation.remoteStage as GenerationStage : undefined,
+        progressMilestones: isGenerationProgressMilestoneHistory(value.generation.progressMilestones)
+          ? value.generation.progressMilestones as GenerationProgressMilestone[]
+          : undefined,
         errorMessage: typeof value.generation.errorMessage === 'string' ? value.generation.errorMessage : undefined,
       },
       dirty: value.dirty,
@@ -642,6 +662,58 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         get().logIssue('生成任务响应与当前草稿或任务不匹配。');
         return;
       }
+      if (
+        snapshot.status === 'succeeded'
+        && !isGenerationResultForSelectedPhotoIds(snapshot.result, current.selectedPhotoIds)
+      ) {
+        applyGenerationFailure(draftId, round, {
+          status: 'failed',
+          stage: 'failed',
+          message: '生成结果结构无效，请重新生成。',
+        });
+        get().logIssue('生成任务结果没有按照片顺序生成一图一正文。');
+        return;
+      }
+      const sameJob = current.generation.remoteJobId === snapshot.jobId;
+      const milestoneOrder: GenerationProgressMilestone['milestoneId'][] = [
+        'queued',
+        'photo-processing-started',
+        'photos-ready',
+        'provider-submitted',
+        'provider-response-received',
+        'result-validated',
+        'completed',
+      ];
+      const milestoneById = new Map<GenerationProgressMilestone['milestoneId'], GenerationProgressMilestone>();
+      if (sameJob) {
+        current.generation.progressMilestones?.forEach(milestone => milestoneById.set(milestone.milestoneId, milestone));
+      }
+      snapshot.progressMilestones?.forEach(milestone => {
+        const existing = milestoneById.get(milestone.milestoneId);
+        if (!existing || milestone.reachedAt < existing.reachedAt) {
+          milestoneById.set(milestone.milestoneId, milestone);
+        }
+      });
+      const progressMilestones = milestoneOrder
+        .map(milestoneId => milestoneById.get(milestoneId))
+        .filter((milestone): milestone is GenerationProgressMilestone => Boolean(milestone));
+      const snapshotProgress = snapshot.progressPercent ?? fallbackProgressByStage[snapshot.stage];
+      if (
+        snapshot.status === 'failed'
+        || snapshot.status === 'cancelled'
+        || current.generation.remoteStage !== snapshot.stage
+        || current.generation.progress < snapshotProgress
+      ) {
+        logDevDiagnostic(snapshot.status === 'failed' ? 'warn' : 'info', 'generation.job.snapshot', {
+          status: snapshot.status,
+          phase: snapshot.stage,
+          progressPercent: snapshotProgress,
+          attempt: snapshot.attemptCount ?? 0,
+          attemptLimit: snapshot.maxAttempts ?? 0,
+          outcome: snapshot.errorCode ?? 'none',
+          retryable: snapshot.retryable ?? false,
+        });
+      }
       mutateDraft(draftId, draft => {
         if (draft.generation.round !== round) return draft;
         if (draft.generation.status === 'idle' || draft.generation.status === 'failed' || draft.generation.status === 'cancelled' || draft.generation.status === 'complete') {
@@ -658,6 +730,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               progress: Math.max(draft.generation.progress, Math.min(99, snapshot.progressPercent ?? fallbackProgressByStage[snapshot.stage])),
               remoteJobId: snapshot.jobId,
               remoteStage: snapshot.stage,
+              progressMilestones,
               errorMessage: snapshot.errorMessage ?? (snapshot.status === 'failed' ? '生成失败，请稍后重试。' : '本次生成已取消。'),
             },
           };
@@ -675,6 +748,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
                 progress: Math.max(draft.generation.progress, 99),
                 remoteJobId: snapshot.jobId,
                 remoteStage: 'failed',
+                progressMilestones,
                 errorMessage: '生成结果结构无效，请重新生成。',
               },
             };
@@ -689,6 +763,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               status: 'complete',
               remoteJobId: snapshot.jobId,
               remoteStage: 'completed',
+              progressMilestones,
             },
             dirty: true,
           };
@@ -711,6 +786,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             progress: Math.max(draft.generation.progress, Math.min(99, snapshot.progressPercent ?? fallbackProgressByStage[snapshot.stage])),
             remoteJobId: snapshot.jobId,
             remoteStage: snapshot.stage,
+            progressMilestones,
             errorMessage: undefined,
           },
         };
@@ -749,32 +825,52 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
 
     const syncDraftToRemote = async (draft: DiaryDraft) => {
       const repository = resolved.adapters.diaryRepository;
-      if (!repository) return;
-        try {
-          const result = await repository.createDraft({
-            id: draft.id,
-            sourceDiaryId: draft.sourceDiaryId,
-            type: draft.diary.type,
-            characterId: draft.diary.characterId,
-            selectedPhotoIds: draft.selectedPhotoIds,
-            privacy: draft.diary.privacy,
-            version: draft.generation.round,
-          });
-          if (!result.ok) get().logIssue(`草稿同步失败：${result.error.message}`);
-        } catch (error) {
-          get().logIssue(`草稿同步失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      if (!repository) return false;
+      try {
+        const result = await repository.createDraft({
+          id: draft.id,
+          sourceDiaryId: draft.sourceDiaryId,
+          type: draft.diary.type,
+          characterId: draft.diary.characterId,
+          selectedPhotoIds: draft.selectedPhotoIds,
+          privacy: draft.diary.privacy,
+          version: draft.generation.round,
+        });
+        if (!result.ok) {
+          get().logIssue(`草稿同步失败：${result.error.message}`);
+          return false;
         }
+        return true;
+      } catch (error) {
+        get().logIssue(`草稿同步失败：${error instanceof Error ? error.message : 'unknown error'}`);
+        return false;
+      }
     };
 
     const syncGenerationToRemote = async (draftId: string, round: number) => {
       const repository = resolved.adapters.diaryRepository;
       if (!repository) return;
+      let photoUploads: GenerationPhotoUpload[] = [];
       try {
+        const draft = get().drafts[draftId];
+        if (!draft || draft.generation.round !== round || draft.generation.status !== 'running') return;
+        const currentDraft = draft;
+        try {
+          photoUploads = await resolved.diaryPhotoUploadPreparer(currentDraft.selectedPhotoIds, get().photos);
+        } catch (error) {
+          applyGenerationFailure(draftId, round, {
+            status: 'failed',
+            stage: 'failed',
+            message: error instanceof Error ? error.message : '所选照片暂时无法处理，请返回相册重新选择。',
+          });
+          get().logIssue('生成任务创建失败：所选照片无法读取或上传。');
+          return;
+        }
         const result = await repository.createGenerationJob({
           draftId,
           draftVersion: round,
           idempotencyKey: `${draftId}-round-${round}`,
-        });
+        }, { timeoutMs: 120_000 }, photoUploads);
         if (!result.ok) {
           if (result.error.code === 'not_found') {
             applyGenerationFailure(draftId, round, {
@@ -803,6 +899,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             get().logIssue(`生成任务创建失败：${result.error.message}`);
             return;
           }
+          if (result.error.code === 'asset_unreadable') {
+            applyGenerationFailure(draftId, round, {
+              status: 'failed',
+              stage: 'failed',
+              message: '照片读取失败，请返回相册重新选择后重试。',
+            });
+            get().logIssue(`生成任务创建失败：${result.error.message}`);
+            return;
+          }
           applyGenerationFailure(draftId, round, {
             status: 'failed',
             stage: 'failed',
@@ -824,6 +929,8 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           message: '生成启动失败，请检查网络后重试。',
         });
         get().logIssue(`生成任务创建失败：${error instanceof Error ? error.message : 'unknown error'}`);
+      } finally {
+        await cleanupDiaryPhotoUploads(photoUploads);
       }
     };
 
@@ -856,11 +963,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         content: block.content,
         selectedPhotoIds: draft.selectedPhotoIds,
         photoIds: block.photoIds ?? [],
+        contextBlocks: getRewriteContextBlocks(draft, block.id),
       });
     };
 
     const syncRewriteToRemote = async (
-      input: RewriteBlockRequestContract & { requestId: number; fingerprint: string },
+      input: RewriteBlockRequestContract & {
+        requestId: number;
+        fingerprint: string;
+      },
     ) => {
       const repository = resolved.adapters.diaryRepository;
       const key = rewriteRequestKey(input.draftId, input.blockId);
@@ -868,18 +979,23 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         clearPendingRewriteRequest(input.draftId, input.blockId);
         return;
       }
-      const request: RewriteBlockRequestContract = {
-        draftId: input.draftId,
-        blockId: input.blockId,
-        draftVersion: input.draftVersion,
-        characterId: input.characterId,
-        blockType: input.blockType,
-        content: input.content,
-        selectedPhotoIds: input.selectedPhotoIds,
-        photoIds: input.photoIds,
-      };
+      let photoUploads: GenerationPhotoUpload[] = [];
       try {
-        const result = await repository.rewriteBlock(request);
+        photoUploads = await resolved.diaryPhotoUploadPreparer(input.photoIds ?? [], get().photos);
+        const request: RewriteBlockRequestContract = {
+          draftId: input.draftId,
+          blockId: input.blockId,
+          draftVersion: input.draftVersion,
+          characterId: input.characterId,
+          blockType: input.blockType,
+          content: input.content,
+          selectedPhotoIds: input.selectedPhotoIds,
+          photoIds: input.photoIds ?? [],
+          contextBlocks: input.contextBlocks,
+        };
+        const result = await repository.rewriteBlock(request, {
+          timeoutMs: PROVIDER_REQUEST_CLIENT_TIMEOUT_MS,
+        }, photoUploads);
         if (!result.ok) {
           if (pendingRewriteRequestIds.get(key) === input.requestId) {
             clearPendingRewriteRequest(input.draftId, input.blockId);
@@ -918,18 +1034,25 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           clearPendingRewriteRequest(input.draftId, input.blockId);
           get().logIssue(`段落重写失败：${error instanceof Error ? error.message : 'unknown error'}`);
         }
+      } finally {
+        await cleanupDiaryPhotoUploads(photoUploads);
       }
     };
 
-    const mutateDraft = (draftId: string, transform: (draft: DiaryDraft) => DiaryDraft) => {
+    const mutateDraft = (
+      draftId: string,
+      transform: (draft: DiaryDraft) => DiaryDraft,
+      options?: { syncRemote?: boolean },
+    ) => {
       const draft = get().drafts[draftId];
-      if (!draft || draft.savedDiaryId) return;
+      if (!draft || draft.savedDiaryId) return undefined;
       const transformedDraft = transform(draft);
-      if (transformedDraft === draft) return;
+      if (transformedDraft === draft) return draft;
       const nextDraft = { ...transformedDraft, editRevision: (draft.editRevision ?? 0) + 1 };
       set(state => ({ drafts: { ...state.drafts, [draftId]: nextDraft } }));
       persistDraftSnapshotInBackground();
-      void syncDraftToRemote(nextDraft);
+      if (options?.syncRemote !== false) void syncDraftToRemote(nextDraft);
+      return nextDraft;
     };
 
     const rewriteRequestKey = (draftId: string, blockId: string) =>
@@ -939,6 +1062,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       const key = rewriteRequestKey(draftId, blockId);
       pendingRewriteRequestIds.delete(key);
       pendingRewriteFingerprints.delete(key);
+      set(state => state.rewritingDraftBlockKeys.includes(key)
+        ? { rewritingDraftBlockKeys: state.rewritingDraftBlockKeys.filter(item => item !== key) }
+        : state);
     };
 
     const clearPendingRewriteRequests = (draftId: string) => {
@@ -949,6 +1075,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           pendingRewriteFingerprints.delete(key);
         }
       }
+      set(state => state.rewritingDraftBlockKeys.some(key => key.startsWith(prefix))
+        ? { rewritingDraftBlockKeys: state.rewritingDraftBlockKeys.filter(key => !key.startsWith(prefix)) }
+        : state);
     };
 
     const replaceDraftBlockContent = (
@@ -1065,24 +1194,31 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         text: result.text,
       };
       set(state => {
-        if (state.chatMessages.some(message => message.role === 'assistant' && message.requestId === requestId)) {
+        const chatMessagesWithoutStatus = state.chatMessages.filter(message =>
+          !(message.role === 'assistant'
+            && message.requestId === requestId
+            && (message.source === 'pending' || message.source === 'failed')),
+        );
+        if (chatMessagesWithoutStatus.some(message => message.role === 'assistant' && message.requestId === requestId)) {
           return {
+            chatMessages: chatMessagesWithoutStatus,
             chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
               ? { ...item, status: 'completed', source: result.source, providerRequestId: result.providerRequestId }
               : item),
           };
         }
 
-        const userIndex = state.chatMessages.findIndex(message => message.id === request.userMessageId);
+        const userIndex = chatMessagesWithoutStatus.findIndex(message => message.id === request.userMessageId);
         if (userIndex < 0) {
           return {
+            chatMessages: chatMessagesWithoutStatus,
             chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
               ? { ...item, status: 'stale' }
               : item),
           };
         }
 
-        const chatMessages = [...state.chatMessages];
+        const chatMessages = [...chatMessagesWithoutStatus];
         chatMessages.splice(userIndex + 1, 0, assistantMessage);
         return {
           chatMessages,
@@ -1093,16 +1229,212 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       });
     };
 
-    const failChatReply = (requestId: string, attempt: number, _error: unknown) => {
+    const appendChatReplyDelta = (requestId: string, attempt: number, delta: string) => {
+      if (!delta) return;
+      const request = get().chatTurnRequests.find(item => item.id === requestId);
+      if (!request || request.attempt !== attempt || request.status !== 'pending'
+        || get().chatConversationId !== request.conversationId) return;
+      set(state => ({
+        chatMessages: state.chatMessages.map(message =>
+          message.role === 'assistant'
+          && message.requestId === requestId
+          && message.source === 'pending'
+            ? { ...message, text: message.text + delta }
+            : message,
+        ),
+      }));
+    };
+
+    const failChatReply = (requestId: string, attempt: number, error: unknown) => {
       const request = get().chatTurnRequests.find(item => item.id === requestId);
       if (!request || request.attempt !== attempt || request.status !== 'pending') return;
-      const message = 'provider_failed';
-      set(state => ({
-        chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
-          ? { ...item, status: 'failed', error: message }
-          : item),
-        issueLog: [...state.issueLog, `聊天回复失败：${message}`],
-      }));
+      const code = error instanceof PetChatRepositoryError ? error.code : 'provider_failed';
+      const blocked = code === 'out_of_scope' || code === 'unsafe_request' || code === 'chat_busy';
+      const text = code === 'out_of_scope'
+        ? '小橘主要陪你聊日常、心情和旅行回忆，暂不提供代码、小说或商业内容创作。'
+        : code === 'unsafe_request'
+          ? '这个请求可能带来伤害，我不能提供相关方法。如果你正遇到困难，我可以陪你聊聊，也请联系身边可信任的人。'
+          : code === 'chat_busy'
+            ? '小橘正在回复上一条消息，等这次回复完成后再继续吧。'
+            : code === 'timeout'
+              ? '小橘回复超时了，点这里重试。'
+              : '小橘刚刚没有连上，点这里重试。';
+      set(state => {
+        const statusMessageIndex = state.chatMessages.findIndex(message =>
+          message.role === 'assistant'
+          && message.requestId === requestId
+          && (message.source === 'pending' || message.source === 'failed'),
+        );
+        const chatMessages = [...state.chatMessages];
+        const failedMessage: ChatMessage = {
+          id: `chat-status-${requestId}`,
+          conversationId: request.conversationId,
+          requestId,
+          role: 'assistant',
+          source: blocked ? 'blocked' : 'failed',
+          text,
+        };
+        if (statusMessageIndex >= 0) {
+          chatMessages[statusMessageIndex] = failedMessage;
+        } else {
+          const userIndex = chatMessages.findIndex(message => message.id === request.userMessageId);
+          if (userIndex >= 0) chatMessages.splice(userIndex + 1, 0, failedMessage);
+        }
+        return {
+          chatMessages,
+          chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
+            ? { ...item, status: blocked ? 'blocked' : 'failed', error: code }
+            : item),
+          issueLog: blocked ? state.issueLog : [...state.issueLog, `聊天回复失败：${code}`],
+        };
+      });
+    };
+
+    const applyPetChatConversation = (conversation: PetChatConversation) => {
+      if (get().chatConversationId !== conversation.id) return false;
+      const current = get();
+      const serverRequestIds = new Set(conversation.turns.map(turn => turn.requestId));
+      const currentConversationRequests = current.chatTurnRequests.filter(
+        request => request.conversationId === conversation.id,
+      );
+      const currentRequestIds = new Set(currentConversationRequests.map(request => request.id));
+      const localOnlyRequests = currentConversationRequests.filter(request => !serverRequestIds.has(request.id));
+      const requestOrder = currentConversationRequests.map(request => request.id);
+      for (const turn of conversation.turns) {
+        if (!currentRequestIds.has(turn.requestId)) requestOrder.push(turn.requestId);
+      }
+      const serverMessagesByRequest = new Map<string, typeof conversation.messages>();
+      for (const message of conversation.messages) {
+        const messages = serverMessagesByRequest.get(message.requestId) ?? [];
+        messages.push(message);
+        serverMessagesByRequest.set(message.requestId, messages);
+      }
+      const turnsByRequest = new Map(conversation.turns.map(turn => [turn.requestId, turn]));
+      const chatMessages: ChatMessage[] = current.chatMessages.filter(message => message.source === 'welcome');
+      for (const requestId of requestOrder) {
+        const turn = turnsByRequest.get(requestId);
+        const serverMessages = serverMessagesByRequest.get(requestId);
+        if (serverMessages) {
+          chatMessages.push(...serverMessages.map(message => ({
+            id: message.id,
+            conversationId: message.conversationId,
+            requestId: message.requestId,
+            providerRequestId: message.providerRequestId,
+            role: message.role,
+            source: message.source,
+            text: message.text,
+          })));
+        } else {
+          chatMessages.push(...current.chatMessages.filter(message =>
+            message.conversationId === conversation.id && message.requestId === requestId,
+          ));
+        }
+        if (!turn) continue;
+        const userMessage = serverMessages?.find(message => message.role === 'user');
+        if (!userMessage) continue;
+        if (turn.status !== 'pending' && turn.status !== 'failed') continue;
+        chatMessages.push({
+          id: `chat-status-${turn.requestId}`,
+          conversationId: conversation.id,
+          requestId: turn.requestId,
+          role: 'assistant',
+          source: turn.status,
+          text: turn.status === 'pending'
+            ? ''
+            : turn.failureCode === 'timeout'
+              ? '小橘回复超时了，点这里重试。'
+              : '小橘刚刚没有连上，点这里重试。',
+        });
+      }
+      set({
+        chatMessages,
+        chatConversationId: conversation.id,
+        chatTurnRequests: [
+          ...requestOrder.map(requestId => {
+            const turn = turnsByRequest.get(requestId);
+            if (turn) {
+              return {
+                id: turn.requestId,
+                conversationId: conversation.id,
+                userMessageId: turn.userMessageId,
+                attempt: turn.attempt,
+                status: turn.status,
+                source: turn.source,
+                providerRequestId: turn.providerRequestId,
+                error: turn.failureCode,
+              } satisfies ChatTurnRequest;
+            }
+            return localOnlyRequests.find(request => request.id === requestId)!;
+          }),
+        ],
+      });
+      return true;
+    };
+
+    const requestPersistedChatReply = async (requestId: string, retry: boolean) => {
+      const chatRequest = get().chatTurnRequests.find(item => item.id === requestId);
+      const userMessage = chatRequest
+        ? get().chatMessages.find(item => item.id === chatRequest.userMessageId)
+        : undefined;
+      const repository = resolved.adapters.petChatRepository;
+      if (!chatRequest || !userMessage || !repository) return;
+
+      let attempt = chatRequest.attempt;
+      try {
+        let conversation: PetChatConversation | undefined;
+        if (retry) {
+          try {
+            conversation = await repository.getConversation(chatRequest.conversationId);
+          } catch (error) {
+            if (!(error instanceof PetChatRepositoryError) || error.code !== 'not_found') throw error;
+          }
+        }
+
+        if (!conversation) {
+          conversation = await repository.beginTurn({
+            conversationId: chatRequest.conversationId,
+            requestId,
+            userMessageId: chatRequest.userMessageId,
+            text: userMessage.text,
+          });
+        } else {
+          let serverTurn = conversation.turns.find(item => item.requestId === requestId);
+          if (!serverTurn) {
+            conversation = await repository.beginTurn({
+              conversationId: chatRequest.conversationId,
+              requestId,
+              userMessageId: chatRequest.userMessageId,
+              text: userMessage.text,
+            });
+            serverTurn = conversation.turns.find(item => item.requestId === requestId);
+          }
+          if (!serverTurn) throw new PetChatRepositoryError('provider_failed', '聊天请求状态缺失。', false);
+          if (serverTurn.status === 'failed') {
+            conversation = await repository.retryTurn({
+              conversationId: chatRequest.conversationId,
+              requestId,
+              nextAttempt: serverTurn.attempt + 1,
+            });
+          } else if (serverTurn.status === 'completed') {
+            applyPetChatConversation(conversation);
+            return;
+          }
+        }
+
+        if (!applyPetChatConversation(conversation)) return;
+        let serverTurn = conversation.turns.find(item => item.requestId === requestId);
+        if (!serverTurn) throw new PetChatRepositoryError('provider_failed', '聊天请求状态缺失。', false);
+        if (serverTurn.status !== 'pending') return;
+        attempt = serverTurn.attempt;
+        const result = await repository.generateReply({
+          conversationId: chatRequest.conversationId,
+          requestId,
+          attempt,
+        }, undefined, delta => appendChatReplyDelta(requestId, attempt, delta));
+        applyPetChatConversation(result);
+      } catch (error) {
+        failChatReply(requestId, get().chatTurnRequests.find(item => item.id === requestId)?.attempt ?? attempt, error);
+      }
     };
 
     const receiveChatReply = (requestId: string, attempt: number, value: unknown) => {
@@ -1123,12 +1455,16 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       });
     };
 
-    const requestChatReply = (requestId: string) => {
+    const requestChatReply = (requestId: string, retry = false) => {
       const chatRequest = get().chatTurnRequests.find(item => item.id === requestId);
       const userMessage = chatRequest
         ? get().chatMessages.find(item => item.id === chatRequest.userMessageId)
         : undefined;
       if (!chatRequest || !userMessage || chatRequest.status !== 'pending') return;
+      if (resolved.adapters.petChatRepository) {
+        void requestPersistedChatReply(requestId, retry);
+        return;
+      }
 
       const attempt = chatRequest.attempt;
       try {
@@ -1166,11 +1502,11 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       diaries: resolved.diaries.map(cloneDiary),
       issueLog: [],
       drafts: {},
-      chatMessages: [{ id: 'chat-welcome', role: 'assistant', source: 'welcome', text: '嘿，今天过得怎么样？\n我一直在这里，想听听你的小故事。' }],
+      chatMessages: [],
       chatConversationId: undefined,
       chatTurnRequests: [],
       likedDiscoveryIds: [],
-      materialPhotoIds: resolved.photos.slice(0, 6).map(photo => photo.id),
+      materialPhotoIds: [],
       aiImageGenerationRequests: [],
       insightReportGeneration: { status: 'idle' },
       correctedAnchors: {},
@@ -1179,6 +1515,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       hydratedDrafts: false,
       hydratedMemories: false,
       savingDraftIds: [],
+      rewritingDraftBlockKeys: [],
       memoriesSourceItems: resolved.adapters.memoriesRepository ? [] : resolved.diaries.map(cloneDiary),
       memoriesItems: [],
       memoriesTotal: 0,
@@ -1195,9 +1532,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       beginCreation: () => {
         const id = resolved.createId('draft');
         const photoIds: string[] = [];
-        const diary = resolved.diaries[0]
-          ? cloneDiary(resolved.diaries[0])
-          : createBlankDiary(resolved.now(), initialCharacter);
+        const diary = createBlankDiary(resolved.now(), initialCharacter);
         const people = getPeopleForPhotos(photoIds, get().photos);
         const draft: DiaryDraft = {
           id,
@@ -1296,6 +1631,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               status: 'idle',
               remoteJobId: undefined,
               remoteStage: undefined,
+              progressMilestones: undefined,
               errorMessage: undefined,
             },
           };
@@ -1317,11 +1653,47 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               status: 'idle',
               remoteJobId: undefined,
               remoteStage: undefined,
+              progressMilestones: undefined,
               errorMessage: undefined,
             } : draft.generation,
           };
         });
         if (get().activeDraftId === id) set({ selectedCharacterId: characterId });
+      },
+      restartGenerationWithCharacter: async (id, characterId) => {
+        if (!canSelectCharacterId(characterId)) return false;
+        const current = get().drafts[id];
+        if (!current || current.savedDiaryId) return false;
+        if (current.diary.characterId === characterId) return true;
+        const expectedRevision = current.editRevision ?? 0;
+        const updatedDraft: DiaryDraft = {
+          ...current,
+          editRevision: expectedRevision + 1,
+          dirty: true,
+          diary: { ...current.diary, characterId, status: 'draft' },
+          generation: {
+            ...current.generation,
+            progress: 0,
+            status: 'idle',
+            remoteJobId: undefined,
+            remoteStage: undefined,
+            progressMilestones: undefined,
+            errorMessage: undefined,
+          },
+        };
+        if (!await syncDraftToRemote(updatedDraft)) return false;
+
+        const latest = get().drafts[id];
+        if (!latest || (latest.editRevision ?? 0) !== expectedRevision) {
+          if (latest) await syncDraftToRemote(latest);
+          return false;
+        }
+        set(state => ({
+          drafts: { ...state.drafts, [id]: updatedDraft },
+          ...(state.activeDraftId === id ? { selectedCharacterId: characterId } : {}),
+        }));
+        persistDraftSnapshotInBackground();
+        return true;
       },
       setDraftPersonName: (id, personId, name) => mutateDraft(id, draft => {
         const old = draft.people.find(person => person.id === personId);
@@ -1354,7 +1726,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       setDraftBlockPhotos: (id, blockId, incoming) => mutateDraft(id, draft => {
         if (!draft.diary.blocks.some(block => block.id === blockId && block.type !== 'photo')) return draft;
         const photos = get().photos;
-        const photoIds = sanitizePhotoIds(incoming, photos);
+        const photoIds = sanitizePhotoIds(incoming, photos).slice(0, 1);
         const all = [...new Set([...draft.selectedPhotoIds, ...photoIds])];
         const people = getPeopleForPhotos(all, photos, draft.people);
         const target = draft.diary.blocks.find(block => block.id === blockId);
@@ -1382,6 +1754,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const requestId = nextRewriteRequestId++;
         pendingRewriteRequestIds.set(key, requestId);
         pendingRewriteFingerprints.set(key, fingerprint);
+        set(state => state.rewritingDraftBlockKeys.includes(key)
+          ? state
+          : { rewritingDraftBlockKeys: [...state.rewritingDraftBlockKeys, key] });
         void syncRewriteToRemote({
           requestId,
           fingerprint,
@@ -1392,7 +1767,8 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           blockType: block.type,
           content: sourceContent,
           selectedPhotoIds: draft.selectedPhotoIds,
-          photoIds: 'photoIds' in block ? block.photoIds ?? [] : undefined,
+          photoIds: 'photoIds' in block ? block.photoIds ?? [] : [],
+          contextBlocks: getRewriteContextBlocks(draft, block.id),
         });
       },
       startGeneration: id => {
@@ -1412,6 +1788,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             status: 'running',
             remoteJobId: undefined,
             remoteStage: 'queued',
+            progressMilestones: undefined,
             errorMessage: undefined,
           },
         }));
@@ -1427,6 +1804,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         },
       }),
       finishGeneration: (id, round) => mutateDraft(id, draft => {
+        if (!process.env.JEST_WORKER_ID) return draft;
         if (draft.generation.round !== round || draft.generation.status !== 'running') return draft;
         const diary = buildGeneratedDiary(draft);
         return {
@@ -1458,6 +1836,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             status: 'idle',
             remoteJobId: undefined,
             remoteStage: undefined,
+            progressMilestones: undefined,
             errorMessage: undefined,
           },
         });
@@ -1581,10 +1960,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           version: savedVersion,
         }, sanitizePhotoIds(draft.selectedPhotoIds, photos)));
         const destination: 'detail' | 'complete' = draft.sourceDiaryId ? 'detail' : 'complete';
-        const finishLocalSave = (savedDiaryId: string, savedVersion: number) => {
+        const finishLocalSave = (savedDiaryId: string, savedVersion: number, publishedDate?: string) => {
+          const effectivePublishedDate = publishedDate
+            ?? (draft.sourceDiaryId
+              ? draft.diary.date
+              : new Date(resolved.now()).toISOString().slice(0, 10).replace(/-/g, '.'));
           const diary = cloneDiary({
             ...normalizedDiary,
             id: savedDiaryId,
+            date: effectivePublishedDate,
             version: savedVersion,
           });
           clearPendingRewriteRequests(id);
@@ -1645,8 +2029,18 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
 
         set(state => ({ savingDraftIds: [...new Set([...state.savingDraftIds, id])] }));
         const idempotencyKey = `${draft.id}-save-${draft.sourceDiaryId ?? 'new'}-${sourceDiaryVersion ?? 0}-${draft.generation.round}-${draft.editRevision ?? 0}`;
+        const locallyReadablePhotoIds = normalizedDiary.photoIds.filter(photoId => {
+          const photo = photos.find(item => item.id === photoId);
+          return Boolean(photo && /^(file|content):\/\//i.test(photo.localUri ?? photo.uri ?? ''));
+        });
+        let photoUploads: GenerationPhotoUpload[] = [];
+        let saveRequestStarted = false;
         try {
-          const result = await repository.saveDiary({
+          if (locallyReadablePhotoIds.length) {
+            photoUploads = await resolved.diaryPhotoUploadPreparer(locallyReadablePhotoIds, photos);
+          }
+          saveRequestStarted = true;
+          const saveInput = {
             id: targetDiaryId,
             draftId: draft.id,
             sourceDiaryId: draft.sourceDiaryId,
@@ -1670,9 +2064,12 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               posterPhotoIds: normalizedDiary.posterPhotoIds,
               people: normalizedDiary.people,
             },
-          });
+          };
+          const result = photoUploads.length
+            ? await repository.saveDiary(saveInput, undefined, photoUploads)
+            : await repository.saveDiary(saveInput);
           if (result.ok) {
-            return finishLocalSave(result.data.id ?? result.data.diaryId, result.data.savedVersion);
+            return finishLocalSave(result.data.id ?? result.data.diaryId, result.data.savedVersion, result.data.date);
           }
           if (result.error.code === 'version_conflict') {
             get().logIssue('日记保存失败：原日记已有新版本，请重新进入编辑后再处理。');
@@ -1694,7 +2091,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             try {
               const recovered = await repository.getSaveResult(idempotencyKey);
               if (recovered.ok) {
-                return finishLocalSave(recovered.data.id ?? recovered.data.diaryId, recovered.data.savedVersion);
+                return finishLocalSave(recovered.data.id ?? recovered.data.diaryId, recovered.data.savedVersion, recovered.data.date);
               }
             } catch {
               // Keep the working draft; the same idempotency key remains available for a later retry.
@@ -1707,13 +2104,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             message: result.error.message,
           };
         } catch (error) {
-          try {
-            const recovered = await repository.getSaveResult(idempotencyKey);
-            if (recovered.ok) {
-              return finishLocalSave(recovered.data.id ?? recovered.data.diaryId, recovered.data.savedVersion);
+          if (saveRequestStarted) {
+            try {
+              const recovered = await repository.getSaveResult(idempotencyKey);
+              if (recovered.ok) {
+                return finishLocalSave(recovered.data.id ?? recovered.data.diaryId, recovered.data.savedVersion, recovered.data.date);
+              }
+            } catch (recoveryError) {
+              void recoveryError;
             }
-          } catch (recoveryError) {
-            void recoveryError;
           }
           const message = error instanceof Error ? error.message : 'unknown error';
           get().logIssue(`日记保存失败：${message}`);
@@ -1723,6 +2122,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             message,
           };
         } finally {
+          await cleanupDiaryPhotoUploads(photoUploads);
           set(state => ({
             savingDraftIds: state.savingDraftIds.filter(draftId => draftId !== id),
           }));
@@ -1832,12 +2232,6 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         pendingVisibilityRequests.set(id, request);
         return request;
       },
-      recordShareDemo: (diaryId, mode) => {
-        const diary = get().diaries.find(item => item.id === diaryId);
-        if (!diary || (platforms.includes(mode) && diary.privacy === 'private')) return false;
-        applyShareRecord(diaryId, mode);
-        return true;
-      },
       confirmShareDelivery: ({ diaryId, mode, operationId, version }) => {
         const diary = get().diaries.find(item => item.id === diaryId);
         const currentVersion = diary?.version ?? 0;
@@ -1853,6 +2247,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const message = text.trim();
         if (!message) return;
         const state = get();
+        if (state.chatTurnRequests.some(request => request.status === 'pending')) return;
         const conversationId = state.chatConversationId ?? resolved.createId('chat-session');
         const requestId = resolved.createId('chat-request');
         const userMessageId = resolved.createId('chat');
@@ -1864,6 +2259,13 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             requestId,
             role: 'user',
             text: message,
+          }, {
+            id: `chat-status-${requestId}`,
+            conversationId,
+            requestId,
+            role: 'assistant',
+            source: 'pending',
+            text: '',
           }],
           chatTurnRequests: [...current.chatTurnRequests, {
             id: requestId,
@@ -1876,27 +2278,75 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         requestChatReply(requestId);
       },
       retryChat: requestId => {
-        const current = get().chatTurnRequests.find(item => item.id === requestId);
+        const state = get();
+        if (state.chatTurnRequests.some(item => item.status === 'pending')) return;
+        const current = state.chatTurnRequests.find(item => item.id === requestId);
         if (!current || current.status !== 'failed' || current.conversationId !== get().chatConversationId) return;
         set(state => ({
+          chatMessages: state.chatMessages.map(message =>
+            message.role === 'assistant'
+            && message.requestId === requestId
+            && message.source === 'failed'
+              ? { ...message, source: 'pending', text: '' }
+              : message,
+          ),
           chatTurnRequests: state.chatTurnRequests.map(item => item.id === requestId
             ? { ...item, attempt: item.attempt + 1, status: 'pending', error: undefined }
             : item),
         }));
-        requestChatReply(requestId);
+        requestChatReply(requestId, true);
       },
       toggleDiscoveryLike: id => set(state => ({ likedDiscoveryIds: state.likedDiscoveryIds.includes(id) ? state.likedDiscoveryIds.filter(item => item !== id) : [...state.likedDiscoveryIds, id] })),
       addMaterialPhoto: id => {
-        if (get().photos.some(photo => photo.id === id)) {
+        const state = get();
+        if (state.photos.some(photo => photo.id === id)
+          && (state.materialPhotoIds.includes(id)
+            || state.materialPhotoIds.length < MAX_MATERIAL_LIBRARY_PHOTOS)) {
           set(state => ({ materialPhotoIds: [...new Set([...state.materialPhotoIds, id])] }));
         }
       },
+      syncMaterialPhotos: photos => {
+        if (!Array.isArray(photos)
+          || photos.length > MAX_MATERIAL_LIBRARY_PHOTOS
+          || photos.some(photo =>
+            !photo
+            || typeof photo.id !== 'string'
+            || !photo.id.trim()
+            || photo.source !== 'device'
+            || !(photo.localUri ?? photo.uri)?.trim())
+          || new Set(photos.map(photo => photo.id)).size !== photos.length) {
+          return false;
+        }
+        set(state => {
+          const photosById = new Map(state.photos.map(photo => [photo.id, photo]));
+          for (const photo of photos) {
+            const current = photosById.get(photo.id);
+            photosById.set(photo.id, clonePhotoAsset(current ? { ...current, ...photo } : photo));
+          }
+          return {
+            photos: [...photosById.values()],
+            materialPhotoIds: photos.map(photo => photo.id),
+            photoCatalogVersion: state.photoCatalogVersion + (photos.length ? 1 : 0),
+          };
+        });
+        return true;
+      },
+      removeMaterialPhotos: photoIds => {
+        if (!Array.isArray(photoIds) || !photoIds.length) return;
+        const removed = new Set(photoIds);
+        set(state => ({ materialPhotoIds: state.materialPhotoIds.filter(id => !removed.has(id)) }));
+      },
       importDevicePhotosToMaterials: async photoIds => {
         if (!Array.isArray(photoIds) || photoIds.length === 0
+          || photoIds.length > MAX_MATERIAL_PHOTOS_PER_UPLOAD
           || photoIds.some(id => typeof id !== 'string' || !id.trim())) {
           return { ok: false, reason: 'invalid_input', message: '请选择有效的照片。' };
         }
         const requestedIds = [...new Set(photoIds.map(id => id.trim()))];
+        const current = get();
+        if (current.materialPhotoIds.length + requestedIds.length > MAX_MATERIAL_LIBRARY_PHOTOS) {
+          return { ok: false, reason: 'invalid_input', message: '素材库最多保存 100 张照片，请先删除部分素材。' };
+        }
         let result: DevicePhotoAssetImportResult;
         try {
           result = await resolved.devicePhotoImporter(requestedIds);
@@ -1980,6 +2430,13 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             ok: false,
             reason: 'invalid_input',
             message: '请先描述想生成的画面。',
+          });
+        }
+        if (get().materialPhotoIds.length >= MAX_MATERIAL_LIBRARY_PHOTOS) {
+          return Promise.resolve({
+            ok: false,
+            reason: 'invalid_input',
+            message: '素材库已满，请先删除部分照片。',
           });
         }
         const inflight = pendingImageGenerations.get(normalizedDescription);
@@ -2067,6 +2524,19 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             }
             if (!assetReadable) {
               throw new AIImageGenerationError('provider_failed', '生成图片不可读取');
+            }
+            if (get().materialPhotoIds.length >= MAX_MATERIAL_LIBRARY_PHOTOS) {
+              set(state => ({
+                aiImageGenerationRequests: state.aiImageGenerationRequests.map(item => item.id === requestId
+                  ? { ...item, status: 'failed', errorCode: 'invalid_input' }
+                  : item),
+              }));
+              return {
+                ok: false,
+                requestId,
+                reason: 'invalid_input',
+                message: '素材库已满，请先删除部分照片。',
+              };
             }
 
             const existingPhoto = get().photos.find(item => item.id === photo.id);
@@ -2312,12 +2782,6 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       },
       resetCreation: () => { get().beginCreation(); },
       advanceGeneration: () => set(state => ({ generationPhaseIndex: Math.min(state.generationPhaseIndex + 1, resolved.generationPhases.length - 1) })),
-      completeGeneration: () => {
-        const id = get().activeDraftId;
-        if (!id) return;
-        const round = get().startGeneration(id);
-        if (round !== undefined) get().finishGeneration(id, round);
-      },
       setCurrentDiaryId: currentDiaryId => { if (get().diaries.some(diary => diary.id === currentDiaryId)) set({ currentDiaryId }); },
       updateDiaryText: async (diaryId, content) => {
         const id = get().beginEdit(diaryId);
@@ -2471,8 +2935,11 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             contentSnapshot: item.contentSnapshot,
             contentSnapshotStatus: item.contentSnapshotStatus,
           }));
+          const diaryPhotos = await listSavedDiaryPhotoAssets(remoteDiaries.map(diary => diary.id));
           set(state => {
             const merged = [...state.diaries];
+            const photosById = new Map(state.photos.map(photo => [photo.id, photo]));
+            diaryPhotos.forEach(photo => photosById.set(photo.id, clonePhotoAsset(photo)));
             for (const remoteDiary of remoteDiaries) {
               const index = merged.findIndex(item => item.id === remoteDiary.id);
               if (index >= 0) merged[index] = remoteDiary;
@@ -2480,6 +2947,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             }
             return {
               diaries: merged,
+              ...(diaryPhotos.length ? {
+                photos: [...photosById.values()],
+                photoCatalogVersion: state.photoCatalogVersion + 1,
+              } : {}),
               hydratedMemories: true,
               memoriesSourceItems: remoteDiaries,
               memoriesItems: state.memoriesStatus === 'idle' ? remoteDiaries : state.memoriesItems,
@@ -2510,6 +2981,12 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           }
 
           const diary = normalizeDiaryPhotos(result.data, result.data.photoIds);
+          let diaryPhotos: Awaited<ReturnType<typeof listSavedDiaryPhotoAssets>> = [];
+          try {
+            diaryPhotos = await listSavedDiaryPhotoAssets([diaryId]);
+          } catch (error) {
+            get().logIssue(`日记照片副本读取失败：${error instanceof Error ? error.message : 'unknown error'}`);
+          }
           set(state => {
             const mergeItems = (items: DiaryItem[]) => {
               const next = [...items];
@@ -2518,10 +2995,16 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               else next.unshift(diary);
               return next;
             };
+            const photosById = new Map(state.photos.map(photo => [photo.id, photo]));
+            diaryPhotos.forEach(photo => photosById.set(photo.id, clonePhotoAsset(photo)));
             return {
               diaries: mergeItems(state.diaries),
               memoriesSourceItems: mergeItems(state.memoriesSourceItems),
               memoriesItems: state.memoriesStatus === 'ready' ? mergeItems(state.memoriesItems) : state.memoriesItems,
+              ...(diaryPhotos.length ? {
+                photos: [...photosById.values()],
+                photoCatalogVersion: state.photoCatalogVersion + 1,
+              } : {}),
             };
           });
           return { ok: true as const, diary };
@@ -2729,7 +3212,6 @@ export function createAppSelectors(store: AppStoreHook, deps: AppStoreDeps = cre
     diaryTypes: resolved.diaryTypeOptions,
     characters: resolved.characters,
     availableCharacters,
-    companions: resolved.companions,
     get photos() { return store.getState().photos; },
     get historyGroups() { return getHistoryGroups(store.getState().diaries); },
     generationPhases: resolved.generationPhases,

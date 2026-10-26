@@ -136,4 +136,12 @@ describe('Profile screen monthly entry', () => {
 
     expect(queryByLabelText('打开2026年1月月度装订')).toBeNull();
   });
+
+  test('does not display a seeded account name or membership badge', async () => {
+    const { getByText, queryByText } = await render(<ProfileScreen />);
+
+    expect(getByText('个人主页')).toBeTruthy();
+    expect(queryByText('橘子的日记本')).toBeNull();
+    expect(queryByText('VIP')).toBeNull();
+  });
 });

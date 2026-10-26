@@ -137,7 +137,7 @@ describe('Character screen', () => {
     expect(mockRouter.push).toHaveBeenCalledTimes(1);
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/permission/photos',
-      params: { draftId: drafts[0]?.id },
+      params: { draftId: drafts[0]?.id, characterSelected: 'true' },
     });
     screen.unmount();
   });

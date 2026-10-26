@@ -1,8 +1,8 @@
 import React from 'react';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { render, waitFor } from '@testing-library/react-native';
 import PostcardScreen from '../postcard';
-import { art } from '../../src/theme/assets';
 import { createTestStore } from '../../src/test-utils/create-test-store';
+import { cityStampCatalogCities } from '../../src/components/library/city-stamp-catalog';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryPhoto } from '../../src/types/diary';
@@ -35,6 +35,20 @@ jest.mock('@expo/vector-icons', () => {
   const { Text } = require('react-native');
   return {
     Ionicons: ({ name }: { name: string }) => <Text>{name}</Text>,
+  };
+});
+
+jest.mock('react-native-svg', () => {
+  const React = require('react');
+  const { Text, View } = require('react-native');
+  return {
+    __esModule: true,
+    default: ({ children, ...props }: { children: React.ReactNode }) => React.createElement(View, props, children),
+    Circle: () => null,
+    Defs: () => null,
+    Path: () => null,
+    TextPath: ({ children }: { children: React.ReactNode }) => children,
+    Text: ({ children }: { children: React.ReactNode }) => React.createElement(Text, null, children),
   };
 });
 
@@ -72,7 +86,7 @@ describe('Postcard screen material assets', () => {
     useAppStore.getState().registerPhotos([buildDevicePhoto()]);
   });
 
-  test('reads a registered non-mock photo and returns to postcard choices when switched', async () => {
+  test('renders a registered device photo as the postcard image', async () => {
     const screen = await render(<PostcardScreen />);
 
     await waitFor(() => {
@@ -81,23 +95,42 @@ describe('Postcard screen material assets', () => {
         uri: 'file:///device/device-p1.jpg',
       });
     });
+  });
 
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('选择圣托里尼明信片'));
-    });
+  test('renders the selected city decoration as an SVG stamp', async () => {
+    mockDecoration = 'stampKyoto';
+    const screen = await render(<PostcardScreen />);
 
-    await waitFor(() => expect(screen.getByText(/SANTORINI/)).toBeTruthy());
-    expect(screen.getByTestId('postcard-photo').props.source).not.toEqual({
-      uri: 'file:///device/device-p1.jpg',
+    await waitFor(() => {
+      expect(screen.getByTestId('postcard-decoration')).toBeTruthy();
+      expect(screen.getByText('京都')).toBeTruthy();
     });
   });
 
-  test('renders the routed stable decoration ID on the postcard preview', async () => {
+  test('renders a city stamp from the bundled catalog ID', async () => {
+    const city = cityStampCatalogCities[0];
+    expect(city).toBeDefined();
+    if (!city) return;
+    mockDecoration = city.id;
+
+    const screen = await render(<PostcardScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('postcard-decoration')).toBeTruthy();
+      expect(screen.getByText(city.cityName)).toBeTruthy();
+      expect(screen.getByText(`${city.areaNameEn} · ${city.serial}`)).toBeTruthy();
+    });
+  });
+
+  test('shows an empty state instead of decoration-only content without a selected device photo', async () => {
     mockPhotoId = undefined;
     mockDecoration = 'stampKyoto';
 
     const screen = await render(<PostcardScreen />);
 
-    expect(screen.getByTestId('postcard-decoration').props.source).toBe(art.stampKyoto);
+    expect(screen.getByText('请选择真实照片')).toBeTruthy();
+    expect(screen.getByLabelText('前往素材库')).toBeTruthy();
+    expect(screen.queryByTestId('postcard-photo')).toBeNull();
+    expect(screen.queryByTestId('postcard-decoration')).toBeNull();
   });
 });

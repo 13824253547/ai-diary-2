@@ -105,6 +105,24 @@ describe('Library screen inspiration submission', () => {
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
+  test('submits only the written answer and not the inspiration prompt', async () => {
+    const screen = await render(<LibraryScreen />);
+
+    fireEvent.press(screen.getByText(inspirationCards[0]!));
+    await waitFor(() => expect(screen.getByLabelText('记录灵感')).toBeTruthy());
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText('记录灵感'), '今天彩票中奖了');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('和小橘聊聊'));
+    });
+
+    const userMessages = useAppStore.getState().chatMessages.filter(message => message.role === 'user');
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]?.text).toBe('今天彩票中奖了');
+    expect(mockRouter.push).toHaveBeenCalledWith('/(tabs)/pet');
+  });
+
   test('closing an unanswered inspiration keeps the conversation and diaries unchanged', async () => {
     const initialMessages = useAppStore.getState().chatMessages;
     const initialDiaries = useAppStore.getState().diaries;

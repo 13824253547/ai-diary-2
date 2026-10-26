@@ -16,10 +16,6 @@ export default function Verification() {
     const st = useAppStore.getState();
     const routes: Record<string, string> = {
       home: '/(tabs)/home',
-      complete: '/create/complete?diaryId=diary-1',
-      detail: '/diary/diary-1',
-      privacy: '/share/privacy?diaryId=diary-1',
-      share: '/share/result?diaryId=diary-1',
       library: '/library',
       pet: '/(tabs)/pet',
       memories: '/(tabs)/memories',
@@ -29,18 +25,20 @@ export default function Verification() {
       growth: '/profile/insights',
       anchors: '/profile/anchors',
       flowers: '/profile/flowers',
-      report: '/profile/report?scenario=unlocked',
+      report: '/profile/report',
       invalid: '/diary/not-found',
     };
+    const existingDiary = st.diaries.find(diary => diary.status === 'ready');
+    if (existingDiary) {
+      const diaryId = encodeURIComponent(existingDiary.id);
+      routes.complete = `/create/complete?diaryId=${diaryId}`;
+      routes.detail = `/diary/${diaryId}`;
+      routes.privacy = `/share/privacy?diaryId=${diaryId}`;
+      routes.share = `/share/result?diaryId=${diaryId}`;
+    }
 
     if (routes[scene]) {
       router.replace(routes[scene] as never);
-      return;
-    }
-
-    if (scene === 'anonymous') {
-      st.savePrivacy('diary-1', 'anonymous', ['block-1']);
-      router.replace('/share/result?diaryId=diary-1');
       return;
     }
 
@@ -51,20 +49,29 @@ export default function Verification() {
       return;
     }
 
+    if (['naming', 'edit'].includes(scene)) {
+      const draftId = st.activeDraftId;
+      const draft = draftId ? st.drafts[draftId] : undefined;
+      if (!draft || draft.diary.blocks.length === 0) {
+        const id = draftId ?? st.beginCreation();
+        router.replace({ pathname: '/album/select', params: { draftId: id } });
+        return;
+      }
+      router.replace({
+        pathname: scene === 'naming' ? '/companion/naming' : '/diary/new/edit',
+        params: { draftId: draft.id },
+      });
+      return;
+    }
+
     const id = st.beginCreation();
     if (scene === 'empty-photos') st.setDraftPhotos(id, []);
-    if (['naming', 'edit'].includes(scene)) {
-      const round = st.startGeneration(id);
-      if (round !== undefined) st.finishGeneration(id, round);
-    }
     const flow: Record<string, string> = {
       album: '/album/select',
       'empty-photos': '/album/select',
       template: '/create/template',
       character: '/create/character',
       generating: '/create/generating',
-      naming: '/companion/naming',
-      edit: '/diary/new/edit',
     };
     if (flow[scene]) {
       router.replace({ pathname: flow[scene] as never, params: { draftId: id } });

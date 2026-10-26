@@ -2,7 +2,7 @@
 
 Version: `ai-image-generation-v1`
 
-This contract defines the application-side boundary between MAT-005 and a replaceable image-generation provider. It does not define a network endpoint, a production provider, or a user-facing retention promise.
+This contract defines the versioned boundary between MAT-005 and a replaceable image-generation provider. The current production path is a device-authenticated backend endpoint; provider credentials remain server-side. It does not define a user-facing retention promise.
 
 ## Request
 
@@ -28,7 +28,7 @@ This contract defines the application-side boundary between MAT-005 and a replac
 {
   "version": "ai-image-generation-v1",
   "requestId": "image-request-1",
-  "source": "mock",
+  "source": "provider",
   "photo": {
     "id": "generated-image-request-1",
     "title": "雨后的老街",
@@ -40,12 +40,18 @@ This contract defines the application-side boundary between MAT-005 and a replac
     "source": "generated",
     "generationRequestId": "image-request-1",
     "generationPrompt": "雨后的老街",
-    "generationSource": "mock"
+    "generationSource": "provider"
   }
 }
 ```
 
-Before registration, the consumer requires the supported contract version, matching request ID and exact submitted description, a `mock` or `provider` source marker, a generated asset with matching provenance fields, and a successful independent readability check. A malformed, stale, cancelled, unreadable, or conflicting asset is not added to the material catalog.
+The device-authenticated server endpoint is `POST /api/photos/materials/ai`. In the production path it calls the configured Ark Seedream image endpoint, validates returned image bytes, persists the image through the material-photo asset service, and only then returns the asset envelope. The client constructs an authenticated content URL rather than trusting a provider-returned temporary URL.
+
+## Provider Prompt Policy
+
+The request `description` and persisted `generationPrompt` remain the user's original text. Before calling the image provider, the server wraps that text with a fixed, higher-priority style instruction: output must use realistic photography / photorealism, and must not use anime, cartoon, illustration, comics, painting, sketch, 3D render, CGI, game-art, or other non-photographic styles. The user description controls scene content but cannot override this style rule. Provider prompt policy is server-owned and is not supplied by the client.
+
+Before registration, the consumer requires the supported contract version, matching request ID and exact submitted description, a `mock` or `provider` source marker, a generated asset with matching provenance fields, and a successful independent readability check. The production UI accepts only `source: provider`. A malformed, stale, cancelled, unreadable, or conflicting asset is not added to the material catalog.
 
 ## State and failures
 
@@ -61,4 +67,4 @@ Before registration, the consumer requires the supported contract version, match
 - Q-003: final description limits and image specification.
 - Q-001/Q-015: asset retention, durable URI/storage, deletion, restart recovery, and downstream reuse scope.
 
-The provider boundary is implemented in `src/services/ai-image-generation-provider.ts`; runtime request/result validation is in `src/contracts/ai-image-generation-contract.ts`. The formal material page is not wired to this Store action, and real provider/file integration remains unconfigured.
+The Store provider boundary is implemented in `src/services/ai-image-generation-provider.ts`; the production client adapter is `src/services/http-ai-image-generation-provider.ts`. The NestJS provider and endpoint live under `backend/src/modules/ai-images/`. Server configuration requires `AI_IMAGE_PROVIDER=ark-seedream`, `AI_IMAGE_MODEL`, and either `AI_IMAGE_API_KEY` or the explicitly reusable `PET_CHAT_API_KEY`; credentials remain server-side. The current local model is `doubao-seedream-5-0-flash-260915`, with `1.5K` output size. The generated-asset provenance migration is recorded as applied in the current local database progress. One real provider-to-persistent-asset smoke succeeded on 2026-10-26; see [MAT-005 cases](../test-cases/MAT-005.md). Full UI and native Photos acceptance remains open.

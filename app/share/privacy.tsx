@@ -80,7 +80,7 @@ export default function PrivacyScreen() {
   const displayDate = diary.date.includes('–') ? diary.date.split('–').at(-1)?.replace('.', '月') ?? diary.date : diary.date.slice(5).replace('.', '月');
   return <Screen header={<TopBar title="这篇日记给谁看？" onBackPress={() => router.back()} />} contentStyle={styles.content} footer={<View style={styles.footer}><Button label={saving ? '保存中...' : '完成'} onPress={finish} disabled={saving} /></View>}>
     <View style={styles.diary}>
-      <Photo id={diary.coverPhotoId} style={styles.cover} />
+      <Photo id={diary.coverPhotoId} diaryId={diary.id} style={styles.cover} />
       <View style={styles.diaryCopy}>
         <Text numberOfLines={1} style={styles.diaryTitle}>{diary.title}</Text>
         <Text style={styles.date}>{displayDate}</Text>

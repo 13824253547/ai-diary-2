@@ -11,7 +11,7 @@ import { colors } from '../../src/theme/tokens';
 
 export default function Permission() {
   const router = useRouter();
-  const { draftId } = useLocalSearchParams<{ draftId: string }>();
+  const { draftId, characterSelected } = useLocalSearchParams<{ draftId: string; characterSelected?: string }>();
   const [open, setOpen] = useState(true);
   const [requesting, setRequesting] = useState(false);
   const requestLockRef = useRef(false);
@@ -67,7 +67,10 @@ export default function Permission() {
 
       router.replace({
         pathname: '/album/select',
-        params: { draftId: activeDraftId },
+        params: {
+          draftId: activeDraftId,
+          ...(characterSelected === 'true' ? { characterSelected } : {}),
+        },
       });
     } catch (error) {
       if (closedRef.current || requestVersion !== requestVersionRef.current) return;

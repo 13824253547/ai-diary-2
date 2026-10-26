@@ -18,7 +18,7 @@ export function DiaryPaper({ diary }: { diary: DiaryItem }) {
   return (
     <View testID={`diary-paper-${diary.id}`} style={[s.paper, nordic && s.nordic, postcard && s.postcard]}>
       <View testID={`diary-hero-frame-${diary.id}`} style={[s.heroFrame, { transform: [{ rotate: nordic ? '0deg' : '-3deg' }] }]}>
-        <Photo id={heroId} anonymous={diary.anonymous} style={s.hero} />
+        <Photo id={heroId} diaryId={diary.id} anonymous={diary.anonymous} style={s.hero} />
         {!nordic ? <Image source={art.stamp} resizeMode="contain" style={s.stamp} /> : null}
       </View>
       <Text testID={`diary-title-${diary.id}`} style={[s.title, nordic && s.nordicTitle]}>
@@ -53,7 +53,7 @@ export function DiaryPaper({ diary }: { diary: DiaryItem }) {
                   postcard && s.postcardPhotoFrame,
                 ]}
               >
-                <Photo id={photoId} anonymous={diary.anonymous} style={[s.photo, postcard && s.postcardPhoto]} />
+                <Photo id={photoId} diaryId={diary.id} anonymous={diary.anonymous} style={[s.photo, postcard && s.postcardPhoto]} />
                 {!nordic ? <Image source={art.tape} resizeMode="contain" style={s.tape} /> : null}
               </View>
             ) : null}

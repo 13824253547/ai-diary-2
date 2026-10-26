@@ -81,7 +81,7 @@ async function toDiaryPhoto(asset: MediaLibrary.Asset, album?: DevicePhotoAlbum)
   return {
     id: asset.id,
     title: buildTitle(asset),
-    location: album?.title ?? '设备相册',
+    location: '',
     emoji: '🖼',
     color: DEFAULT_PHOTO_COLOR,
     date: formatDate(asset.creationTime),

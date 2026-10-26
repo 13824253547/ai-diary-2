@@ -2,6 +2,17 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DiaryGenerationProviderError, DiaryGenerationService, type GenerationInputSnapshot, type GenerationResultRecord, type RewriteInputSnapshot, type RewriteResultRecord } from './diary-generation.service';
 import { PrismaService } from './prisma.service';
+import { GenerationPhotoInputError, TemporaryGenerationPhotoStore, type UploadedGenerationPhoto } from './temporary-generation-photo-store';
+import {
+  classifyDiaryGenerationInput,
+  getDiaryGenerationPolicyMessage,
+} from './diary-generation-policy';
+import {
+  GENERATION_PROGRESS_MILESTONE_DEFINITIONS,
+  type GenerationProgressMilestone,
+  type GenerationProgressMilestoneId,
+  readGenerationProgressMilestones,
+} from './generation-progress';
 
 export type DraftRecord = {
   id: string;
@@ -44,15 +55,22 @@ export type SaveDiaryCommandResult = {
   diaryId: string;
   draftId: string;
   savedVersion: number;
+  date: string;
+};
+
+type DiarySaveAssetHook = {
+  beforeCommit: (tx: Prisma.TransactionClient, diaryId: string) => Promise<void>;
+  rollback: () => Promise<void>;
 };
 
 type SaveErrorCode = 'not_found' | 'version_conflict' | 'invalid_input';
-type GenerationJobErrorCode = 'not_found' | 'version_conflict';
+type GenerationJobErrorCode = 'not_found' | 'version_conflict' | 'invalid_input' | 'asset_unreadable';
 type DraftInputErrorCode = 'invalid_input';
-type RewriteDraftErrorCode = 'not_found' | 'invalid_input' | 'version_conflict';
+type RewriteDraftErrorCode = 'not_found' | 'invalid_input' | 'version_conflict' | 'asset_unreadable';
 
 const SUPPORTED_DIARY_TYPES = ['travel', 'work', 'emotion'] as const;
 const CREATABLE_DIARY_TYPES = ['travel'] as const;
+const MIN_GENERATION_PHOTOS = 3;
 const SUPPORTED_CHARACTER_IDS = [
   'character-blue',
   'character-green',
@@ -249,6 +267,7 @@ export type GenerationJobRecord = {
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   stage: 'queued' | 'analyzing-photos' | 'drafting' | 'structuring' | 'completed' | 'failed' | 'cancelled';
   progressPercent?: number;
+  progressMilestones?: GenerationProgressMilestone[];
   attemptCount: number;
   maxAttempts: number;
   errorCode?: 'timeout' | 'provider_failed';
@@ -268,12 +287,40 @@ export class MemoryStoreService implements OnModuleDestroy {
   private readonly processingGenerationJobs = new Map<string, {
     controller: AbortController;
     promise: Promise<void>;
+    releaseTask: () => void;
   }>();
+  private readonly activeDiaryAiTasks = new Map<string, {
+    taskKey: string;
+    token: symbol;
+    references: number;
+  }>();
+  private rewriteTaskSequence = 0;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly diaryGenerationService: DiaryGenerationService,
+    private readonly generationPhotoStore: TemporaryGenerationPhotoStore,
   ) {}
+
+  private acquireDiaryAiTask(ownerDeviceId: string, taskKey: string) {
+    let current = this.activeDiaryAiTasks.get(ownerDeviceId);
+    if (current && current.taskKey !== taskKey) return undefined;
+    if (!current) {
+      current = { taskKey, token: Symbol(taskKey), references: 0 };
+      this.activeDiaryAiTasks.set(ownerDeviceId, current);
+    }
+    current.references += 1;
+    const token = current.token;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const active = this.activeDiaryAiTasks.get(ownerDeviceId);
+      if (active?.token !== token) return;
+      active.references -= 1;
+      if (active.references <= 0) this.activeDiaryAiTasks.delete(ownerDeviceId);
+    };
+  }
 
   async createDraft(input: Omit<DraftRecord, 'id'> & { id?: string }, ownerDeviceId: string) {
     if (!isRecord(input)
@@ -370,6 +417,7 @@ export class MemoryStoreService implements OnModuleDestroy {
   }
 
   async saveDiary(input: Omit<DiaryRecord, 'id'> & { id?: string }, ownerDeviceId: string) {
+    let publishedAt: Date | undefined;
     if (input.id) {
       const existing = await this.prisma.diary.findUnique({
         where: { id: input.id },
@@ -377,9 +425,14 @@ export class MemoryStoreService implements OnModuleDestroy {
       if (existing && existing.ownerDeviceId !== ownerDeviceId) {
         throw new PermissionDeniedError('diary does not belong to current device');
       }
+      publishedAt = existing?.createdAt;
     }
 
-    const date = this.normalizeDateInput(input.date);
+    const requestedDate = this.normalizeDateInput(input.date);
+    if (!Number.isFinite(requestedDate.getTime())) {
+      throw new SaveDiaryError('invalid_input', 'diary date is invalid');
+    }
+    publishedAt ??= new Date();
     const diary = input.id
       ? await this.prisma.diary.upsert({
           where: { id: input.id },
@@ -390,7 +443,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             title: input.title,
             summary: input.summary,
             location: input.location,
-            date,
+            date: publishedAt,
             privacy: input.privacy,
             photoIds: input.photoIds as Prisma.InputJsonValue,
             publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
@@ -402,7 +455,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             title: input.title,
             summary: input.summary,
             location: input.location,
-            date,
+            date: publishedAt,
             privacy: input.privacy,
             photoIds: input.photoIds as Prisma.InputJsonValue,
             publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
@@ -417,7 +470,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             title: input.title,
             summary: input.summary,
             location: input.location,
-            date,
+            date: publishedAt,
             privacy: input.privacy,
             photoIds: input.photoIds as Prisma.InputJsonValue,
             publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
@@ -435,7 +488,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     sourceDiaryVersion?: number;
     idempotencyKey: string;
     contentSnapshot: DiaryContentSnapshotRecord;
-  }, ownerDeviceId: string): Promise<SaveDiaryCommandResult> {
+  }, ownerDeviceId: string, assetHook?: DiarySaveAssetHook): Promise<SaveDiaryCommandResult> {
     if (!isRecord(input)
       || !isNonEmptyString(input.draftId)
       || !isNonEmptyString(input.idempotencyKey)
@@ -460,12 +513,13 @@ export class MemoryStoreService implements OnModuleDestroy {
       throw new SaveDiaryError('invalid_input', 'public block ids are invalid');
     }
     assertDiaryContentSnapshot(input.contentSnapshot, input.photoIds);
-    const date = this.normalizeDateInput(input.date);
-    if (!Number.isFinite(date.getTime())) {
+    const requestedDate = this.normalizeDateInput(input.date);
+    if (!Number.isFinite(requestedDate.getTime())) {
       throw new SaveDiaryError('invalid_input', 'diary date is invalid');
     }
 
     const sourceDiaryVersion = input.sourceDiaryVersion;
+    let publishedAt: Date | undefined;
     const existingCommand = await this.prisma.saveCommand.findUnique({
       where: {
         ownerDeviceId_idempotencyKey: {
@@ -482,6 +536,7 @@ export class MemoryStoreService implements OnModuleDestroy {
           diaryId: existingCommand.diaryId,
           draftId: existingCommand.draftId,
           savedVersion: existingCommand.savedVersion,
+          date: existingDiary.date,
         };
       }
     }
@@ -505,7 +560,9 @@ export class MemoryStoreService implements OnModuleDestroy {
       if (sourceDiary.version !== sourceDiaryVersion) {
         throw new SaveDiaryError('version_conflict', 'source diary version conflict');
       }
+      publishedAt = sourceDiary.createdAt;
     }
+    publishedAt ??= new Date();
 
     if (input.id) {
       const existingDiary = await this.prisma.diary.findUnique({
@@ -535,7 +592,7 @@ export class MemoryStoreService implements OnModuleDestroy {
               title: input.title,
               summary: input.summary,
               location: input.location,
-              date,
+              date: publishedAt,
               privacy: input.privacy,
               photoIds: input.photoIds as Prisma.InputJsonValue,
               publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
@@ -560,6 +617,7 @@ export class MemoryStoreService implements OnModuleDestroy {
                   diaryId: racedCommand.diaryId,
                   draftId: racedCommand.draftId,
                   savedVersion: racedCommand.savedVersion,
+                  date: this.formatDate(racedDiary.createdAt),
                 };
               }
             }
@@ -580,7 +638,7 @@ export class MemoryStoreService implements OnModuleDestroy {
               title: input.title,
               summary: input.summary,
               location: input.location,
-              date,
+              date: publishedAt,
               privacy: input.privacy,
               photoIds: input.photoIds as Prisma.InputJsonValue,
               publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
@@ -589,6 +647,8 @@ export class MemoryStoreService implements OnModuleDestroy {
             },
           });
         }
+
+        await assetHook?.beforeCommit(prisma, savedDiary.id);
 
         await prisma.saveCommand.create({
           data: {
@@ -606,11 +666,13 @@ export class MemoryStoreService implements OnModuleDestroy {
           diaryId: savedDiary.id,
           draftId: input.draftId,
           savedVersion: savedDiary.version,
+          date: this.formatDate(savedDiary.createdAt),
         };
       });
 
       return result;
     } catch (error) {
+      await assetHook?.rollback();
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const racedCommand = await this.prisma.saveCommand.findUnique({
           where: {
@@ -628,6 +690,7 @@ export class MemoryStoreService implements OnModuleDestroy {
               diaryId: racedCommand.diaryId,
               draftId: racedCommand.draftId,
               savedVersion: racedCommand.savedVersion,
+              date: racedDiary.date,
             };
           }
         }
@@ -653,6 +716,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       draftId: command.draftId,
       savedVersion: command.savedVersion,
       id: diary.id,
+      date: diary.date,
     };
   }
 
@@ -725,7 +789,11 @@ export class MemoryStoreService implements OnModuleDestroy {
     return this.mapDiaryRecord(updated);
   }
 
-  async rewriteDraftBlock(input: RewriteInputSnapshot, ownerDeviceId: string): Promise<RewriteResultRecord> {
+  async rewriteDraftBlock(
+    input: RewriteInputSnapshot,
+    ownerDeviceId: string,
+    uploads: UploadedGenerationPhoto[] = [],
+  ): Promise<RewriteResultRecord> {
     if (!isRecord(input)
       || !isNonEmptyString(input.draftId)
       || !isNonEmptyString(input.blockId)
@@ -737,33 +805,76 @@ export class MemoryStoreService implements OnModuleDestroy {
       || !Array.isArray(input.selectedPhotoIds)
       || !input.selectedPhotoIds.every(isNonEmptyString)
       || (input.photoIds !== undefined
-        && (!Array.isArray(input.photoIds) || !input.photoIds.every(isNonEmptyString)))) {
+        && (!Array.isArray(input.photoIds) || !input.photoIds.every(isNonEmptyString)))
+      || (input.contextBlocks !== undefined
+        && (!Array.isArray(input.contextBlocks) || input.contextBlocks.some(block =>
+          !isRecord(block)
+          || !isNonEmptyString(block.id)
+          || block.id === input.blockId
+          || (block.type !== 'text' && block.type !== 'quote')
+            || !isNonEmptyString(block.content))))) {
       throw new RewriteDraftError('invalid_input', 'rewrite request is invalid');
     }
 
-    const draft = await this.getDraft(input.draftId, ownerDeviceId);
-    if (!draft) {
-      throw new RewriteDraftError('not_found', 'draft not found');
-    }
-    if (draft.version !== input.draftVersion) {
-      throw new RewriteDraftError('version_conflict', 'draft version conflict');
+    const policyCode = classifyDiaryGenerationInput([
+      input.content,
+      ...(input.contextBlocks ?? []).map(block => block.content),
+    ].join('\n'));
+    if (policyCode) {
+      throw new RewriteDraftError(
+        'invalid_input',
+        getDiaryGenerationPolicyMessage(policyCode, 'input'),
+      );
     }
 
-    const selectedPhotoIds = draft.selectedPhotoIds;
-    const scopedPhotoIds = (input.photoIds ?? []).filter(photoId => selectedPhotoIds.includes(photoId));
+    const taskKey = `rewrite:${input.draftId}:${input.blockId}:${++this.rewriteTaskSequence}`;
+    const releaseTask = this.acquireDiaryAiTask(ownerDeviceId, taskKey);
+    if (!releaseTask) {
+      throw new RewriteDraftError(
+        'version_conflict',
+        '当前设备已有一项日记生成或重写任务正在执行，请等待完成后重试。',
+      );
+    }
 
-    return this.diaryGenerationService.rewriteBlock({
-      ...input,
-      characterId: draft.characterId,
-      selectedPhotoIds,
-      photoIds: scopedPhotoIds.length ? scopedPhotoIds : undefined,
-    });
+    try {
+      const draft = await this.getDraft(input.draftId, ownerDeviceId);
+      if (!draft) {
+        throw new RewriteDraftError('not_found', 'draft not found');
+      }
+      if (draft.version !== input.draftVersion) {
+        throw new RewriteDraftError('version_conflict', 'draft version conflict');
+      }
+
+      const selectedPhotoIds = draft.selectedPhotoIds;
+      const requestedPhotoIds = input.photoIds ?? [];
+      if (requestedPhotoIds.some(photoId => !selectedPhotoIds.includes(photoId))) {
+        throw new RewriteDraftError('invalid_input', 'rewrite references a photo outside the selected set');
+      }
+      let photos;
+      try {
+        photos = await this.generationPhotoStore.readUploadedPhotos(requestedPhotoIds, uploads);
+      } catch (error) {
+        if (error instanceof GenerationPhotoInputError) {
+          throw new RewriteDraftError(error.code, error.message);
+        }
+        throw error;
+      }
+
+      return await this.diaryGenerationService.rewriteBlock({
+        ...input,
+        characterId: draft.characterId,
+        selectedPhotoIds,
+        photoIds: requestedPhotoIds,
+      }, { photos });
+    } finally {
+      releaseTask();
+    }
   }
 
   async listDiaries(ownerDeviceId: string) {
     const diaries = await this.prisma.diary.findMany({
       where: { ownerDeviceId },
-      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     return diaries.map(diary => this.mapDiaryRecord(diary));
   }
@@ -772,7 +883,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     draftId: string;
     draftVersion: number;
     idempotencyKey: string;
-  }, ownerDeviceId: string) {
+  }, ownerDeviceId: string, uploads: UploadedGenerationPhoto[] = []) {
     const restoreIdempotentJob = async () => {
       const existing = await this.prisma.generationJob.findUnique({
         where: {
@@ -796,34 +907,76 @@ export class MemoryStoreService implements OnModuleDestroy {
     if (!draft) {
       throw new GenerationJobError('not_found', 'draft not found');
     }
-    const inputSnapshot = this.buildGenerationInputSnapshot(draft, input.draftVersion);
+    if (draft.selectedPhotoIds.length < MIN_GENERATION_PHOTOS) {
+      throw new GenerationJobError('invalid_input', '生成日记至少需要3张不同的有效照片。');
+    }
+    const taskKey = `generation:${input.draftId}:${input.draftVersion}:${input.idempotencyKey}`;
+    const releaseTask = this.acquireDiaryAiTask(ownerDeviceId, taskKey);
+    if (!releaseTask) {
+      throw new GenerationJobError(
+        'version_conflict',
+        '当前设备已有一项日记生成或重写任务正在执行，请等待完成后重试。',
+      );
+    }
+    let processingOwnsTask = false;
     try {
-      const job = await this.prisma.generationJob.create({
-        data: {
+      try {
+        await this.generationPhotoStore.stage(
           ownerDeviceId,
-          draftId: input.draftId,
-          draftVersion: input.draftVersion,
-          idempotencyKey: input.idempotencyKey,
-          status: 'queued',
-          stage: 'queued',
-          progressPercent: 0,
-          attemptCount: 0,
-          maxAttempts: this.resolveGenerationMaxAttempts(),
-          errorCode: null,
-          errorMessage: null,
-          retryable: null,
-          inputSnapshot: inputSnapshot as Prisma.InputJsonValue,
-          result: Prisma.JsonNull,
-        },
-      });
-      void this.ensureGenerationJobProcessing(job.jobId);
-      return this.toPublicGenerationJob(this.mapGenerationJobRecord(job));
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const raced = await restoreIdempotentJob();
-        if (raced) return raced;
+          draft.id,
+          input.draftVersion,
+          draft.selectedPhotoIds,
+          uploads,
+        );
+      } catch (error) {
+        await this.generationPhotoStore.cleanupGeneration(ownerDeviceId, draft.id, input.draftVersion).catch(() => undefined);
+        if (error instanceof GenerationPhotoInputError) {
+          throw new GenerationJobError(error.code, error.message);
+        }
+        throw error;
       }
+      const inputSnapshot = this.buildGenerationInputSnapshot(draft, input.draftVersion);
+      try {
+        const job = await this.prisma.generationJob.create({
+          data: {
+            ownerDeviceId,
+            draftId: input.draftId,
+            draftVersion: input.draftVersion,
+            idempotencyKey: input.idempotencyKey,
+            status: 'queued',
+            stage: 'queued',
+            progressPercent: 0,
+            attemptCount: 0,
+            maxAttempts: this.resolveGenerationMaxAttempts(),
+            errorCode: null,
+            errorMessage: null,
+            retryable: null,
+            inputSnapshot: inputSnapshot as Prisma.InputJsonValue,
+            progressMilestones: [{
+              milestoneId: 'queued',
+              stage: 'queued',
+              progressPercent: 0,
+              reachedAt: Date.now(),
+              attemptCount: 0,
+            }] as Prisma.InputJsonValue,
+            result: Prisma.JsonNull,
+          },
+        });
+        this.ensureGenerationJobProcessing(job.jobId, ownerDeviceId, taskKey, releaseTask);
+        processingOwnsTask = true;
+        return this.toPublicGenerationJob(this.mapGenerationJobRecord(job));
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          const raced = await restoreIdempotentJob();
+          if (raced) return raced;
+        }
+        await this.generationPhotoStore.cleanupGeneration(ownerDeviceId, draft.id, input.draftVersion).catch(() => undefined);
+        throw error;
+      }
+    } catch (error) {
       throw error;
+    } finally {
+      if (!processingOwnsTask) releaseTask();
     }
   }
 
@@ -839,7 +992,8 @@ export class MemoryStoreService implements OnModuleDestroy {
     if (current.status === 'cancelled' || current.status === 'failed' || current.status === 'succeeded') {
       return this.toPublicGenerationJob(current);
     }
-    void this.ensureGenerationJobProcessing(jobId);
+    const taskKey = `generation:${job.draftId}:${job.draftVersion}:${job.idempotencyKey}`;
+    void this.ensureGenerationJobProcessing(jobId, ownerDeviceId, taskKey);
     return this.toPublicGenerationJob(current);
   }
 
@@ -927,6 +1081,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     photoIds: Prisma.JsonValue;
     publicBlockIds: Prisma.JsonValue | null;
     contentSnapshot: Prisma.JsonValue | null;
+    createdAt: Date;
     version: number;
   }) {
     const invalidContentSnapshot = diary.contentSnapshot !== null
@@ -937,7 +1092,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       title: diary.title,
       summary: diary.summary,
       location: diary.location,
-      date: this.formatDate(diary.date),
+      date: this.formatDate(diary.createdAt),
       privacy: diary.privacy,
       photoIds: this.readStringArray(diary.photoIds),
       publicBlockIds: diary.publicBlockIds === null ? undefined : this.readStringArray(diary.publicBlockIds),
@@ -966,6 +1121,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       errorCode: job.errorCode,
       errorMessage: job.errorMessage,
       retryable: job.retryable,
+      progressMilestones: job.progressMilestones?.length ? job.progressMilestones : undefined,
       result: job.result,
     } satisfies GenerationJobRecord;
   }
@@ -985,6 +1141,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     errorMessage: string | null;
     retryable: boolean | null;
     inputSnapshot: Prisma.JsonValue | null;
+    progressMilestones?: Prisma.JsonValue | null;
     result: Prisma.JsonValue | null;
     createdAt: Date;
   }) {
@@ -1004,8 +1161,47 @@ export class MemoryStoreService implements OnModuleDestroy {
       errorMessage: job.errorMessage ?? undefined,
       retryable: job.retryable ?? undefined,
       inputSnapshot: this.readGenerationInputSnapshot(job.inputSnapshot),
+      progressMilestones: readGenerationProgressMilestones(job.progressMilestones),
       result: this.readGenerationResult(job.result),
     } satisfies StoredGenerationJobRecord;
+  }
+
+  private async recordGenerationMilestone(
+    jobId: string,
+    milestoneId: GenerationProgressMilestoneId,
+    attemptCount: number,
+  ) {
+    const row = await this.prisma.generationJob.findUnique({ where: { jobId } });
+    if (!row) return;
+    const current = this.mapGenerationJobRecord(row);
+    if (current.status === 'cancelled' || current.status === 'failed' || current.status === 'succeeded') return;
+
+    const definition = GENERATION_PROGRESS_MILESTONE_DEFINITIONS[milestoneId];
+    const existing = current.progressMilestones ?? [];
+    const hasMilestone = existing.some(milestone => milestone.milestoneId === milestoneId);
+    const progressMilestones = hasMilestone
+      ? existing
+      : [...existing, {
+          milestoneId,
+          ...definition,
+          reachedAt: Date.now(),
+          attemptCount,
+        }].sort((left, right) => left.progressPercent - right.progressPercent);
+    const progressPercent = Math.max(current.progressPercent ?? 0, definition.progressPercent);
+    const stage = progressPercent > definition.progressPercent
+      ? current.stage
+      : definition.stage;
+
+    await this.prisma.generationJob.update({
+      where: { jobId },
+      data: {
+        status: 'running',
+        stage,
+        progressPercent: Math.min(99, progressPercent),
+        attemptCount,
+        progressMilestones: progressMilestones as unknown as Prisma.InputJsonValue,
+      },
+    });
   }
 
   private readGenerationInputSnapshot(value: Prisma.JsonValue | null) {
@@ -1048,22 +1244,48 @@ export class MemoryStoreService implements OnModuleDestroy {
     } satisfies GenerationInputSnapshot;
   }
 
-  private ensureGenerationJobProcessing(jobId: string) {
-    if (this.processingGenerationJobs.has(jobId)) return;
+  private ensureGenerationJobProcessing(
+    jobId: string,
+    ownerDeviceId: string,
+    taskKey: string,
+    reservedTaskRelease?: () => void,
+  ) {
+    if (this.processingGenerationJobs.has(jobId)) {
+      reservedTaskRelease?.();
+      return;
+    }
+    const releaseTask = reservedTaskRelease ?? this.acquireDiaryAiTask(ownerDeviceId, taskKey);
+    if (!releaseTask) return;
     const active = {
       controller: new AbortController(),
       promise: Promise.resolve(),
+      releaseTask,
     };
     this.processingGenerationJobs.set(jobId, active);
     active.promise = this.processGenerationJob(jobId, active.controller.signal)
       .catch(() => {
         this.logger.error('Generation job processing stopped before reaching a terminal state.');
       })
-      .finally(() => {
-        if (this.processingGenerationJobs.get(jobId) === active) {
-          this.processingGenerationJobs.delete(jobId);
+      .finally(async () => {
+        try {
+          await this.cleanupTerminalGenerationPhotos(jobId);
+        } finally {
+          active.releaseTask();
+          if (this.processingGenerationJobs.get(jobId) === active) {
+            this.processingGenerationJobs.delete(jobId);
+          }
         }
       });
+  }
+
+  private async cleanupTerminalGenerationPhotos(jobId: string) {
+    try {
+      const job = await this.prisma.generationJob.findUnique({ where: { jobId } });
+      if (!job || !['cancelled', 'failed', 'succeeded'].includes(job.status)) return;
+      await this.generationPhotoStore.cleanupGeneration(job.ownerDeviceId, job.draftId, job.draftVersion);
+    } catch {
+      this.logger.warn('Unable to clean terminal generation photo assets.');
+    }
   }
 
   private async abortAndWaitForGenerationJobs() {
@@ -1124,8 +1346,10 @@ export class MemoryStoreService implements OnModuleDestroy {
         where: { jobId },
         data: {
           status: 'running',
-          stage: 'analyzing-photos',
-          progressPercent: 18,
+          stage: (latestBeforeAttempt.progressPercent ?? 0) === 0
+            ? 'analyzing-photos'
+            : latestBeforeAttempt.stage,
+          progressPercent: latestBeforeAttempt.progressPercent ?? 0,
           attemptCount: attempt,
           maxAttempts,
           errorCode: null,
@@ -1138,7 +1362,20 @@ export class MemoryStoreService implements OnModuleDestroy {
       if (signal.aborted) return;
 
       try {
-        const result = await this.diaryGenerationService.generate(current.inputSnapshot, { signal });
+        await this.recordGenerationMilestone(jobId, 'photo-processing-started', attempt);
+        const photos = await this.generationPhotoStore.readForGeneration(
+          current.ownerDeviceId,
+          current.draftId,
+          current.draftVersion,
+          current.inputSnapshot.selectedPhotoIds,
+        );
+        await this.recordGenerationMilestone(jobId, 'photos-ready', attempt);
+        const result = await this.diaryGenerationService.generate(current.inputSnapshot, {
+          signal,
+          photos,
+          onProgress: milestoneId => this.recordGenerationMilestone(jobId, milestoneId, attempt),
+        });
+        await this.recordGenerationMilestone(jobId, 'result-validated', attempt);
         if (signal.aborted) return;
         const beforeFinalize = await this.prisma.generationJob.findUnique({ where: { jobId } });
         if (!beforeFinalize || signal.aborted) return;
@@ -1147,17 +1384,6 @@ export class MemoryStoreService implements OnModuleDestroy {
           return;
         }
 
-        await this.prisma.generationJob.update({
-          where: { jobId },
-          data: {
-            status: 'running',
-            stage: 'structuring',
-            progressPercent: 82,
-            attemptCount: attempt,
-            maxAttempts,
-          },
-        });
-
         const beforeSuccess = await this.prisma.generationJob.findUnique({ where: { jobId } });
         if (!beforeSuccess) return;
         const terminalCheck = this.mapGenerationJobRecord(beforeSuccess);
@@ -1165,6 +1391,15 @@ export class MemoryStoreService implements OnModuleDestroy {
           return;
         }
 
+        const completedMilestones = terminalCheck.progressMilestones ?? [];
+        const progressMilestones = completedMilestones.some(item => item.milestoneId === 'completed')
+          ? completedMilestones
+          : [...completedMilestones, {
+              milestoneId: 'completed' as const,
+              ...GENERATION_PROGRESS_MILESTONE_DEFINITIONS.completed,
+              reachedAt: Date.now(),
+              attemptCount: attempt,
+            }];
         await this.prisma.generationJob.update({
           where: { jobId },
           data: {
@@ -1176,6 +1411,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             errorCode: null,
             errorMessage: null,
             retryable: null,
+            progressMilestones: progressMilestones as unknown as Prisma.InputJsonValue,
             result: result as Prisma.InputJsonValue,
           },
         });
@@ -1198,14 +1434,15 @@ export class MemoryStoreService implements OnModuleDestroy {
               false,
             );
         const shouldRetry = failure.retryable && attempt < maxAttempts;
+        const latestProgress = latest.progressPercent ?? 0;
 
         await this.prisma.generationJob.update({
           where: { jobId },
           data: shouldRetry
             ? {
                 status: 'running',
-                stage: 'drafting',
-                progressPercent: 45,
+                stage: latest.stage,
+                progressPercent: latestProgress,
                 attemptCount: attempt,
                 maxAttempts,
                 errorCode: failure.code,
@@ -1216,7 +1453,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             : {
                 status: 'failed',
                 stage: 'failed',
-                progressPercent: 0,
+                progressPercent: Math.min(99, latestProgress),
                 attemptCount: attempt,
                 maxAttempts,
                 errorCode: failure.code,

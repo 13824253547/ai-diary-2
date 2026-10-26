@@ -12,7 +12,10 @@ export type PetChatRepositoryErrorCode =
   | 'not_found'
   | 'invalid_input'
   | 'version_conflict'
-  | 'provider_failed';
+  | 'provider_failed'
+  | 'out_of_scope'
+  | 'unsafe_request'
+  | 'chat_busy';
 
 export class PetChatRepositoryError extends Error {
   constructor(
@@ -37,6 +40,11 @@ export interface PetChatRepository {
     userMessageId: string;
     text: string;
   }, options?: ApiRequestOptions): Promise<PetChatConversation>;
+  generateReply(input: {
+    conversationId: string;
+    requestId: string;
+    attempt: number;
+  }, options?: ApiRequestOptions, onTextDelta?: (text: string) => void): Promise<PetChatConversation>;
   completeTurn(input: {
     conversationId: string;
     requestId: string;

@@ -1,0 +1,12 @@
+{
+  "HKG-11566": {
+    "cityName": "香港",
+    "aliases": [],
+    "note": "WUP uses Tamar (Hong Kong) for the Hong Kong urban-area record."
+  },
+  "MAC-11460": {
+    "cityName": "澳门-珠海",
+    "aliases": [],
+    "note": "Cross-border WUP urban-area record; constituent city names must not unlock it."
+  }
+}

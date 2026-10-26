@@ -52,6 +52,33 @@ describe('Backend foundation (e2e)', () => {
     throw new Error(`generation job ${jobId} did not complete in time`);
   }
 
+  async function postGenerationJob(
+    input: { draftId: string; draftVersion: number; idempotencyKey: string },
+    deviceId: string,
+    server: ReturnType<INestApplication['getHttpServer']> = app.getHttpServer(),
+    expectedStatus = 201,
+  ) {
+    const draft = await store.getDraft(input.draftId, deviceId);
+    const selectedPhotoIds = draft?.selectedPhotoIds ?? [];
+    let upload = request(server)
+      .post('/api/generation/jobs')
+      .set('x-device-id', deviceId)
+      .field('draftId', input.draftId)
+      .field('draftVersion', String(input.draftVersion))
+      .field('idempotencyKey', input.idempotencyKey)
+      .field('photoMetadata', JSON.stringify(selectedPhotoIds.map((photoId, index) => ({
+        photoId,
+        date: '2026.10.20',
+      }))));
+    selectedPhotoIds.forEach((photoId, index) => {
+      upload = upload.attach('photos', Buffer.from([0xff, 0xd8, 0xff, index, 0xff, 0xd9]), {
+        filename: `${photoId}.jpg`,
+        contentType: 'image/jpeg',
+      });
+    });
+    return upload.expect(expectedStatus);
+  }
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -1795,15 +1822,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-remote-1',
-        draftVersion: 2,
-        idempotencyKey: 'draft-remote-1-round-2',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-remote-1',
+      draftVersion: 2,
+      idempotencyKey: 'draft-remote-1-round-2',
+    }, deviceA);
 
     expect(created.body.data.jobId).toBeTruthy();
 
@@ -1814,7 +1837,14 @@ describe('Backend foundation (e2e)', () => {
     expect(completed.body.data.stage).toBe('completed');
     expect(completed.body.data.result.title).toContain('把旅程写成一页');
     expect(completed.body.data.result.coverPhotoId).toBe('photo-1');
-    expect(completed.body.data.result.blocks.length).toBeGreaterThan(0);
+    const textBlocks = completed.body.data.result.blocks.filter((block: { type: string }) => block.type === 'text');
+    expect(textBlocks).toHaveLength(3);
+    expect(textBlocks.map((block: { photoIds: string[] }) => block.photoIds)).toEqual([
+      ['photo-1'],
+      ['photo-2'],
+      ['photo-3'],
+    ]);
+    expect(completed.body.data.result.blocks.some((block: { type: string }) => block.type === 'quote')).toBe(false);
   });
 
   it('reuses generation jobs only when an idempotency key matches the original draft and version', async () => {
@@ -1839,40 +1869,24 @@ describe('Backend foundation (e2e)', () => {
       idempotencyKey: 'generation-idempotency-key',
     };
     const [first, concurrentRetry] = await Promise.all([
-      request(app.getHttpServer())
-        .post('/api/generation/jobs')
-        .set('x-device-id', deviceA)
-        .send(input),
-      request(app.getHttpServer())
-        .post('/api/generation/jobs')
-        .set('x-device-id', deviceA)
-        .send(input),
+      postGenerationJob(input, deviceA),
+      postGenerationJob(input, deviceA),
     ]);
 
     expect(first.status).toBe(201);
     expect(concurrentRetry.status).toBe(201);
     expect(concurrentRetry.body.data.jobId).toBe(first.body.data.jobId);
 
-    const sameRequest = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send(input)
-      .expect(201);
+    const sameRequest = await postGenerationJob(input, deviceA);
     expect(sameRequest.body.data.jobId).toBe(first.body.data.jobId);
 
     for (const conflictingInput of [
       { ...input, draftId: 'draft-idempotency-b' },
       { ...input, draftVersion: 2 },
     ]) {
-      await request(app.getHttpServer())
-        .post('/api/generation/jobs')
-        .set('x-device-id', deviceA)
-        .send(conflictingInput)
-        .expect(409)
-        .expect(({ body }) => {
-          expect(body.error.code).toBe('version_conflict');
-          expect(body.error.retryable).toBe(false);
-        });
+      const conflict = await postGenerationJob(conflictingInput, deviceA, undefined, 409);
+      expect(conflict.body.error.code).toBe('version_conflict');
+      expect(conflict.body.error.retryable).toBe(false);
     }
   });
 
@@ -1906,7 +1920,19 @@ describe('Backend foundation (e2e)', () => {
                     '      "id": "provider-block-1",',
                     '      "type": "text",',
                     '      "content": "海风从傍晚一路吹到夜灯亮起。",',
-                    '      "photoIds": ["photo-8", "photo-9"]',
+                    '      "photoIds": ["photo-8"]',
+                    '    },',
+                    '    {',
+                    '      "id": "provider-block-2",',
+                    '      "type": "text",',
+                    '      "content": "沿着照片里的线索继续向前。",',
+                    '      "photoIds": ["photo-9"]',
+                    '    },',
+                    '    {',
+                    '      "id": "provider-block-3",',
+                    '      "type": "text",',
+                    '      "content": "最后一张照片为旅程收好尾声。",',
+                    '      "photoIds": ["photo-10"]',
                     '    }',
                     '  ]',
                     '}',
@@ -1933,15 +1959,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-content-array',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-content-array-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-content-array',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-content-array-round-1',
+    }, deviceA);
 
     const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
     expect(completed.body.data.status).toBe('succeeded');
@@ -1953,7 +1975,19 @@ describe('Backend foundation (e2e)', () => {
         id: 'provider-block-1',
         type: 'text',
         content: '海风从傍晚一路吹到夜灯亮起。',
-        photoIds: ['photo-8', 'photo-9'],
+        photoIds: ['photo-8'],
+      },
+      {
+        id: 'provider-block-2',
+        type: 'text',
+        content: '沿着照片里的线索继续向前。',
+        photoIds: ['photo-9'],
+      },
+      {
+        id: 'provider-block-3',
+        type: 'text',
+        content: '最后一张照片为旅程收好尾声。',
+        photoIds: ['photo-10'],
       },
     ]);
   });
@@ -1993,7 +2027,19 @@ describe('Backend foundation (e2e)', () => {
                       id: 'provider-block-1',
                       type: 'text',
                       content: '这是一段来自 provider 的正文。',
-                      photoIds: ['photo-1', 'photo-2'],
+                        photoIds: ['photo-1'],
+                      },
+                      {
+                        id: 'provider-block-2',
+                        type: 'text',
+                        content: '第二张照片延续着同一趟旅程。',
+                        photoIds: ['photo-2'],
+                      },
+                      {
+                        id: 'provider-block-3',
+                        type: 'text',
+                        content: '第三张照片为这段行程自然收尾。',
+                        photoIds: ['photo-3'],
                     },
                   ],
                 }),
@@ -2017,15 +2063,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-retry',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-retry-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-retry',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-retry-round-1',
+    }, deviceA);
 
     const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
     expect(requestCount).toBe(2);
@@ -2069,7 +2111,19 @@ describe('Backend foundation (e2e)', () => {
                       id: 'provider-block-timeout-retry',
                       type: 'text',
                       content: '第二次尝试后生成成功。',
-                      photoIds: ['photo-1', 'photo-2'],
+                        photoIds: ['photo-1'],
+                      },
+                      {
+                        id: 'provider-block-timeout-retry-2',
+                        type: 'text',
+                        content: '第二张照片延续着同一趟旅程。',
+                        photoIds: ['photo-2'],
+                      },
+                      {
+                        id: 'provider-block-timeout-retry-3',
+                        type: 'text',
+                        content: '第三张照片为这段行程自然收尾。',
+                        photoIds: ['photo-3'],
                     },
                   ],
                 }),
@@ -2093,15 +2147,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-timeout-retry',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-timeout-retry-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-timeout-retry',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-timeout-retry-round-1',
+    }, deviceA);
 
     const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
     expect(requestCount).toBe(2);
@@ -2146,7 +2196,19 @@ describe('Backend foundation (e2e)', () => {
                       id: 'provider-block-network-retry',
                       type: 'text',
                       content: '连接恢复后，生成任务继续在同一 job 上成功完成。',
-                      photoIds: ['photo-1', 'photo-2'],
+                        photoIds: ['photo-1'],
+                      },
+                      {
+                        id: 'provider-block-network-retry-2',
+                        type: 'text',
+                        content: '第二张照片延续着同一趟旅程。',
+                        photoIds: ['photo-2'],
+                      },
+                      {
+                        id: 'provider-block-network-retry-3',
+                        type: 'text',
+                        content: '第三张照片为这段行程自然收尾。',
+                        photoIds: ['photo-3'],
                     },
                   ],
                 }),
@@ -2170,15 +2232,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-network-retry',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-network-retry-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-network-retry',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-network-retry-round-1',
+    }, deviceA);
 
     const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
     expect(requestCount).toBe(2);
@@ -2238,15 +2296,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-malformed-success',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-malformed-success-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-malformed-success',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-malformed-success-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2293,7 +2347,19 @@ describe('Backend foundation (e2e)', () => {
                     id: 'provider-block-duplicate-person',
                     type: 'text',
                     content: '我们一起走过了海边。',
-                    photoIds: ['photo-8', 'photo-9'],
+                    photoIds: ['photo-8'],
+                  },
+                  {
+                    id: 'provider-block-duplicate-person-2',
+                    type: 'text',
+                    content: '第二张照片延续旅途。',
+                    photoIds: ['photo-9'],
+                  },
+                  {
+                    id: 'provider-block-duplicate-person-3',
+                    type: 'text',
+                    content: '第三张照片收住旅途。',
+                    photoIds: ['photo-10'],
                   },
                 ],
                 people: [
@@ -2320,15 +2386,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-duplicate-person-ids',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-duplicate-person-ids-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-duplicate-person-ids',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-duplicate-person-ids-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const response = await request(app.getHttpServer())
@@ -2399,15 +2461,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-invalid-text-photo',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-invalid-text-photo-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-invalid-text-photo',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-invalid-text-photo-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2458,6 +2516,18 @@ describe('Backend foundation (e2e)', () => {
                     content: '海风把散步的片段留在傍晚。',
                     photoIds: ['photo-8'],
                   },
+                  {
+                    id: 'provider-block-valid-2',
+                    type: 'text',
+                    content: '下一张照片继续着相同的行程。',
+                    photoIds: ['photo-9'],
+                  },
+                  {
+                    id: 'provider-block-valid-3',
+                    type: 'text',
+                    content: '最后一张照片为旅程收尾。',
+                    photoIds: ['photo-10'],
+                  },
                 ],
                 people: [{
                   name: '同行者',
@@ -2484,15 +2554,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-invalid-malformed-person-photo',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-invalid-malformed-person-photo-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-invalid-malformed-person-photo',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-invalid-malformed-person-photo-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2565,15 +2631,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-invalid-block-entry',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-invalid-block-entry-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-invalid-block-entry',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-invalid-block-entry-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2640,15 +2702,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-missing-title',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-missing-title-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-missing-title',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-missing-title-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2716,15 +2774,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-empty-block-content',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-empty-block-content-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-empty-block-content',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-empty-block-content-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2767,15 +2821,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-timeout-failed',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-timeout-failed-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-timeout-failed',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-timeout-failed-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2821,15 +2871,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-network-failed',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-network-failed-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-network-failed',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-network-failed-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2874,15 +2920,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-provider-failed',
-        draftVersion: 1,
-        idempotencyKey: 'draft-provider-failed-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-provider-failed',
+      draftVersion: 1,
+      idempotencyKey: 'draft-provider-failed-round-1',
+    }, deviceA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
@@ -2904,20 +2946,14 @@ describe('Backend foundation (e2e)', () => {
   });
 
   it('rejects generation job creation when draft is missing', async () => {
-    await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-missing',
-        draftVersion: 1,
-        idempotencyKey: 'draft-missing-round-1',
-      })
-      .expect(404)
-      .expect(({ body }) => {
-        expect(body.error.code).toBe('not_found');
-        expect(body.error.message).toBe('draft not found');
-        expect(body.error.retryable).toBe(false);
-      });
+    const missingDraft = await postGenerationJob({
+      draftId: 'draft-missing',
+      draftVersion: 1,
+      idempotencyKey: 'draft-missing-round-1',
+    }, deviceA, undefined, 404);
+    expect(missingDraft.body.error.code).toBe('not_found');
+    expect(missingDraft.body.error.message).toBe('draft not found');
+    expect(missingDraft.body.error.retryable).toBe(false);
   });
 
   it('restores persisted generation jobs after app reinitialization', async () => {
@@ -2934,15 +2970,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-restart-1',
-        draftVersion: 3,
-        idempotencyKey: 'draft-restart-1-round-3',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-restart-1',
+      draftVersion: 3,
+      idempotencyKey: 'draft-restart-1-round-3',
+    }, deviceA);
 
     const restartedModuleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -2960,18 +2992,11 @@ describe('Backend foundation (e2e)', () => {
       expect(completed.body.data.result.coverPhotoId).toBe('photo-4');
       expect(completed.body.data.result.blocks.length).toBeGreaterThan(0);
 
-      await request(restartedApp.getHttpServer())
-        .post('/api/generation/jobs')
-        .set('x-device-id', deviceA)
-        .send({
-          draftId: 'draft-restart-1',
-          draftVersion: 3,
-          idempotencyKey: 'draft-restart-1-round-3',
-        })
-        .expect(201)
-        .expect(({ body }) => {
-          expect(body.data.jobId).toBe(created.body.data.jobId);
-        });
+      await postGenerationJob({
+        draftId: 'draft-restart-1',
+        draftVersion: 3,
+        idempotencyKey: 'draft-restart-1-round-3',
+      }, deviceA, restartedApp.getHttpServer());
     } finally {
       await restartedApp.close();
     }
@@ -3010,15 +3035,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const created = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: 'draft-remote-2',
-        draftVersion: 1,
-        idempotencyKey: 'draft-remote-2-round-1',
-      })
-      .expect(201);
+    const created = await postGenerationJob({
+      draftId: 'draft-remote-2',
+      draftVersion: 1,
+      idempotencyKey: 'draft-remote-2-round-1',
+    }, deviceA);
 
     await providerStarted;
     await request(app.getHttpServer())
@@ -3084,15 +3105,11 @@ describe('Backend foundation (e2e)', () => {
         expect(body.error.code).toBe('permission_denied');
       });
 
-    const generation = await request(app.getHttpServer())
-      .post('/api/generation/jobs')
-      .set('x-device-id', deviceA)
-      .send({
-        draftId: draft.body.data.id,
-        draftVersion: 1,
-        idempotencyKey: 'shared-round-1',
-      })
-      .expect(201);
+    const generation = await postGenerationJob({
+      draftId: draft.body.data.id,
+      draftVersion: 1,
+      idempotencyKey: 'shared-round-1',
+    }, deviceA);
 
     await request(app.getHttpServer())
       .get(`/api/generation/jobs/${generation.body.data.jobId}`)

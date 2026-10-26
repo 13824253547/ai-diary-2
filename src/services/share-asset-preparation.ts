@@ -27,7 +27,6 @@ type AssetRendererInput = {
 };
 
 type ShareAssetPreparationDeps = {
-  getCacheDirectory?: () => string | undefined;
   getPhotoSourceUri?: (photo: DiaryPhoto) => string | undefined;
   renderAnonymousAsset?: (input: AssetRendererInput) => Promise<string>;
   isPreparedAssetReadable?: (uri: string) => Promise<boolean>;
@@ -38,9 +37,6 @@ type PrepareDiaryShareAssetsInput = {
   target: ShareMode;
   getPhotoById: (photoId: string) => DiaryPhoto | undefined;
 };
-
-const MASK_DIRECTORY = 'anonymous-share-assets';
-const MASK_COLOR = { red: 192, green: 182, blue: 170, alpha: 255 };
 
 function buildRectToken(photo: DiaryPhoto) {
   return (photo.faceRects ?? [])
@@ -87,23 +83,6 @@ function normalizeReadableUri(uri: string) {
   return uri;
 }
 
-async function writeBase64File(uri: string, base64: string) {
-  if (uri.startsWith('file://')) {
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const { Buffer } = require('buffer');
-      const filePath = uri.replace(/^file:\/\//, '');
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
-      return;
-    } catch {}
-  }
-  await FileSystem.writeAsStringAsync(uri, base64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-}
-
 async function readBase64File(uri: string) {
   if (uri.startsWith('file://')) {
     try {
@@ -115,21 +94,6 @@ async function readBase64File(uri: string) {
   return FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
-}
-
-async function doesFileExist(uri: string) {
-  if (uri.startsWith('file://')) {
-    try {
-      const fs = require('fs');
-      return fs.existsSync(uri.replace(/^file:\/\//, ''));
-    } catch {}
-  }
-  try {
-    const info = await FileSystem.getInfoAsync(uri);
-    return info.exists;
-  } catch {
-    return false;
-  }
 }
 
 async function isReadablePngFile(uri: string) {
@@ -149,48 +113,11 @@ async function isReadablePngFile(uri: string) {
   }
 }
 
-async function renderAnonymousAssetToPng(input: AssetRendererInput, getCacheDirectory: () => string | undefined) {
-  const cacheDirectory = getCacheDirectory();
-  if (!cacheDirectory) {
-    throw new Error('cache directory unavailable');
-  }
-  const baseDir = `${cacheDirectory}${MASK_DIRECTORY}/`;
-  const uri = `${baseDir}${encodeURIComponent(input.cacheKey)}.png`;
-  await FileSystem.makeDirectoryAsync(baseDir, { intermediates: true });
-  if (!(await doesFileExist(uri))) {
-    const Jimp = require('jimp-compact');
-    const { Buffer } = require('buffer');
-    const readableUri = normalizeReadableUri(input.sourceUri);
-    const sourceBase64 = readableUri.startsWith('data:')
-      ? readableUri.replace(/^data:[^;]+;base64,/, '')
-      : await readBase64File(readableUri);
-    const image = await Jimp.read(Buffer.from(sourceBase64, 'base64'));
-    const maskColor = Jimp.rgbaToInt(MASK_COLOR.red, MASK_COLOR.green, MASK_COLOR.blue, MASK_COLOR.alpha);
-    for (const rect of input.photo.faceRects ?? []) {
-      const left = Math.floor(Math.max(0, rect.x) * image.bitmap.width);
-      const top = Math.floor(Math.max(0, rect.y) * image.bitmap.height);
-      const right = Math.ceil(Math.min(1, rect.x + rect.width) * image.bitmap.width);
-      const bottom = Math.ceil(Math.min(1, rect.y + rect.height) * image.bitmap.height);
-      const width = Math.max(1, Math.min(image.bitmap.width - left, right - left));
-      const height = Math.max(1, Math.min(image.bitmap.height - top, bottom - top));
-      image.scan(left, top, width, height, (_x: number, _y: number, idx: number) => {
-        image.bitmap.data[idx] = MASK_COLOR.red;
-        image.bitmap.data[idx + 1] = MASK_COLOR.green;
-        image.bitmap.data[idx + 2] = MASK_COLOR.blue;
-        image.bitmap.data[idx + 3] = MASK_COLOR.alpha;
-      });
-      image.setPixelColor(maskColor, left, top);
-    }
-    const encoded = await image.getBufferAsync(Jimp.MIME_PNG);
-    await writeBase64File(uri, encoded.toString('base64'));
-  }
-  return uri;
-}
-
 export function createShareAssetPreparationService(deps: ShareAssetPreparationDeps = {}) {
-  const getCacheDirectory = deps.getCacheDirectory ?? (() => FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? undefined);
   const getPhotoSourceUri = deps.getPhotoSourceUri ?? getFallbackSourceUri;
-  const renderAnonymousAsset = deps.renderAnonymousAsset ?? (input => renderAnonymousAssetToPng(input, getCacheDirectory));
+  const renderAnonymousAsset = deps.renderAnonymousAsset ?? (async () => {
+    throw new Error('anonymous_masking_unavailable');
+  });
   const isPreparedAssetReadable = deps.isPreparedAssetReadable ?? isReadablePngFile;
   const assetCache = new Map<string, Promise<string>>();
 
@@ -311,6 +238,13 @@ export function createShareAssetPreparationService(deps: ShareAssetPreparationDe
               ok: false,
               reason: 'missing_source',
               message: '当前分享内容里有不可用的照片，暂时不能继续分享。',
+            };
+          }
+          if (message === 'anonymous_masking_unavailable') {
+            return {
+              ok: false,
+              reason: 'render_failed',
+              message: '当前环境暂不支持匿名照片遮挡，暂时不能分享。',
             };
           }
           return {

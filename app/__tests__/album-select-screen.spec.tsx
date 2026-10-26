@@ -14,10 +14,11 @@ const mockGetPhotoPermissionStatus=jest.fn();
 
 let mockDraftId='';
 let mockMode: string | undefined;
+let mockCharacterSelected: string | undefined;
 
 jest.mock('expo-router',()=>({
   useRouter:()=>mockRouter,
-  useLocalSearchParams:()=>({draftId:mockDraftId,mode:mockMode}),
+  useLocalSearchParams:()=>({draftId:mockDraftId,mode:mockMode,characterSelected:mockCharacterSelected}),
 }));
 
 jest.mock('../../src/services/photo-library',()=>({
@@ -89,6 +90,7 @@ describe('Album select screen',()=>{
     jest.clearAllMocks();
     alertSpy=jest.spyOn(Alert,'alert').mockImplementation(jest.fn());
     mockMode=undefined;
+    mockCharacterSelected=undefined;
     useAppStore.getState().grantPhotoPermission();
     mockDraftId=useAppStore.getState().beginCreation();
     mockGetPhotoPermissionStatus.mockResolvedValue({status:'full',granted:true,canAskAgain:true});
@@ -130,6 +132,24 @@ describe('Album select screen',()=>{
       expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(['p1','p2','p3']);
       expect(useAppStore.getState().drafts[mockDraftId].selectedPhotoIds).toEqual(['p1','p2','p3']);
       expect(mockRouter.push).toHaveBeenCalledWith({pathname:'/create/template',params:{draftId:mockDraftId}});
+    });
+  });
+
+  test('preserves a previously selected character when continuing to the template',async()=>{
+    mockCharacterSelected='true';
+    const screen=await render(<AlbumScreen/>);
+    await waitFor(()=>expect(screen.getByText('图片:p1')).toBeTruthy());
+
+    await act(async()=>{fireEvent.press(screen.getByLabelText('照片p1'));});
+    await act(async()=>{fireEvent.press(screen.getByLabelText('照片p2'));});
+    await act(async()=>{fireEvent.press(screen.getByLabelText('照片p3'));});
+    await act(async()=>{fireEvent.press(screen.getByLabelText('生成日记'));});
+
+    await waitFor(()=>{
+      expect(mockRouter.push).toHaveBeenCalledWith({
+        pathname:'/create/template',
+        params:{draftId:mockDraftId,characterSelected:'true'},
+      });
     });
   });
 
@@ -343,12 +363,18 @@ describe('Album select screen',()=>{
   });
 
   test('falls back to permission guidance when native permission sync says denied',async()=>{
+    mockCharacterSelected='true';
     mockGetPhotoPermissionStatus.mockResolvedValue({status:'denied',granted:false,canAskAgain:true});
 
     const screen=await render(<AlbumScreen/>);
 
     await waitFor(()=>expect(screen.getByText('需要相册权限')).toBeTruthy());
     expect(screen.getByText('请先允许访问相册，再继续选择照片。')).toBeTruthy();
+    await act(async()=>{fireEvent.press(screen.getByLabelText('返回授权说明'));});
+    expect(mockRouter.replace).toHaveBeenCalledWith({
+      pathname:'/permission/photos',
+      params:{draftId:mockDraftId,characterSelected:'true'},
+    });
     expect(mockListDevicePhotoAlbums).not.toHaveBeenCalled();
     expect(mockListDevicePhotos).not.toHaveBeenCalled();
   });

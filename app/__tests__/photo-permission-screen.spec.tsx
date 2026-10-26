@@ -15,11 +15,12 @@ const mockRouter = {
 };
 
 let mockDraftId = '';
+let mockCharacterSelected: string | undefined;
 const mockRequestPhotoPermission = jest.fn();
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
-  useLocalSearchParams: () => ({ draftId: mockDraftId }),
+  useLocalSearchParams: () => ({ draftId: mockDraftId, characterSelected: mockCharacterSelected }),
 }));
 
 jest.mock('../../src/services/photo-permission', () => ({
@@ -90,6 +91,7 @@ describe('Photo permission screen', () => {
     jest.clearAllMocks();
     const draftId = useAppStore.getState().beginCreation();
     mockDraftId = draftId;
+    mockCharacterSelected = undefined;
   });
 
   test('allows access with the same draft and navigates to album once', async () => {
@@ -114,6 +116,27 @@ describe('Photo permission screen', () => {
     });
 
     expect(Object.keys(useAppStore.getState().drafts)).toEqual([mockDraftId]);
+  });
+
+  test('preserves a previously selected character through photo permission', async () => {
+    mockCharacterSelected = 'true';
+    mockRequestPhotoPermission.mockResolvedValue({
+      status: 'full',
+      granted: true,
+      canAskAgain: true,
+    });
+
+    const screen = await render(<PermissionScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('允许访问相册'));
+    });
+
+    await waitFor(() => {
+      expect(mockRouter.replace).toHaveBeenCalledWith({
+        pathname: '/album/select',
+        params: { draftId: mockDraftId, characterSelected: 'true' },
+      });
+    });
   });
 
   test('shows the explanation first and does not request permission before explicit allow', async () => {

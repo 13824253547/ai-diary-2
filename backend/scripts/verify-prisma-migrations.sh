@@ -79,12 +79,11 @@ DATABASE_URL="mysql://root:root@127.0.0.1:33306/${fresh_database}" \
   --from-url "mysql://root:root@127.0.0.1:33306/${fresh_database}" \
   --to-schema-datamodel prisma/schema.prisma
 
+DATABASE_URL="mysql://root:root@127.0.0.1:33306/${baseline_database}" \
+  npx prisma migrate deploy
 docker compose -f docker-compose.local.yml exec -T mysql \
-  mysql -uroot -proot "${baseline_database}" \
-  < prisma/migrations/20261015000000_initial_schema/migration.sql
-docker compose -f docker-compose.local.yml exec -T mysql \
-  mysql -uroot -proot "${baseline_database}" \
-  < prisma/migrations/20261015001000_diary_content_snapshot/migration.sql
+  mysql -uroot -proot -D "${baseline_database}" -e \
+  "DELETE FROM _prisma_migrations WHERE migration_name <> '20261015000000_initial_schema'"
 docker compose -f docker-compose.local.yml exec -T mysql \
   mysql -uroot -proot -D "${baseline_database}" -e \
   "INSERT INTO Diary (id, ownerDeviceId, draftId, title, summary, location, date, privacy, photoIds, publicBlockIds, contentSnapshot, version, createdAt, updatedAt) VALUES ('baseline-diary', 'baseline-device', 'baseline-draft', 'Baseline diary', 'Existing data', 'Taipei', '2026-10-15 12:00:00.000', 'private', JSON_ARRAY('photo-1'), NULL, JSON_OBJECT('type', 'travel', 'blocks', JSON_ARRAY()), 1, '2026-10-15 12:00:00.000', '2026-10-15 12:00:00.000')"
@@ -102,8 +101,6 @@ case "${confirmation_output}" in
     ;;
 esac
 
-DATABASE_URL="mysql://root:root@127.0.0.1:33306/${baseline_database}" \
-  npx prisma migrate resolve --applied 20261015000000_initial_schema
 DATABASE_URL="mysql://root:root@127.0.0.1:33306/${baseline_database}" \
   npx ts-node scripts/baseline-prisma-migrations.ts --confirm-current-schema-is-final
 DATABASE_URL="mysql://root:root@127.0.0.1:33306/${baseline_database}" \

@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../common/prisma.service';
+import { isArkPetChatProviderConfigured } from './ark-pet-chat-provider';
+import { classifyPetChatInput, getPetChatPolicyMessage } from './pet-chat-safety-policy';
 
 export const CHAT_PAGE_SIZES = [10, 20, 50, 100] as const;
 
@@ -44,7 +46,15 @@ export type ChatConversationPage = {
 
 export class ChatSessionError extends Error {
   constructor(
-    readonly code: 'not_found' | 'invalid_input' | 'version_conflict' | 'permission_denied' | 'provider_failed',
+    readonly code:
+      | 'not_found'
+      | 'invalid_input'
+      | 'version_conflict'
+      | 'permission_denied'
+      | 'provider_failed'
+      | 'out_of_scope'
+      | 'unsafe_request'
+      | 'chat_busy',
     message: string,
   ) {
     super(message);
@@ -75,13 +85,16 @@ function fingerprint(value: unknown) {
 }
 
 function assertReplyProviderAvailable() {
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production' && !isArkPetChatProviderConfigured()) {
     throw new ChatSessionError('provider_failed', '正式环境尚未配置可信的聊天回复服务。');
   }
 }
 
 function assertReplySourceAvailable(source: 'mock' | 'provider') {
   assertReplyProviderAvailable();
+  if (process.env.NODE_ENV === 'production' && source !== 'provider') {
+    throw new ChatSessionError('provider_failed', '正式环境不接受 mock 聊天回复。');
+  }
   if (source === 'provider' && process.env.NODE_ENV !== 'test') {
     throw new ChatSessionError('provider_failed', '当前运行环境尚未配置可信的聊天回复服务。');
   }
@@ -227,6 +240,10 @@ export class ChatSessionsService {
     const userMessageId = normalizeIdentifier(input.userMessageId, 'userMessageId');
     const text = typeof input.text === 'string' ? input.text.trim() : '';
     if (!text) throw new ChatSessionError('invalid_input', '消息内容不能为空。');
+    const policyCode = classifyPetChatInput(text);
+    if (policyCode) {
+      throw new ChatSessionError(policyCode, getPetChatPolicyMessage(policyCode));
+    }
     assertReplyProviderAvailable();
     const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
     const requestHash = fingerprint([conversationId, requestId, userMessageId, text]);
@@ -331,6 +348,65 @@ export class ChatSessionsService {
     source: 'mock' | 'provider';
     providerRequestId?: string;
   }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
+    return this.persistTurnReply(input, ownerDeviceId, false);
+  }
+
+  async completeGeneratedTurn(input: {
+    conversationId: string;
+    requestId: string;
+    attempt: number;
+    assistantMessageId: string;
+    text: string;
+    source: 'provider';
+    providerRequestId?: string;
+  }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
+    if (!isArkPetChatProviderConfigured()) {
+      throw new ChatSessionError('provider_failed', '正式环境尚未配置可信的聊天回复服务。');
+    }
+    return this.persistTurnReply(input, ownerDeviceId, true);
+  }
+
+  async discardPolicyBlockedTurn(input: {
+    conversationId: string;
+    requestId: string;
+    attempt: number;
+  }, ownerDeviceId: string): Promise<void> {
+    const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
+    const requestId = normalizeIdentifier(input.requestId, 'requestId');
+    const attempt = normalizePositiveInteger(input.attempt, 'attempt');
+    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+
+    await this.prisma.$transaction(async transaction => {
+      const conversation = await lockConversation(transaction, conversationId);
+      if (!conversation) throw new ChatSessionError('not_found', '聊天会话不存在。');
+      if (conversation.ownerDeviceId !== owner) {
+        throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
+      }
+      const turn = await transaction.chatTurn.findUnique({
+        where: {
+          ownerDeviceId_conversationId_requestId: { ownerDeviceId: owner, conversationId, requestId },
+        },
+      });
+      if (!turn) return;
+      if (turn.status !== 'pending' || turn.attempt !== attempt) {
+        throw new ChatSessionError('version_conflict', '聊天请求已更新，不能清理当前 turn。');
+      }
+      await transaction.chatMessage.deleteMany({
+        where: { conversationId, requestId, role: 'user', id: turn.userMessageId },
+      });
+      await transaction.chatTurn.delete({ where: { id: turn.id } });
+    });
+  }
+
+  private async persistTurnReply(input: {
+    conversationId: string;
+    requestId: string;
+    attempt: number;
+    assistantMessageId: string;
+    text: string;
+    source: 'mock' | 'provider';
+    providerRequestId?: string;
+  }, ownerDeviceId: string, trustedProvider: boolean): Promise<ChatConversationSnapshot> {
     const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const attempt = normalizePositiveInteger(input.attempt, 'attempt');
@@ -339,7 +415,13 @@ export class ChatSessionsService {
     if (!text || (input.source !== 'mock' && input.source !== 'provider')) {
       throw new ChatSessionError('invalid_input', '回复内容或来源无效。');
     }
-    assertReplySourceAvailable(input.source);
+    if (trustedProvider) {
+      if (input.source !== 'provider') {
+        throw new ChatSessionError('invalid_input', '可信回复必须标记为 provider。');
+      }
+    } else {
+      assertReplySourceAvailable(input.source);
+    }
     const providerRequestId = input.providerRequestId
       ? normalizeIdentifier(input.providerRequestId, 'providerRequestId')
       : undefined;

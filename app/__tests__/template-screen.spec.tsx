@@ -15,12 +15,14 @@ const mockRouter = {
 };
 
 let currentDraftId: string | undefined;
+let mockCharacterSelected: string | undefined;
 
 jest.mock('../../src/hooks/use-diary-flow', () => ({
   useDraftRoute: () => {
     const { useAppStore } = require('../../src/store/use-app-store');
     return {
       draft: mockDraftId ? useAppStore.getState().drafts[mockDraftId] : undefined,
+      params: { characterSelected: mockCharacterSelected },
       router: mockRouter,
     };
   },
@@ -83,6 +85,7 @@ describe('Template screen', () => {
     resetAppStore();
     jest.clearAllMocks();
     mockDraftId = useAppStore.getState().beginCreation();
+    mockCharacterSelected = undefined;
   });
 
   test('travel selection explicitly writes the draft type before entering character step', async () => {
@@ -95,6 +98,21 @@ describe('Template screen', () => {
     expect(useAppStore.getState().drafts[mockDraftId].diary.type).toBe('travel');
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/create/character',
+      params: { draftId: mockDraftId },
+    });
+  });
+
+  test('continues to generation when the character was selected before photo picking', async () => {
+    if (!mockDraftId) throw new Error('draft should exist');
+    useAppStore.getState().setDraftCharacter(mockDraftId, 'character-green');
+    mockCharacterSelected = 'true';
+
+    const screen = await render(<TemplateScreen />);
+    fireEvent.press(screen.getByLabelText('旅行游记'));
+
+    expect(useAppStore.getState().drafts[mockDraftId].diary.characterId).toBe('character-green');
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/create/generating',
       params: { draftId: mockDraftId },
     });
   });

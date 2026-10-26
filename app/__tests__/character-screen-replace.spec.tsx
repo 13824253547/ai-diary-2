@@ -18,6 +18,7 @@ const mockRouter = {
 
 const mockParams: { mode?: string } = { mode: 'replace' };
 let mockDraftId: string | undefined;
+let originalRestartAction: AppStore['restartGenerationWithCharacter'];
 const mockListAvailableCharacters = jest.fn();
 
 jest.mock('../../src/services/character-catalog', () => ({
@@ -119,6 +120,7 @@ describe('Character screen replace mode', () => {
     resetAppStore();
     cleanup();
     jest.clearAllMocks();
+    originalRestartAction = useAppStore.getState().restartGenerationWithCharacter;
     mockDraftId = undefined;
     mockRouter.canGoBack.mockReturnValue(true);
     mockListAvailableCharacters.mockResolvedValue(mockCharacters.filter(character => canSelectCharacterId(character.id)));
@@ -126,14 +128,35 @@ describe('Character screen replace mode', () => {
 
   afterEach(() => {
     cleanup();
+    useAppStore.setState({ restartGenerationWithCharacter: originalRestartAction });
   });
 
-  test('picks a new character, returns back, and preserves the existing draft content', async () => {
+  test('picks a new character, syncs it, and replaces the editor with the generating screen', async () => {
     const draftId = seedReplaceDraft('diary-1');
     const before = useAppStore.getState().drafts[draftId];
     if (!before) {
       throw new Error('expected replace draft to exist');
     }
+    const restart = jest.fn(async (id: string, characterId: string) => {
+      useAppStore.setState(state => ({
+        drafts: {
+          ...state.drafts,
+          [id]: {
+            ...state.drafts[id],
+            diary: { ...state.drafts[id].diary, characterId, status: 'draft' },
+            generation: {
+              ...state.drafts[id].generation,
+              progress: 0,
+              status: 'idle',
+              remoteJobId: undefined,
+              remoteStage: undefined,
+            },
+          },
+        },
+      }));
+      return true;
+    });
+    useAppStore.setState({ restartGenerationWithCharacter: restart });
 
     const screen = await render(<CharacterScreen />);
 
@@ -143,6 +166,14 @@ describe('Character screen replace mode', () => {
 
     fireEvent.press(screen.getByLabelText('选择路易'));
 
+    await waitFor(() => {
+      expect(restart).toHaveBeenCalledWith(draftId, 'character-green');
+      expect(mockRouter.replace).toHaveBeenCalledWith({
+        pathname: '/create/generating',
+        params: { draftId },
+      });
+    });
+
     const after = useAppStore.getState().drafts[draftId];
     expect(after?.sourceDiaryId).toBe('diary-1');
     expect(after?.diary.characterId).toBe('character-green');
@@ -150,8 +181,31 @@ describe('Character screen replace mode', () => {
     expect(after?.diary.summary).toBe(before.diary.summary);
     expect(after?.diary.blocks).toEqual(before.diary.blocks);
     expect(after?.diary.photoIds).toEqual(before.diary.photoIds);
-    expect(mockRouter.back).toHaveBeenCalledTimes(1);
+    expect(after?.generation.status).toBe('idle');
+    expect(mockRouter.back).not.toHaveBeenCalled();
     expect(mockRouter.push).not.toHaveBeenCalled();
+    screen.unmount();
+  });
+
+  test('keeps the current character and stays on the picker when draft sync fails', async () => {
+    const draftId = seedReplaceDraft('diary-1');
+    const before = useAppStore.getState().drafts[draftId];
+    const restart = jest.fn(async () => false);
+    useAppStore.setState({ restartGenerationWithCharacter: restart });
+
+    const screen = await render(<CharacterScreen />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('选择路易')).toBeTruthy();
+    });
+
+    fireEvent.press(screen.getByLabelText('选择路易'));
+    await waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+
+    expect(useAppStore.getState().drafts[draftId].diary.characterId).toBe(before?.diary.characterId);
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByLabelText('选择路易'));
+    await waitFor(() => expect(restart).toHaveBeenCalledTimes(2));
     expect(mockRouter.replace).not.toHaveBeenCalled();
     screen.unmount();
   });

@@ -1,5 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
-import { type PropsWithChildren, useEffect, useRef, useState } from "react";
+import {
+  type PropsWithChildren,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   Easing,
@@ -10,6 +16,8 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -25,11 +33,16 @@ type BottomSheetProps = PropsWithChildren<{
   title?: string;
   actionLabel?: string;
   onAction?: () => void;
+  headerAction?: ReactNode;
   showClose?: boolean;
   scroll?: boolean;
   maxHeight?: number | `${number}%`;
   sheetStyle?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  footer?: ReactNode;
+  footerContainerStyle?: StyleProp<ViewStyle>;
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  scrollEventThrottle?: number;
   useModal?: boolean;
 }>;
 
@@ -40,11 +53,16 @@ export function BottomSheet({
   title,
   actionLabel,
   onAction,
+  headerAction,
   showClose = true,
   scroll = false,
   maxHeight = "82%",
   sheetStyle,
   contentContainerStyle,
+  footer,
+  footerContainerStyle,
+  onScroll,
+  scrollEventThrottle,
   useModal = true,
   children,
 }: BottomSheetProps) {
@@ -53,6 +71,7 @@ export function BottomSheet({
   const [rendered, setRendered] = useState(visible);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
+  const [footerHeight, setFooterHeight] = useState(0);
   const backdropOpacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
   const translateY = useRef(
     new Animated.Value(visible ? 0 : INITIAL_HIDDEN_OFFSET),
@@ -124,7 +143,7 @@ export function BottomSheet({
         : windowHeight * 0.82;
 
   const bodyMaxHeight = Math.max(
-    resolvedMaxHeight - headerHeight - 24 - insets.bottom,
+    resolvedMaxHeight - headerHeight - (footer ? footerHeight : 0) - 24 - insets.bottom,
     120,
   );
   const shouldScroll = scroll && contentHeight > bodyMaxHeight;
@@ -135,6 +154,8 @@ export function BottomSheet({
       scrollEnabled={shouldScroll}
       showsVerticalScrollIndicator={shouldScroll}
       onContentSizeChange={(_, height) => setContentHeight(height)}
+      onScroll={onScroll}
+      scrollEventThrottle={scrollEventThrottle}
       style={[styles.scrollBody, { maxHeight: bodyMaxHeight }]}
       contentContainerStyle={[styles.content, contentContainerStyle]}
     >
@@ -169,7 +190,7 @@ export function BottomSheet({
             sheetStyle,
           ]}
         >
-          {title || actionLabel || showClose ? (
+          {title || actionLabel || headerAction || showClose ? (
             <View
               style={styles.header}
               onLayout={(event) =>
@@ -181,6 +202,7 @@ export function BottomSheet({
               </Text>
               <Text style={styles.title}>{title}</Text>
               <View style={styles.headerRight}>
+                {headerAction}
                 {actionLabel ? (
                   <Pressable
                     accessibilityRole="button"
@@ -208,6 +230,16 @@ export function BottomSheet({
             </View>
           ) : null}
           {body}
+          {footer ? (
+            <View
+              onLayout={(event) =>
+                setFooterHeight(event.nativeEvent.layout.height)
+              }
+              style={footerContainerStyle}
+            >
+              {footer}
+            </View>
+          ) : null}
         </View>
       </Animated.View>
     </View>

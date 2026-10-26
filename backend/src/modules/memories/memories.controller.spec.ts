@@ -90,4 +90,15 @@ describe('MemoriesController', () => {
     ).resolves.toMatchObject({ data: { total: 0 } });
     expect(store.listDiaries).toHaveBeenCalledWith('device-test');
   });
+
+  test('filters the memories calendar using the publication date returned by the store', async () => {
+    (store.listDiaries as jest.Mock).mockResolvedValueOnce([
+      { id: 'diary-published-april', date: '2026.04.25', title: '四月发布', summary: '', location: '' },
+      { id: 'diary-captured-january', date: '2026.01.13', title: '一月发布', summary: '', location: '' },
+    ]);
+
+    const result = await controller.listMemories('2026-04', undefined, undefined, '1', '20', 'device-test');
+
+    expect(result.data.items.map(item => item.id)).toEqual(['diary-published-april']);
+  });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../src/components/common/button';
@@ -8,9 +8,9 @@ import { BottomSheet } from '../../src/components/common/bottom-sheet';
 import { EmptyResult, IconAction, SearchField, SectionTitle, supportStyles as u } from '../../src/components/common/support-ui';
 import { BottomTabs } from '../../src/components/navigation/bottom-tabs';
 import { useAppStore } from '../../src/store/use-app-store';
-import { mockPhotos } from '../../src/mocks/photos';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
+import { Photo } from '../../src/components/diary/photo';
 
 function formatDiaryCardAccessibilityLabel(title: string, date: string) {
   return `${title}，${date}`;
@@ -110,12 +110,12 @@ export default function MemoriesScreen() {
       </Pressable>;
     })}</View>
     {day || month !== '全部' ? <Pressable onPress={() => setMemoriesFilters({ month: '全部', day: null })}><Text style={u.muted}>查看{day ? `${day}日` : '本月'}的回忆　·　显示全部</Text></Pressable> : null}
-    {recent.length > 0 && month !== '全部' && !search ? <View style={s.group}><SectionTitle title="刚刚写下的回忆" />{recent.map(d => <Pressable key={d.id} accessibilityRole="button" accessibilityLabel={formatRecentDiaryCardAccessibilityLabel(d.title, d.date)} onPress={() => router.push(`/diary/${d.id}`)} style={s.diary}><Image source={mockPhotos.find(p => p.id === d.coverPhotoId)?.image ?? art.temple} style={s.cover} /><View style={s.copy}><Text style={s.diaryTitle}>{d.title}</Text><Text style={u.muted}>{d.date}</Text></View></Pressable>)}</View> : null}
+    {recent.length > 0 && month !== '全部' && !search ? <View style={s.group}><SectionTitle title="刚刚写下的回忆" />{recent.map(d => <Pressable key={d.id} accessibilityRole="button" accessibilityLabel={formatRecentDiaryCardAccessibilityLabel(d.title, d.date)} onPress={() => router.push(`/diary/${d.id}`)} style={s.diary}><Photo id={d.coverPhotoId} diaryId={d.id} style={s.cover} /><View style={s.copy}><Text style={s.diaryTitle}>{d.title}</Text><Text style={u.muted}>{d.date}</Text></View></Pressable>)}</View> : null}
     {memoriesStatus === 'error' ? <View style={s.group}><Text style={u.muted}>{memoriesError ?? '回忆加载失败，请稍后再试。'}</Text><Button variant="secondary" label="重新加载" onPress={() => void retryMemoriesSearch()} /></View> : displayedDiaries.length === 0 ? <EmptyResult /> : <>
-      {travel.length > 0 ? <View style={s.group}><SectionTitle title={`▸ 旅行游记 · ${travel.length}篇`} /><View style={{ gap: 7 }}>{travel.map(d => <Pressable accessibilityRole="button" accessibilityLabel={formatDiaryCardAccessibilityLabel(d.title, d.date)} key={d.id} onPress={() => router.push(`/diary/${d.id}`)} style={s.diary}><Image source={mockPhotos.find(p => p.id === d.coverPhotoId)?.image ?? art.temple} style={s.cover} /><View style={s.copy}><Text style={s.diaryTitle} numberOfLines={2}>{d.title}</Text><Text style={u.muted}>{d.date.replaceAll('.', '/')}</Text></View><Image source={art.mascot} style={s.smallMascot} resizeMode="contain" /></Pressable>)}</View></View> : null}
+      {travel.length > 0 ? <View style={s.group}><SectionTitle title={`▸ 旅行游记 · ${travel.length}篇`} /><View style={{ gap: 7 }}>{travel.map(d => <Pressable accessibilityRole="button" accessibilityLabel={formatDiaryCardAccessibilityLabel(d.title, d.date)} key={d.id} onPress={() => router.push(`/diary/${d.id}`)} style={s.diary}><Photo id={d.coverPhotoId} diaryId={d.id} style={s.cover} /><View style={s.copy}><Text style={s.diaryTitle} numberOfLines={2}>{d.title}</Text><Text style={u.muted}>{d.date.replaceAll('.', '/')}</Text></View><Image source={art.mascot} style={s.smallMascot} resizeMode="contain" /></Pressable>)}</View></View> : null}
       {thoughts.length > 0 ? <View style={s.group}><SectionTitle title={`▸ 生活感悟 · ${thoughts.length}篇`} /><View style={s.thoughts}>{thoughts.map(d => <Pressable key={d.id} accessibilityRole="button" accessibilityLabel={formatDiaryCardAccessibilityLabel(d.title, d.date)} onPress={() => router.push(`/diary/${d.id}`)} style={s.thought}><Text style={s.quote}>“</Text><Text numberOfLines={3} style={u.body}>{d.summary}</Text><Text style={u.muted}>{d.date.slice(5).replace('.', '月')}日</Text></Pressable>)}</View></View> : null}
     </>}
-    <View style={s.group}><SectionTitle title="▸ 旅游明信片" action="制作一张" onPress={() => router.push('/postcard')} /><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>{[art.santorini, art.balloons, art.mountain, art.train].map((source, i) => <Pressable accessibilityLabel={`查看第${i + 1}张明信片`} key={i} onPress={() => router.push({ pathname: '/postcard', params: { photo: String(i) } })}><Image source={source} style={s.postcard} /></Pressable>)}</ScrollView></View>
+    <View style={s.group}><SectionTitle title="▸ 旅游明信片" action="选择真实照片" onPress={() => router.push('/library')} /><Text style={u.muted}>从素材库选择设备照片后，可预览明信片样式。</Text></View>
     <BottomSheet visible={pickerVisible} onClose={() => setPickerVisible(false)} title="选择日期" actionLabel="完成" onAction={() => setPickerVisible(false)} showClose={false} scroll maxHeight="92%" sheetStyle={s.sheet}>
       <Text style={u.body}>{selectedMonth.replace('.', '年')}月</Text><View style={s.calendar}>{calendar.map((d, i) => {
       const hasEntries = d > 0 && daysWithEntries.has(d);
@@ -135,7 +135,7 @@ const s = StyleSheet.create({
   monthButton: { flexDirection: 'row', gap: 8, alignItems: 'center' }, month: { fontSize: 23, fontWeight: '600', color: colors.textPrimary }, tools: { flexDirection: 'row', gap: 10 },
   week: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }, day: { alignItems: 'center', gap: 9, minWidth: 36 }, weekName: { fontSize: 12, color: colors.textMuted }, dayBadge: { alignItems: 'center', minHeight: 44 }, dayNumber: { fontSize: 16, color: colors.textPrimary, width: 36, height: 36, textAlign: 'center', lineHeight: 36, overflow: 'hidden', borderRadius: 18 }, selectedDay: { color: '#fff', backgroundColor: colors.brand }, dayDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.brand, marginTop: 3 }, selectedDayDot: { backgroundColor: '#fff', marginTop: -7 },
   group: { borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 9, gap: 10 }, diary: { flexDirection: 'row', borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.surface, overflow: 'hidden', alignItems: 'center', gap: 12 }, cover: { width: 139, height: 82 }, copy: { flex: 1, paddingRight: 4, gap: 6 }, diaryTitle: { fontSize: 14, lineHeight: 21, color: colors.textPrimary }, smallMascot: { width: 32, height: 35, position: 'absolute', bottom: 0, right: 3 },
-  thoughts: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' }, thought: { flexBasis: '48%', flexGrow: 1, padding: 12, paddingTop: 4, backgroundColor: colors.surface, borderRadius: 12, borderColor: colors.border, borderWidth: 1, gap: 5 }, quote: { color: colors.brand, fontSize: 26, height: 22 }, postcard: { width: 80, height: 94, borderRadius: 9 },
+  thoughts: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' }, thought: { flexBasis: '48%', flexGrow: 1, padding: 12, paddingTop: 4, backgroundColor: colors.surface, borderRadius: 12, borderColor: colors.border, borderWidth: 1, gap: 5 }, quote: { color: colors.brand, fontSize: 26, height: 22 },
   calendar: { flexDirection: 'row', flexWrap: 'wrap' }, calendarCell: { width: '14.28%', alignItems: 'center', paddingVertical: 2 },
   sheet: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 44, borderTopLeftRadius: 24, borderTopRightRadius: 24 }, monthChoice: { paddingVertical: 13, borderBottomWidth: 1, borderColor: colors.border, flexDirection: 'row', justifyContent: 'space-between' },
 });

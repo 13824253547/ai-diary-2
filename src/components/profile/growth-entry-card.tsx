@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useAppStore } from '../../store/use-app-store';
 
 export function GrowthEntryCard({ onPress }: { onPress: () => void }) {
+  const diaryCount = useAppStore(state => state.diaries.length);
   return <Pressable accessibilityRole="button" accessibilityLabel="小橘眼中的你，查看成长记忆" onPress={onPress} style={({ pressed }) => [s.card, pressed && { opacity: 0.8 }]}>
-    <View style={s.copy}><Text style={s.title}>小橘眼中的你</Text><Text style={s.subtitle}>12 个记忆锚点 ·{'\n'}再长 3 片叶子就会开花啦</Text></View>
+    <View style={s.copy}><Text style={s.title}>小橘眼中的你</Text><Text style={s.subtitle}>{diaryCount} 篇日记 ·{'\n'}成长记录以真实回忆为准</Text></View>
     <Ionicons name="chevron-forward" size={20} color="#3F2D1D" style={s.arrow} />
     <Image source={require('../../../assets/restored/growth-globe.png')} style={s.art} resizeMode="contain" accessibilityIgnoresInvertColors />
   </Pressable>;

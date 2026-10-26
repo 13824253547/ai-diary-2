@@ -82,38 +82,20 @@ async function createTempImage(
 }
 
 describe('share export file service', () => {
-  test('renders a real png export file for save mode', async () => {
-    const fs = require('fs');
-    const os = require('os');
-    const path = require('path');
-    const Jimp = require('jimp-compact');
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-export-image-'));
-    const outputRoot = `file://${tempRoot}/`;
-    const firstImage = await createTempImage(path.join(tempRoot, 'photo-1.png'), 0xf28d35ff, { id: 'photo-1' });
-    const secondImage = await createTempImage(path.join(tempRoot, 'photo-2.png'), 0x4d7bdfff, { id: 'photo-2' });
-    const service = createShareExportFileService({
-      getOutputDirectory: () => outputRoot,
-    });
+  test('fails closed for image export until a native renderer is available', async () => {
+    const service = createShareExportFileService();
 
-    const result = await service.exportFile({
+    await expect(service.exportFile({
       diary: createDiary(),
       mode: 'save',
-      assets: [firstImage.asset, secondImage.asset],
+      assets: [],
       operationId: 'share-op-image-1',
+    })).resolves.toEqual({
+      ok: false,
+      reason: 'unsupported',
+      message: '长图导出尚未接入真实文字渲染和系统相册保存。',
     });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error(result.message);
-    }
-    expect(result.fileUri).toMatch(/\.png$/);
-    expect(fs.existsSync(result.fileUri.replace(/^file:\/\//, ''))).toBe(true);
-
-    const rendered = await Jimp.read(result.fileUri.replace(/^file:\/\//, ''));
-    expect(rendered.bitmap.width).toBe(1080);
-    expect(rendered.bitmap.height).toBeGreaterThan(900);
-    expect(rendered.getPixelColor(120, 240)).toBe(firstImage.asset ? 0xf28d35ff : 0);
-  }, 15000);
+  });
 
   test('writes a pdf export file with the expected header and content bytes', async () => {
     const fs = require('fs');

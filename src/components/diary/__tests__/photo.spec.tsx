@@ -72,7 +72,47 @@ describe('Diary photo', () => {
 
     expect(screen.getByTestId('diary-photo-device-photo-p1').props.source).toEqual({
       uri: 'file:///device/device-p1.jpg',
+      headers: undefined,
     });
+  });
+
+  test('sends identity headers when loading a remote material photo', async () => {
+    const remoteHeaders = {
+      'x-device-id': 'device-1',
+      Authorization: 'Bearer signed-token',
+    };
+    registerPhoto('material-photo-p1', {
+      localUri: undefined,
+      uri: 'https://api.example.test/photos/materials/material-photo-p1/content',
+      remoteHeaders,
+    });
+
+    const screen = await render(<Photo id="material-photo-p1" style={{ width: 120, height: 90 }} />);
+
+    expect(screen.getByTestId('diary-photo-material-photo-p1').props.source).toEqual({
+      uri: 'https://api.example.test/photos/materials/material-photo-p1/content',
+      headers: remoteHeaders,
+    });
+  });
+
+  test('loads a saved diary photo by query so iOS cannot split source IDs on slashes', async () => {
+    const remoteHeaders = { 'x-device-id': 'device-1' };
+    const photoId = 'material-photo-context/L0/001';
+    registerPhoto(photoId, {
+      localUri: undefined,
+      uri: 'https://api.example.test/photos/diary-copies/material-photo-context/L0/001/content',
+      remoteHeaders,
+    });
+
+    const screen = await render(
+      <Photo id={photoId} diaryId="diary-context-1" style={{ width: 120, height: 90 }} />,
+    );
+
+    const source = screen.getByTestId(`diary-photo-${photoId}`).props.source;
+    expect(source.uri).toContain(
+      '/photos/diaries/diary-context-1/photo-content?photoId=material-photo-context%2FL0%2F001',
+    );
+    expect(source.headers).toBe(remoteHeaders);
   });
 
   test('keeps diary text visible when an inline photo becomes unreadable', async () => {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert } from 'react-native';
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import EditScreen from '../diary/[id]/edit';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
@@ -419,6 +419,45 @@ describe('Edit screen', () => {
     expect(rewriteDraftBlock).not.toHaveBeenCalled();
   });
 
+  test('rewrite loading locks editing, navigation, photo selection, layout changes, and saving', async () => {
+    const { draftId, getByLabelText, getByText, queryByLabelText } = await renderWithExistingDraft();
+    const targetBlock = useAppStore.getState().drafts[draftId].diary.blocks.find(block => block.type === 'text')!;
+    const requestKey = `${encodeURIComponent(draftId)}:${encodeURIComponent(targetBlock.id)}`;
+    const submitDraft = jest.fn();
+    mockLeaveDraft = jest.fn();
+    useAppStore.setState({ submitDraft });
+
+    await act(async () => {
+      useAppStore.setState({ rewritingDraftBlockKeys: [requestKey] });
+    });
+
+    expect(getByLabelText('重写中…').props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+    expect(getByLabelText('日记标题').props.editable).toBe(false);
+    expect(getByLabelText('编辑段落1').props.editable).toBe(false);
+    expect(getByLabelText('更换照片').props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+    expect(getByLabelText('返回').props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+    expect(getByLabelText('更换排版师').props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+
+    const referenceButton = getByLabelText(/^为第1段选择引用图片$|^更换第1段引用图片$/);
+    expect(referenceButton.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+
+    fireEvent.press(getByText('保存'));
+    fireEvent.press(getByLabelText('返回'));
+    fireEvent.press(getByLabelText('更换照片'));
+    fireEvent.press(getByLabelText('更换排版师'));
+    expect(submitDraft).not.toHaveBeenCalled();
+    expect(mockLeaveDraft).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useAppStore.setState({ rewritingDraftBlockKeys: [] });
+    });
+
+    expect(queryByLabelText('重写中…')).toBeNull();
+    expect(getByLabelText('重写本段')).toBeTruthy();
+    expect(getByLabelText('日记标题').props.editable).toBe(true);
+  });
+
   test('rewrite timeout surfaces a visible Chinese failure alert on the edit screen', async () => {
     const { getByText } = await renderWithExistingDraft();
     const rewriteDraftBlock = jest.fn().mockImplementation(() => {
@@ -473,6 +512,40 @@ describe('Edit screen', () => {
     });
   });
 
+  test('out-of-scope rewrite requests and device task conflicts show specific Chinese alerts', async () => {
+    for (const [message, expected] of [
+      [
+        '段落重写失败：此功能仅用于整理日记和已选照片，不支持代码、小说或商业推广内容。',
+        '重写内容超出日记范围，请修改原文后重试。',
+      ],
+      [
+        '段落重写失败：生成结果超出日记内容范围，未予采用；请检查照片或原文后重试。',
+        '重写结果超出日记范围，未写回原文，请稍后重试。',
+      ],
+      [
+        '段落重写失败：当前设备已有一项日记生成或重写任务正在执行，请等待完成后重试。',
+        '当前设备已有一项日记生成或重写任务正在执行，请等待完成后重试。',
+      ],
+    ]) {
+      const { getByText } = await renderWithExistingDraft();
+      const rewriteDraftBlock = jest.fn().mockImplementation(() => {
+        useAppStore.getState().logIssue(message);
+        return Promise.resolve();
+      });
+      useAppStore.setState({ rewriteDraftBlock });
+
+      await act(async () => {
+        fireEvent.press(getByText('重写本段'));
+      });
+
+      await waitFor(() => {
+        expect(rewriteDraftBlock).toHaveBeenCalled();
+        expect(alertSpy).toHaveBeenCalledWith('重写失败', expected);
+      });
+      alertSpy.mockClear();
+    }
+  });
+
   test('closing the paragraph photo sheet keeps the original references untouched', async () => {
     mockParams.openBlockPhotos = 'block-1';
     const { getByText, draftId } = await renderWithExistingDraft();
@@ -487,16 +560,61 @@ describe('Edit screen', () => {
     expect(updatedBlock && 'photoIds' in updatedBlock ? updatedBlock.photoIds : undefined).toEqual(originalRefs);
   });
 
-  test('invalid paragraph reference photos stay uncommitted and show an inline warning', async () => {
+  test('paragraph photo choices follow the selected-photo order and commit only one reference', async () => {
     mockParams.openBlockPhotos = 'block-1';
-    const { getByText, draftId } = await renderWithExistingDraft();
-    const setDraftBlockPhotos = jest.fn();
-    useAppStore.setState({ setDraftBlockPhotos });
-    const originalBlock = useAppStore.getState().drafts[draftId].diary.blocks.find(block => block.id === 'block-1');
-    const originalRefs = originalBlock && 'photoIds' in originalBlock ? [...(originalBlock.photoIds ?? [])] : [];
-    mockValidateReadableDevicePhotoIds.mockResolvedValue({
-      validIds: originalRefs.slice(0, 1),
-      invalidIds: originalRefs.slice(1),
+    const { getByLabelText, getByText, draftId } = await renderWithCustomExistingDraft(draft => ({
+      ...draft,
+      selectedPhotoIds: ['photo-3', 'photo-1'],
+    }));
+    const selectedId = 'photo-3';
+    mockValidateReadableDevicePhotoIds.mockResolvedValue({ validIds: [selectedId], invalidIds: [] });
+
+    expect(getByLabelText('引用图片1')).toBeTruthy();
+    expect(getByLabelText('引用图片2')).toBeTruthy();
+    expect(() => getByLabelText('引用图片3')).toThrow();
+
+    await act(async () => {
+    fireEvent.press(getByLabelText('引用图片1'));
+    });
+    await act(async () => {
+      fireEvent.press(getByText('引用所选图片'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith([selectedId]));
+    const updatedBlock = useAppStore.getState().drafts[draftId].diary.blocks.find(block => block.id === 'block-1');
+    expect(updatedBlock && 'photoIds' in updatedBlock ? updatedBlock.photoIds : undefined).toEqual([selectedId]);
+  });
+
+  test('referenced photo is shown in the control and can be replaced from the chooser', async () => {
+    const { getByLabelText, getByText, getAllByText, rerender, draftId } = await renderWithCustomExistingDraft(draft => ({
+      ...draft,
+      selectedPhotoIds: ['photo-1', 'photo-2'],
+      diary: {
+        ...draft.diary,
+        blocks: draft.diary.blocks.map(block => (
+          block.id === 'block-1' && 'photoIds' in block
+            ? { ...block, photoIds: ['photo-1'] }
+            : block
+        )),
+      },
+    }));
+    const referenceButton = getByLabelText('更换第1段引用图片');
+
+    expect(within(referenceButton).getByText('photo-1')).toBeTruthy();
+    expect(getAllByText('photo-1')).toHaveLength(2);
+
+    await act(async () => {
+      fireEvent.press(referenceButton);
+    });
+
+    await waitFor(() => expect(getByLabelText('引用图片1')).toBeTruthy());
+    expect(getByLabelText('引用图片1').props.accessibilityState).toEqual(expect.objectContaining({ checked: true, disabled: false }));
+    expect(getByLabelText('引用图片2').props.accessibilityState).toEqual(expect.objectContaining({ checked: false, disabled: false }));
+    mockValidateReadableDevicePhotoIds.mockResolvedValue({ validIds: ['photo-2'], invalidIds: [] });
+
+    await act(async () => {
+      fireEvent.press(getByLabelText('引用图片2'));
     });
 
     await act(async () => {
@@ -504,7 +622,41 @@ describe('Edit screen', () => {
     });
 
     await waitFor(() => {
-      expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(originalRefs);
+      const updatedBlock = useAppStore.getState().drafts[draftId].diary.blocks.find(block => block.id === 'block-1');
+      expect(updatedBlock && 'photoIds' in updatedBlock ? updatedBlock.photoIds : undefined).toEqual(['photo-2']);
+      expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(['photo-2']);
+    });
+
+    mockDraft = useAppStore.getState().drafts[draftId];
+    await act(async () => rerender(<EditScreen />));
+
+    const updatedReferenceButton = getByLabelText('更换第1段引用图片');
+    expect(within(updatedReferenceButton).getByText('photo-2')).toBeTruthy();
+    expect(getAllByText('photo-1')).toHaveLength(1);
+  });
+
+  test('invalid paragraph reference photos stay uncommitted and show an inline warning', async () => {
+    const { getByText, getByLabelText, draftId } = await renderWithExistingDraft();
+    await act(async () => {
+      fireEvent.press(getByLabelText('更换第1段引用图片'));
+    });
+    await waitFor(() => expect(getByText('引用所选图片')).toBeTruthy());
+    const setDraftBlockPhotos = jest.fn();
+    useAppStore.setState({ setDraftBlockPhotos });
+    const originalBlock = useAppStore.getState().drafts[draftId].diary.blocks.find(block => block.id === 'block-1');
+    const originalRefs = originalBlock && 'photoIds' in originalBlock ? [...(originalBlock.photoIds ?? [])] : [];
+    const selectedRefs = originalRefs.slice(0, 1);
+    mockValidateReadableDevicePhotoIds.mockResolvedValue({
+      validIds: [],
+      invalidIds: selectedRefs,
+    });
+
+    await act(async () => {
+      fireEvent.press(getByText('引用所选图片'));
+    });
+
+    await waitFor(() => {
+      expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(selectedRefs);
       expect(getByText('有1张引用图片已不可用，请重新选择。')).toBeTruthy();
     });
 
@@ -516,20 +668,24 @@ describe('Edit screen', () => {
   });
 
   test('paragraph reference validation failure keeps the original references unchanged', async () => {
-    mockParams.openBlockPhotos = 'block-1';
-    const { getByText, draftId } = await renderWithExistingDraft();
+    const { getByText, getByLabelText, draftId } = await renderWithExistingDraft();
+    await act(async () => {
+      fireEvent.press(getByLabelText('更换第1段引用图片'));
+    });
+    await waitFor(() => expect(getByText('引用所选图片')).toBeTruthy());
     const setDraftBlockPhotos = jest.fn();
     useAppStore.setState({ setDraftBlockPhotos });
     mockValidateReadableDevicePhotoIds.mockRejectedValue(new Error('broken asset info'));
     const originalBlock = useAppStore.getState().drafts[draftId].diary.blocks.find(block => block.id === 'block-1');
     const originalRefs = originalBlock && 'photoIds' in originalBlock ? [...(originalBlock.photoIds ?? [])] : [];
+    const selectedRefs = originalRefs.slice(0, 1);
 
     await act(async () => {
       fireEvent.press(getByText('引用所选图片'));
     });
 
     await waitFor(() => {
-      expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(originalRefs);
+      expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(selectedRefs);
       expect(getByText('当前无法更新引用图片，请稍后重试。')).toBeTruthy();
     });
 

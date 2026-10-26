@@ -1,19 +1,25 @@
 import {useEffect,useMemo,useState} from 'react';
 import {Image,StyleSheet,Text,View,type ImageSourcePropType,type StyleProp,type ViewStyle} from 'react-native';
 import {appSelectors,useAppStore} from '../../store/use-app-store';
+import {getDiaryPhotoContentUrl} from '../../services/material-photo-api';
 
-export function Photo({id,style,anonymous=false}:{id:string;style?:StyleProp<ViewStyle>;anonymous?:boolean}){
+export function Photo({id,diaryId,style,anonymous=false}:{id:string;diaryId?:string;style?:StyleProp<ViewStyle>;anonymous?:boolean}){
   useAppStore(state=>state.photoCatalogVersion);
   const photo=appSelectors.getPhotoById(id);
   const [failed,setFailed]=useState(false);
   const [size,setSize]=useState({width:0,height:0});
-  const source=useMemo<ImageSourcePropType|undefined>(()=>photo?.localUri||photo?.uri?{uri:photo.localUri??photo.uri}:photo?.image,[photo?.image,photo?.localUri,photo?.uri]);
+  const source=useMemo<ImageSourcePropType|undefined>(()=> {
+    const uri=diaryId&&photo?.remoteHeaders&&/^https?:\/\//i.test(photo.uri??'')
+      ?getDiaryPhotoContentUrl(diaryId,id)
+      :photo?.localUri??photo?.uri;
+    return uri?{uri,headers:photo?.remoteHeaders}:photo?.image;
+  },[diaryId,id,photo?.image,photo?.localUri,photo?.remoteHeaders,photo?.uri]);
   const sourceSize=useMemo(()=>{
     if(photo?.image)return Image.resolveAssetSource(photo.image);
     if(photo?.width&&photo?.height)return {width:photo.width,height:photo.height};
     return undefined;
   },[photo?.height,photo?.image,photo?.width]);
-  useEffect(()=>{setFailed(false);},[id,source]);
+  useEffect(()=>{setFailed(false);},[diaryId,id,source]);
   if(!photo||!source||failed)return <View accessibilityLabel="图片暂时不可用" style={[s.frame,s.fallback,style]}><Text style={s.fallbackText}>图片暂时不可用</Text></View>;
   const scale=sourceSize?Math.max(size.width/sourceSize.width,size.height/sourceSize.height):1;
   const dx=sourceSize?(size.width-sourceSize.width*scale)/2:0;

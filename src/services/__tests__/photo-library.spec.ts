@@ -2,12 +2,15 @@ import * as MediaLibrary from 'expo-media-library/legacy';
 import { PermissionStatus } from 'expo-modules-core';
 import { Image } from 'react-native';
 import { createAsyncFaultPlan } from '../../test-utils/fakes/create-async-fault-plan';
-import { importDevicePhotoAssets, validateReadableDevicePhotoIds } from '../photo-library';
+import { importDevicePhotoAssets, listDevicePhotos, validateReadableDevicePhotoIds } from '../photo-library';
 
 jest.mock('expo-media-library/legacy', () => ({
   getAssetInfoAsync: jest.fn(),
+  getAlbumsAsync: jest.fn(),
+  getAssetsAsync: jest.fn(),
   getPermissionsAsync: jest.fn(),
   MediaType: { photo: 'photo' },
+  SortBy: { creationTime: 'creationTime' },
 }));
 
 describe('photo library asset access', () => {
@@ -92,6 +95,45 @@ describe('photo library asset access', () => {
       expect.any(Function),
       expect.any(Function),
     );
+  });
+
+  test('does not treat a photo album name as the photo location', async () => {
+    jest.mocked(MediaLibrary.getAlbumsAsync).mockResolvedValue([
+      { id: 'album-1', title: '苏州旅行', assetCount: 1 },
+    ] as Awaited<ReturnType<typeof MediaLibrary.getAlbumsAsync>>);
+    jest.mocked(MediaLibrary.getAssetsAsync).mockResolvedValue({
+      assets: [{
+        id: 'device-photo-1',
+        mediaType: MediaLibrary.MediaType.photo,
+        uri: 'ph://device-photo-1',
+        filename: 'trip.jpg',
+        creationTime: 1_760_000_000_000,
+        modificationTime: 1_760_000_000_000,
+        duration: 0,
+        width: 1200,
+        height: 1600,
+      }],
+      hasNextPage: false,
+      endCursor: 'device-photo-cursor',
+      totalCount: 1,
+    } as Awaited<ReturnType<typeof MediaLibrary.getAssetsAsync>>);
+    jest.mocked(MediaLibrary.getAssetInfoAsync).mockResolvedValue({
+      id: 'device-photo-1',
+      mediaType: MediaLibrary.MediaType.photo,
+      uri: 'ph://device-photo-1',
+      localUri: 'file:///device-photo-1.jpg',
+      filename: 'trip.jpg',
+      creationTime: 1_760_000_000_000,
+      width: 1200,
+      height: 1600,
+    } as Awaited<ReturnType<typeof MediaLibrary.getAssetInfoAsync>>);
+
+    const page = await listDevicePhotos({ albumId: 'album-1' });
+
+    expect(page.photos[0]).toMatchObject({
+      location: '',
+      albumTitle: '苏州旅行',
+    });
   });
 
   test('does not import a denied or network-only asset', async () => {

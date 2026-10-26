@@ -12,6 +12,7 @@ import { DiscoveryModule } from './modules/discovery/discovery.module';
 import { SharingModule } from './modules/sharing/sharing.module';
 import { AnchorCorrectionsModule } from './modules/anchors/anchor-corrections.module';
 import { ChatSessionsModule } from './modules/chat/chat-sessions.module';
+import { AIImageGenerationModule } from './modules/ai-images/ai-image-generation.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ChatSessionsModule } from './modules/chat/chat-sessions.module';
     SharingModule,
     AnchorCorrectionsModule,
     ChatSessionsModule,
+    AIImageGenerationModule,
   ],
   controllers: [HealthController],
 })

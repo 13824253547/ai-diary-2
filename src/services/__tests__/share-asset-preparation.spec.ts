@@ -286,91 +286,21 @@ describe('share asset preparation', () => {
     }
   });
 
-  test('renders a masked png asset without mutating the source image', async () => {
-    const Jimp = require('jimp-compact');
-    const fs = require('fs');
-    const os = require('os');
-    const path = require('path');
-
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-asset-'));
-    const sourcePath = path.join(tempRoot, 'source.png');
-    const cacheDirectory = `file://${tempRoot}/cache/`;
-    const maskColor = Jimp.rgbaToInt(192, 182, 170, 255);
-    fs.mkdirSync(path.join(tempRoot, 'cache', 'anonymous-share-assets'), { recursive: true });
-
-    const source = await new Jimp(10, 10, 0xff8844ff);
-    await source.writeAsync(sourcePath);
-
-    const service = createShareAssetPreparationService({
-      getCacheDirectory: () => cacheDirectory,
-    });
+  test('fails closed when anonymous photo masking has no native renderer', async () => {
+    const service = createShareAssetPreparationService();
     const result = await service.prepareDiaryShareAssets({
       diary: createDiary(),
       target: 'save',
       getPhotoById: () => createPhoto({
-        uri: `file://${sourcePath}`,
-        localUri: `file://${sourcePath}`,
-        width: 10,
-        height: 10,
         faceRects: [{ x: 0.2, y: 0.3, width: 0.3, height: 0.4 }],
         personIds: ['person-friend'],
       }),
     });
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error('expected share asset preparation to succeed');
-    }
-    expect(result.assets[0]).toMatchObject({
-      photoId: 'photo-1',
-      anonymous: true,
+    expect(result).toEqual({
+      ok: false,
+      reason: 'render_failed',
+      message: '当前环境暂不支持匿名照片遮挡，暂时不能分享。',
     });
-    expect(result.assets[0]?.uri.endsWith('.png')).toBe(true);
-
-    const sourceAfter = await Jimp.read(sourcePath);
-    const masked = await Jimp.read(result.assets[0]?.uri.replace(/^file:\/\//, ''));
-
-    expect(masked.getPixelColor(0, 0)).toBe(sourceAfter.getPixelColor(0, 0));
-    expect(masked.getPixelColor(3, 4)).toBe(maskColor);
-    expect(sourceAfter.getPixelColor(3, 4)).not.toBe(maskColor);
-  });
-
-  test('clips partially out-of-bounds face rectangles to the source image pixels', async () => {
-    const Jimp = require('jimp-compact');
-    const fs = require('fs');
-    const os = require('os');
-    const path = require('path');
-
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'share-asset-edge-'));
-    const sourcePath = path.join(tempRoot, 'source.png');
-    const cacheDirectory = `file://${tempRoot}/cache/`;
-    const maskColor = Jimp.rgbaToInt(192, 182, 170, 255);
-    fs.mkdirSync(path.join(tempRoot, 'cache', 'anonymous-share-assets'), { recursive: true });
-    await new Jimp(10, 10, 0xff8844ff).writeAsync(sourcePath);
-
-    const service = createShareAssetPreparationService({
-      getCacheDirectory: () => cacheDirectory,
-    });
-    const result = await service.prepareDiaryShareAssets({
-      diary: createDiary(),
-      target: 'save',
-      getPhotoById: () => createPhoto({
-        uri: `file://${sourcePath}`,
-        localUri: `file://${sourcePath}`,
-        width: 10,
-        height: 10,
-        faceRects: [{ x: -0.1, y: 0.3, width: 0.3, height: 0.4 }],
-        personIds: ['person-friend'],
-      }),
-    });
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      throw new Error('expected clipped face rect to produce an anonymous asset');
-    }
-    const masked = await Jimp.read(result.assets[0]?.uri.replace(/^file:\/\//, ''));
-    expect(masked.getPixelColor(0, 4)).toBe(maskColor);
-    expect(masked.getPixelColor(1, 4)).toBe(maskColor);
-    expect(masked.getPixelColor(2, 4)).not.toBe(maskColor);
   });
 });

@@ -1,6 +1,40 @@
 import { HttpCoreDiaryRepository } from '../http-core-diary-repository';
 import { ApiClient } from '../../services/api-client';
 
+class MultipartXMLHttpRequestFixture {
+  static lastRequest: MultipartXMLHttpRequestFixture | undefined;
+  static responseBody = '';
+
+  status = 201;
+  responseText = MultipartXMLHttpRequestFixture.responseBody;
+  responseType = '';
+  timeout = 0;
+  headers: Record<string, string> = {};
+  body: XMLHttpRequestBodyInit | null = null;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+
+  constructor() {
+    MultipartXMLHttpRequestFixture.lastRequest = this;
+  }
+
+  open() {}
+
+  setRequestHeader(name: string, value: string) {
+    this.headers[name] = value;
+  }
+
+  send(body: XMLHttpRequestBodyInit | null) {
+    this.body = body;
+    this.onload?.();
+  }
+
+  abort() {
+    this.onabort?.();
+  }
+}
+
 describe('HttpCoreDiaryRepository', () => {
   beforeEach(() => {
     global.fetch = jest.fn().mockResolvedValue({
@@ -17,6 +51,168 @@ describe('HttpCoreDiaryRepository', () => {
         },
       }),
     }) as unknown as typeof fetch;
+  });
+
+  test('uploads selected photos as ordered multipart parts without a JSON content-type header', async () => {
+    const originalFormData = global.FormData;
+    const originalXhr = globalThis.XMLHttpRequest;
+    class FormDataFixture {
+      _parts: Array<[string, unknown]> = [];
+      append(name: string, value: unknown) {
+        this._parts.push([name, value]);
+      }
+    }
+    global.FormData = FormDataFixture as unknown as typeof FormData;
+    MultipartXMLHttpRequestFixture.responseBody = JSON.stringify({
+      ok: true,
+      data: {
+        jobId: 'job-upload-1',
+        draftId: 'draft-1',
+        draftVersion: 2,
+        idempotencyKey: 'draft-1-round-2',
+        status: 'queued',
+        stage: 'queued',
+        progressPercent: 0,
+      },
+    });
+    MultipartXMLHttpRequestFixture.lastRequest = undefined;
+    Object.defineProperty(globalThis, 'XMLHttpRequest', {
+      configurable: true,
+      value: MultipartXMLHttpRequestFixture,
+    });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+    }));
+    const legacyPhotoUploads = [
+      {
+        photoId: 'photo-3',
+        uri: 'file:///photo-3.jpg',
+        mimeType: 'image/jpeg',
+        title: 'IMG_003.jpg',
+        location: '家庭相册',
+        date: '2026.10.20',
+      },
+      {
+        photoId: 'photo-1',
+        uri: 'file:///photo-1.jpg',
+        mimeType: 'image/jpeg',
+        title: 'IMG_001.jpg',
+        location: '旅行相册',
+        date: '2026.10.19',
+      },
+    ];
+
+    try {
+      const result = await repository.createGenerationJob({
+        draftId: 'draft-1',
+        draftVersion: 2,
+        idempotencyKey: 'draft-1-round-2',
+      }, undefined, legacyPhotoUploads);
+
+      expect(result.ok).toBe(true);
+      const xhr = MultipartXMLHttpRequestFixture.lastRequest!;
+      expect(xhr.headers).toMatchObject({ 'x-device-id': 'device-test-1' });
+      expect(xhr.headers).not.toHaveProperty('Content-Type');
+      const parts = (xhr.body as unknown as FormDataFixture)._parts;
+      expect(parts.filter(([name]) => name === 'photos').map(([, file]) => file)).toEqual([
+        expect.objectContaining({ uri: 'file:///photo-3.jpg', type: 'image/jpeg', name: 'photo-001.jpg' }),
+        expect.objectContaining({ uri: 'file:///photo-1.jpg', type: 'image/jpeg', name: 'photo-002.jpg' }),
+      ]);
+      expect(parts.find(([name]) => name === 'photoMetadata')?.[1]).toBe(JSON.stringify([
+        { photoId: 'photo-3', date: '2026.10.20' },
+        { photoId: 'photo-1', date: '2026.10.19' },
+      ]));
+    } finally {
+      global.FormData = originalFormData;
+      Object.defineProperty(globalThis, 'XMLHttpRequest', {
+        configurable: true,
+        value: originalXhr,
+      });
+    }
+  });
+
+  test('uploads readable diary photos with the save snapshot using the native multipart transport', async () => {
+    const originalFormData = global.FormData;
+    const originalXhr = globalThis.XMLHttpRequest;
+    class FormDataFixture {
+      _parts: Array<[string, unknown]> = [];
+      append(name: string, value: unknown) {
+        this._parts.push([name, value]);
+      }
+    }
+    global.FormData = FormDataFixture as unknown as typeof FormData;
+    MultipartXMLHttpRequestFixture.responseBody = JSON.stringify({
+      ok: true,
+      data: {
+        diaryId: 'diary-1',
+        draftId: 'draft-1',
+        savedVersion: 1,
+        id: 'diary-1',
+        date: '2026.10.23',
+      },
+    });
+    MultipartXMLHttpRequestFixture.lastRequest = undefined;
+    Object.defineProperty(globalThis, 'XMLHttpRequest', {
+      configurable: true,
+      value: MultipartXMLHttpRequestFixture,
+    });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+    }));
+
+    try {
+      const result = await repository.saveDiary({
+        id: 'diary-1',
+        draftId: 'draft-1',
+        idempotencyKey: 'draft-1-save-new',
+        title: '测试标题',
+        summary: '测试摘要',
+        location: '',
+        date: '2026.10.23',
+        privacy: 'private',
+        photoIds: ['device-photo-1'],
+        version: 1,
+        contentSnapshot: {
+          type: 'travel',
+          subtitle: '',
+          helperMessage: '',
+          characterId: 'character-blue',
+          companionName: '自己',
+          coverPhotoId: 'device-photo-1',
+          blocks: [{ id: 'block-1', type: 'text', content: '测试正文。', photoIds: ['device-photo-1'] }],
+          posterPhotoIds: ['device-photo-1'],
+          people: [],
+        },
+      }, undefined, [{
+        photoId: 'device-photo-1',
+        uri: 'file:///device-photo-1.jpg',
+        mimeType: 'image/jpeg',
+        date: '2026.10.20',
+      }]);
+
+      expect(result.ok).toBe(true);
+      const xhr = MultipartXMLHttpRequestFixture.lastRequest!;
+      expect(xhr.headers).toMatchObject({ 'x-device-id': 'device-test-1' });
+      expect(xhr.headers).not.toHaveProperty('Content-Type');
+      const parts = (xhr.body as unknown as FormDataFixture)._parts;
+      expect(parts.some(([name, value]) => name === 'sourceDiaryId' || value === 'undefined')).toBe(false);
+      expect(JSON.parse(String(parts.find(([name]) => name === 'photoIds')?.[1])))
+        .toEqual(['device-photo-1']);
+      expect(parts.find(([name]) => name === 'photoMetadata')?.[1]).toBe(JSON.stringify([
+        { photoId: 'device-photo-1', date: '2026.10.20' },
+      ]));
+      expect(parts.filter(([name]) => name === 'photos').map(([, file]) => file)).toEqual([
+        expect.objectContaining({ uri: 'file:///device-photo-1.jpg', type: 'image/jpeg' }),
+      ]);
+    } finally {
+      global.FormData = originalFormData;
+      Object.defineProperty(globalThis, 'XMLHttpRequest', {
+        configurable: true,
+        value: originalXhr,
+      });
+    }
   });
 
   test('wraps backend draft response into contract result', async () => {
@@ -492,6 +688,76 @@ describe('HttpCoreDiaryRepository', () => {
     );
   });
 
+  test('uploads only the target block photo with read-only context in multipart rewrite requests', async () => {
+    const originalFormData = global.FormData;
+    const originalXhr = globalThis.XMLHttpRequest;
+    class FormDataFixture {
+      _parts: Array<[string, unknown]> = [];
+      append(name: string, value: unknown) {
+        this._parts.push([name, value]);
+      }
+    }
+    global.FormData = FormDataFixture as unknown as typeof FormData;
+    MultipartXMLHttpRequestFixture.responseBody = JSON.stringify({
+      ok: true,
+      data: {
+        draftId: 'draft-1',
+        blockId: 'block-2',
+        draftVersion: 3,
+        blockType: 'text',
+        content: '只替换当前段落。',
+        photoIds: ['photo-2'],
+      },
+    });
+    MultipartXMLHttpRequestFixture.lastRequest = undefined;
+    Object.defineProperty(globalThis, 'XMLHttpRequest', {
+      configurable: true,
+      value: MultipartXMLHttpRequestFixture,
+    });
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+    }));
+    const contextBlocks = [{ id: 'block-1', type: 'text' as const, content: '只读的前段。' }];
+
+    try {
+      const result = await repository.rewriteBlock({
+        draftId: 'draft-1',
+        blockId: 'block-2',
+        draftVersion: 3,
+        characterId: 'character-green',
+        blockType: 'text',
+        content: '原段落',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        photoIds: ['photo-2'],
+        contextBlocks,
+      }, undefined, [{
+        photoId: 'photo-2',
+        uri: 'file:///photo-2.jpg',
+        mimeType: 'image/jpeg',
+        date: '2026.10.20',
+      }]);
+
+      expect(result.ok).toBe(true);
+      const xhr = MultipartXMLHttpRequestFixture.lastRequest!;
+      expect(xhr.headers).toMatchObject({ 'x-device-id': 'device-test-1' });
+      expect(xhr.headers).not.toHaveProperty('Content-Type');
+      const parts = (xhr.body as unknown as FormDataFixture)._parts;
+      const fields = Object.fromEntries(parts.filter(([name]) => name !== 'photos'));
+      expect(fields.contextBlocks).toBe(JSON.stringify(contextBlocks));
+      expect(JSON.parse(String(fields.photoIds))).toEqual(['photo-2']);
+      expect(parts.filter(([name]) => name === 'photos')).toEqual([
+        ['photos', expect.objectContaining({ uri: 'file:///photo-2.jpg', type: 'image/jpeg' })],
+      ]);
+    } finally {
+      global.FormData = originalFormData;
+      Object.defineProperty(globalThis, 'XMLHttpRequest', {
+        configurable: true,
+        value: originalXhr,
+      });
+    }
+  });
+
   test('rejects malformed rewrite payload from backend', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
@@ -638,6 +904,7 @@ describe('HttpCoreDiaryRepository', () => {
             draftId: 'draft-1',
             savedVersion: 2,
             id: 'diary-1',
+            date: '2026.10.23',
           },
         }),
       })
@@ -650,6 +917,7 @@ describe('HttpCoreDiaryRepository', () => {
             draftId: 'draft-1',
             savedVersion: 2,
             id: 'diary-1',
+            date: '2026.10.23',
           },
         }),
       });
@@ -686,11 +954,17 @@ describe('HttpCoreDiaryRepository', () => {
       version: 2,
     });
     expect(saved.ok).toBe(true);
-    if (saved.ok) expect(saved.data.diaryId).toBe('diary-1');
+    if (saved.ok) {
+      expect(saved.data.diaryId).toBe('diary-1');
+      expect(saved.data.date).toBe('2026.10.23');
+    }
 
     const recovered = await repository.getSaveResult('draft-1-save-2');
     expect(recovered.ok).toBe(true);
-    if (recovered.ok) expect(recovered.data.savedVersion).toBe(2);
+    if (recovered.ok) {
+      expect(recovered.data.savedVersion).toBe(2);
+      expect(recovered.data.date).toBe('2026.10.23');
+    }
   });
 
   test('maps save conflict into remote error result', async () => {

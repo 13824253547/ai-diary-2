@@ -1,6 +1,6 @@
 # 外部能力与任务处理清单
 
-日期：2026-10-16。扫描依据：delivery 全部 42 份 task、当前 decision-register、package.json、backend provider、store、素材页、导出与分享服务。此表是能力分类及开发策略，不是功能完成报告，也不指定供应商。
+日期：2026-10-16；PET-001 provider 接入状态补充：2026-10-20。扫描依据：delivery 全部 42 份 task、当前 decision-register、package.json、backend provider、store、素材页、导出与分享服务。此表是能力分类及开发策略，不是功能完成报告，也不指定供应商。
 
 ## 核心结论
 
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | CRE-005 日记生成 | 照片理解与自然语言生成、输出质量 | `backend/src/common/diary-generation.service.ts` 有 deterministic 与 openai-compatible；调用 `/chat/completions`，需模型/服务凭据 | 保留已接通的任务与保存服务；deterministic 仅限非生产开发/测试，生产模式门禁 fail closed；真实模型与评测延期 |
 | DIA-002 局部重写 | 真实语言改写 | 同 provider 的 rewrite 能力 | 文字编辑正常开发；重写业务和版本保护用 mock，真实改写延期 |
-| PET-001 宠物聊天 | 理解消息并生成陪伴回复 | 客户端有可注入 `ChatReplyProvider`、来源标签和异步请求关联；DEV-3 新增 device-scoped conversation/turn/message Prisma/API 与 client repository，但 migration 未应用、正式页面/Store send-retry 未接线 | 默认 mock 仅在 `hybrid-dev` 且开发运行时启用；开发持久服务只允许显式 `source: mock`，所有非测试运行环境拒绝客户端自报 `source: provider`。production 还拒绝创建/重试/回复写入；Q-001 retention/删除/跨设备及 Q-002 真实模型/质量延期 |
+| PET-001 宠物聊天 | 理解消息并生成陪伴回复 | DEV-13 新增 NestJS Ark-compatible server provider 与受信 `/generate` 路由；Store、`app/(tabs)/pet.tsx` 和 HTTP repository 已接线。旧服务端 Ark key/base/model 已迁入本地 `backend/.env`（0600、Git ignored）；真实 provider smoke 与 disposable schema 上单条 HTTP→provider→Prisma turn 均成功。尚无 Expo App 实机端到端证据。旧 Fastify 的访客 cookie/CSRF、额度和审计机制没有移植 | 凭据仅在服务端运行环境配置；真实 app 请求走后端 provider，失败在原气泡中显式重试。Q-001 重启留存、Q-002 真实质量/安全/取消/重试策略与 Q-003 输入边界仍待确认；smoke 不计 PET CASE 通过 |
 | MAT-005 AI 配图 | 文生图推理与生成资源 | `app/library/index.tsx` 正式入口仍保留 `photo-9` 演示；DEV-1 新增 `src/services/ai-image-generation-provider.ts` 和 Store mock/provider 业务骨架，未配置真实 provider | `hybrid-dev` 开发运行时使用独立 ID、显式 mock 来源和可替换 adapter；release fail closed。正式页面接线待 UI/UX 反馈边界确认，真实 provider/质量/资产留存延期 |
 | GRW-006 洞察报告 | 三维语义洞察生成与质量 | `app/profile/report.tsx` 仍为固定演示内容；DEV-1 新增 `src/services/insight-report-provider.ts` 与 Store 来源版本/状态骨架，未配置真实 provider | 仅 hybrid-dev 开发运行时使用标记 mock 的结构化返回；release fail closed。报告页尚未接线；真实推理、来源规则、质量和留存延期 |
 | GRW-003 锚点/标签提取 | 提取方案和语义质量待定，非已确认第三方采购 | task 明确 Q-016/Q-002，禁止首句截断冒充最终提取；DEV-3 已加设备/来源版本隔离的持久 read model/API，未应用 migration；无可信 provider 时所有非测试运行环境 fail closed | 显式 tagId 查询与版本化 repository 先建；mock 留在内存适配器，不写持久真实读模型；保留算法、触发和分类规则决策 |

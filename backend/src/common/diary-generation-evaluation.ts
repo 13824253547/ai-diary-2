@@ -91,12 +91,17 @@ export const DIARY_GENERATION_MANUAL_DIMENSIONS: DiaryGenerationManualDimension[
   {
     id: 'grounding',
     label: '照片贴合度',
-    guidance: '标题、摘要、正文和图片说明是否明显来自输入照片，而不是泛化空话。',
+    guidance: '标题、摘要与整篇内容是否共同来自输入照片，而不是泛化空话。',
   },
   {
-    id: 'coherence',
-    label: '叙事连贯性',
-    guidance: '标题、摘要、正文块之间是否前后连贯，没有明显跳段、重复或自相矛盾。',
+    id: 'per-photo-grounding',
+    label: '单图事实贴合度',
+    guidance: '第 i 个正文块是否准确描述第 i 张照片可见的内容，没有串图或添加画面无法证明的事实。',
+  },
+  {
+    id: 'continuity',
+    label: '跨段连贯性',
+    guidance: '所有段落是否形成同一趟旅程的起承转合，前后自然衔接，没有重复或自相矛盾。',
   },
   {
     id: 'character-tone',
@@ -126,6 +131,11 @@ export function evaluateDiaryGenerationResult(
   const photoBlocks = result.blocks.filter(block => block.type === 'photo');
   const textBlocks = result.blocks.filter(block => block.type === 'text');
   const quoteBlocks = result.blocks.filter(block => block.type === 'quote');
+  const hasOneTextPerPhoto = textBlocks.length === fixture.input.selectedPhotoIds.length;
+  const textPhotoOrderValid = hasOneTextPerPhoto && textBlocks.every((block, index) =>
+    block.type === 'text'
+    && block.photoIds?.length === 1
+    && block.photoIds[0] === fixture.input.selectedPhotoIds[index]);
   const referencedPhotoIds = result.blocks.flatMap(block => {
     if (block.type === 'photo') {
       return [block.photoId];
@@ -184,6 +194,26 @@ export function evaluateDiaryGenerationResult(
       '至少包含一个正文块',
       textBlocks.length > 0,
       `text=${textBlocks.length}, quote=${quoteBlocks.length}, photo=${photoBlocks.length}`,
+    ),
+    formatCheck(
+      'one-text-per-photo',
+      '正文块数量与所选照片数量一致',
+      hasOneTextPerPhoto,
+      `text=${textBlocks.length}, selectedPhotos=${fixture.input.selectedPhotoIds.length}`,
+    ),
+    formatCheck(
+      'text-photo-order',
+      '每段只绑定选择顺序对应的一张照片',
+      textPhotoOrderValid,
+      textPhotoOrderValid
+        ? `ordered=${textBlocks.map(block => block.type === 'text' ? block.photoIds?.[0] : '').join(', ')}`
+        : '正文块照片引用缺失、多图、错序或数量不匹配',
+    ),
+    formatCheck(
+      'no-quote-blocks',
+      '没有额外的独立引用句块',
+      quoteBlocks.length === 0,
+      `quote=${quoteBlocks.length}`,
     ),
     formatCheck(
       'photo-reference',

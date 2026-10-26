@@ -17,9 +17,11 @@ const decorations = [
   { title: '酷酷的小橘', label: '预览酷酷的小橘', artKey: 'stickerCool' },
   { title: '抱抱小橘', label: '预览抱抱小橘', artKey: 'stickerCry' },
   { title: '喜欢你', label: '预览喜欢你', artKey: 'stickerLove' },
-  { title: '京都', label: '预览京都印章', artKey: 'stampKyoto' },
-  { title: '镰仓', label: '预览镰仓印章', artKey: 'stampKamakura' },
-  { title: '台南', label: '预览台南印章', artKey: 'stamp' },
+] as const;
+const cityStamps = [
+  { title: '京都', label: '预览京都印章', id: 'stampKyoto' },
+  { title: '镰仓', label: '预览镰仓印章', id: 'stampKamakura' },
+  { title: '台南', label: '预览台南印章', id: 'stamp' },
 ] as const;
 
 jest.mock('expo-router', () => ({
@@ -62,6 +64,20 @@ jest.mock('@expo/vector-icons', () => {
   const { Text } = require('react-native');
   return {
     Ionicons: ({ name }: { name: string }) => <Text>{name}</Text>,
+  };
+});
+
+jest.mock('react-native-svg', () => {
+  const React = require('react');
+  const { Text, View } = require('react-native');
+  return {
+    __esModule: true,
+    default: ({ children, ...props }: { children: React.ReactNode }) => React.createElement(View, props, children),
+    Circle: () => null,
+    Defs: () => null,
+    Path: () => null,
+    TextPath: ({ children }: { children: React.ReactNode }) => children,
+    Text: ({ children }: { children: React.ReactNode }) => React.createElement(Text, null, children),
   };
 });
 
@@ -118,18 +134,49 @@ describe('Library screen decoration previews', () => {
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
+  test.each(cityStamps)('previews the SVG city stamp with configurable city text: $title', async item => {
+    const screen = await render(<LibraryScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(item.label));
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(item.title).length).toBeGreaterThan(1);
+      expect(screen.getByTestId('city-stamp-preview')).toBeTruthy();
+      expect(screen.queryByTestId('material-photo-preview')).toBeNull();
+    });
+  });
+
   test('passes the selected stable decoration ID to the postcard route', async () => {
+    useAppStore.setState(state => ({
+      diaries: state.diaries.map(diary => (
+        diary.id === 'diary-1' ? { ...diary, location: '京都', status: 'ready' as const } : diary
+      )),
+    }));
     const screen = await render(<LibraryScreen />);
     await act(async () => {
       fireEvent.press(screen.getByLabelText('预览京都印章'));
     });
 
-    await waitFor(() => expect(screen.getByText('京都')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('city-stamp-preview')).toBeTruthy());
     fireEvent.press(screen.getByLabelText('用于明信片'));
 
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/postcard',
       params: { decoration: 'stampKyoto' },
     });
+  });
+
+  test('allows locked stamps to be previewed but prevents applying them', async () => {
+    const screen = await render(<LibraryScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('预览京都印章'));
+    });
+
+    const applyButton = screen.getByLabelText('用于明信片');
+    expect(applyButton.props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByText('记录地点与城市名称精确匹配的已保存日记后解锁应用。')).toBeTruthy();
+    fireEvent.press(applyButton);
+    expect(mockRouter.push).not.toHaveBeenCalled();
   });
 });

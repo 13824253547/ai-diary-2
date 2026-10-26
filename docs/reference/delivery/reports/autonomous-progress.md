@@ -32,11 +32,11 @@ DEV-1 推进 PET-001 provider/store、CRE-005 生产 mock 门禁、DIA-006 分�
 - 正式素材上传 sheet 仍是既有示例选择，没有接入 action，也未改变 UI/UX；真实 iOS 文件可读性、权限矩阵及跨重启 URI 留存未验证，Q-001/Q-015/Q-018/Q-003 继续限制相应分支。`npm run typecheck`、`git diff --check` 通过，新 Jest 未运行；验收矩阵与 CASE 状态不变。
 - MAT-001 从“已有实现待复验”调整为“实施中”；42 项互斥主状态现为 23 项已有实现待复验、7 项延期/决策阻塞、12 项实施中，整项实现完成和 mock 业务完成仍各为 0。验收仍为 96/225（42.7%），未新增 passed。
 
-### 2026-10-16 · DEV-3 · MAT-002 保留当前编辑草稿引用
+### 2026-10-16 · DEV-3 · MAT-002 保留当前编辑草稿引用（历史规则，DEV-14 已更新）
 
-- 修正素材应用路径：目标已有未保存草稿时，从该草稿的当前首个 text block 读取引用并追加照片 ID；不再从已保存日记恢复旧引用覆盖当前编辑。未保存文字、标题、摘要和已有引用保持不变；没有保存目标/没有任何可用 text block 仍在创建新草稿前停止。没有更改页面样式、文案、反馈或路由。
-- 在 `app/__tests__/library-screen-material-apply.spec.tsx` 增加现有草稿改正文/标题/摘要及引用后再应用 P4 的回归，代码未运行；`CASE-MAT-002-004` 继续受 Q-015 待决策，未改 CASE/matrix passed。
-- `npm run typecheck` 与 `git diff --check` 通过；未运行 Jest、backend build、数据库 e2e。MAT-002 由“已有实现待复验”转为“实施中”，当前 42 项主状态为 22 项已有实现待复验、7 项延期/决策阻塞、13 项实施中；整体验收维持 96/225（42.7%）。
+- 当时素材应用从当前草稿首段读取引用并追加照片 ID，避免以已保存日记覆盖当前编辑；该追加规则是历史实现，不代表当前行为。2026-10-20 用户确认素材应用替换首段引用，当前实现与证据见 DEV-14。
+- 当时新增的草稿保留回归未运行，CASE-MAT-002-004 仍待决策；该状态已由 DEV-14 局部确认及定向回归更新。历史测试数字与通过数保留为当时快照，不代表本轮验收统计。
+- 当时 `npm run typecheck` 与 `git diff --check` 通过，未运行 Jest、backend build、数据库 e2e。MAT-002 主状态仍为实施中；当前证据与未决边界见最新 task/CASE/验收矩阵。
 
 ### 2026-10-16 · DEV-3 · MAT-003/004/005 与 PCD-001 再审
 
@@ -992,3 +992,26 @@ DEV-1 推进 PET-001 provider/store、CRE-005 生产 mock 门禁、DIA-006 分�
 - 首轮锚点 DB e2e 发现 Prisma/MySQL correlated `EXISTS(JSON_TABLE)` 查询将已保存 anchor 错误过滤为空。DEV-12 改为 JSON_TABLE join、显式 collation 与 anchor 去重 count/page；首次实际 read-model DB 集成复测通过。既有 GRW-003 cancellation `2/2` 历史保留；未重置计数或 CASE。
 - TEST-14 完整 direct Jest e2e 49/49、backend unit 17/199、typecheck、backend build、migrate status、schema diff 和 diff check 通过。临时 `ai_diary_test_dev12` schema 已删除。
 - CASE-DSC-001～003、PET-001、GRW-003/004 的相关数据库/服务子项仅更新为部分执行；未有完整 CASE 新增 passed，故 matrix 保持 96/225（42.7%）。合成 fixture/mock 不作真实发布或 AI 质量证据。
+
+### 2026-10-20 · DEV-13 · PET-001 Ark server provider
+
+- 旧 `wxcoco-api` 已有 Fastify Ark streaming endpoint、陪伴 prompt、安全规则、guest cookie/CSRF、额度与审计实现；其中身份与会话持久逻辑属于旧项目。只复用 Ark-compatible transport 和面向当前“小橘”场景的提示策略，不移植旧 guest-session/cookie/CSRF。
+- 新 NestJS 后端新增隔离的 `PET_CHAT_*` provider config、可信服务端 generate endpoint 和 repository method；Store send/retry 与现有 PET 页气泡反馈已接线，日记 generation/rewrite 的 `AI_PROVIDER_*` 不受聊天配置影响。客户端仍不能提交自称 provider 的回复。
+- 旧服务端 Ark key/base/model 已从 `wxcoco-api/.env` 白名单迁入新 `backend/.env`，文件权限 `0600` 且被 Git 忽略；没有复制 cookie/session、数据库或其他变量。新 backend provider 对 Doubao 模型执行一次无个人数据 smoke test，返回有效中文回复和 provider request ID。
+- root typecheck、backend build、provider/controller/service 定向 31/31、chat repository 7/7、Store integration 2/2 与页面 retry 1/1 通过。`ai_diary` 已应用 6/6 migration 并通过 schema diff；真实 provider 另在 disposable schema 完成一条 HTTP→Prisma 合成 turn，测试库已清理。未跑 Expo App 实机流程；Q-001/Q-002/Q-003 仍开放，未新增 CASE passed，验收保持 96/225。
+
+### 2026-10-20 · DEV-14 · DIA-003 / MAT-002 照片引用规则
+
+- 编辑页引用候选仅取当前草稿已选照片并按用户选择顺序展示；每个正文/引用文本块最多关联一张。mock/provider 生成均按文本块顺序分配，照片不足时后续块留空。
+- 素材应用以新素材照片替换当前草稿首段引用，旧照片仍保留于整篇照片集合；草稿正文、标题、摘要及其它未保存修改不被覆盖，页面样式、反馈与导航未调整。
+- 更新 DIA-003/MAT-002 业务规则、任务、CASE、coverage、决策登记、验收矩阵、执行快照和阻塞记录。CASE-DIA-003-010 关联 AC02/AC03；AC05 仍由 CASE-DIA-003-006 覆盖。CASE-MAT-002-004 从待决策更新为已执行的本地状态回归，不以此扩大 Q-015 其它未决范围。
+- 定向 Jest 3 suites / 135 tests、`npm run typecheck`、`git diff --check` 通过。编辑页测试有既有 overlapping `act()` 警告；未运行全量测试、backend、数据库或真实 iOS 媒体读取。验收 passed 保持 96/225（42.7%）。
+
+## DEV-21 BAS-002 App Attest 匿名设备认证（2026-10-21）
+
+- 引入 Expo SDK 57 对应的 `@expo/app-integrity` 和 `expo-secure-store`；iOS App Attest 私钥由系统 Secure Enclave 管理，Key ID、服务端 ID 与 bearer token 保存到 Keychain。所有现有 backend adapters 及 PET SSE headers 统一接入服务端签发身份。
+- 新 NestJS 身份模块验证 Apple attestation，并新增 32-byte 单次 challenge、5 分钟失效、key 唯一绑定、HMAC 摘要 IP 小时窗口限流、服务端 UUID、30 天 HS256 token 与 assertion token recovery。生产全局 guard 校验 token 和 `x-device-id` 一致；生产不能切回 legacy。
+- Prisma 新增设备、公钥/计数器、challenge、限流模型及 migration。仅生成客户端，不应用迁移或改动本地数据库/`.env`。旧 ID 数据不迁移；这会使新身份无法读取旧 owner 下的远端记录。
+- backend build、root typecheck、身份/JWT/guard/service 单测 9/9、客户端身份测试 1/1、Expo entitlement 配置及 Apple module autolinking 解析通过；Debug simulator native target 编译成功但未签名/安装。真实 Apple proof、EAS/实机签名、production 环境、隔离 MySQL e2e 未执行。不新增 CASE passed。
+- 范围确认：用户明确 Android 不需要支持，本方案仅覆盖 iOS，不接入 Play Integrity。Team ID `JWTMTK2F34` 与随机 JWT secret 已写入忽略的本地 `backend/.env`，未显示值；开发仍为 legacy，等待隔离 migration。其它限制：bearer token 的业务请求窗口内可重放，本轮没有逐请求 assertion；按 IP 限流需要部署时审查反向代理来源地址与正常 NAT 用户流量。production 需刷新 profile 并真实设备验收。
+- 模拟器旧原生包缺少 App Integrity module 时曾报 `Cannot find native module 'ExpoAppIntegrity'`；移除模块静态 import、延迟 require 并仅在 development 回退后，不会再因旧 dev client 在模块加载阶段崩溃。更新后的原生构建未安装到用户模拟器。

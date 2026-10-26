@@ -34,6 +34,13 @@ export class MonthlyExportAbortedError extends Error {
   }
 }
 
+export class MonthlyExportUnavailableError extends Error {
+  constructor() {
+    super('月度合集文件导出服务尚未接入。');
+    this.name = 'MonthlyExportUnavailableError';
+  }
+}
+
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) {
     throw new MonthlyExportAbortedError();
@@ -41,15 +48,9 @@ function throwIfAborted(signal?: AbortSignal) {
 }
 
 export async function exportMonthlyCollection(
-  snapshot: MonthlyExportSnapshot,
+  _snapshot: MonthlyExportSnapshot,
   options: MonthlyExportOptions = {},
 ): Promise<MonthlyExportResult> {
   throwIfAborted(options.signal);
-  await Promise.resolve();
-  throwIfAborted(options.signal);
-  return {
-    monthLabel: snapshot.monthLabel,
-    diaryCount: snapshot.diaryIds.length,
-    previewMessage: `${snapshot.monthLabel} 的 ${snapshot.diaryIds.length} 篇日记已整理为合集预览。本次为本地演示，没有写入文件。`,
-  };
+  throw new MonthlyExportUnavailableError();
 }

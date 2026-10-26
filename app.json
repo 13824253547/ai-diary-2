@@ -9,7 +9,11 @@
     "scheme": "ai-diary-2",
     "ios": {
       "bundleIdentifier": "io.com.shihangbiji.www.aidiary",
+      "appleTeamId": "JWTMTK2F34",
       "supportsTablet": true,
+      "entitlements": {
+        "com.apple.developer.devicecheck.appattest-environment": "development"
+      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -30,7 +34,8 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "允许访问你的相册，用来读取你选择的照片并生成回忆日记。"
+          "photosPermission": "允许访问你的相册，用来读取你选择的照片并生成回忆日记。",
+          "savePhotosPermission": "允许将生成的配图保存到你的系统相册。"
         }
       ],
       "expo-dev-client"

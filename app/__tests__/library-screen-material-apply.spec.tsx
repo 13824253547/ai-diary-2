@@ -5,6 +5,8 @@ import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryPhoto } from '../../src/types/diary';
+import * as photoLibrary from '../../src/services/photo-library';
+import * as photoPermission from '../../src/services/photo-permission';
 
 const mockRouter = {
   push: jest.fn(),
@@ -108,7 +110,33 @@ describe('Library screen apply material photo to diary', () => {
     useAppStore.getState().addMaterialPhoto('device-photo-p4');
   });
 
-  test('adds the material URI photo to the target first block and edit draft', async () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test('loads real device photos from the add-photo shortcut', async () => {
+    const permission = jest.spyOn(photoPermission, 'getPhotoPermissionStatus').mockResolvedValue({
+      status: 'full',
+      granted: true,
+      canAskAgain: true,
+    });
+    const listPhotos = jest.spyOn(photoLibrary, 'listDevicePhotos').mockResolvedValue({
+      album: { id: '__all__', title: '全部照片', assetCount: 1 },
+      photos: [buildDevicePhoto()],
+      hasNextPage: false,
+    });
+    const screen = await render(<LibraryScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('添加照片'));
+    });
+
+    await waitFor(() => expect(screen.getByLabelText('添加素材照片P4')).toBeTruthy());
+    expect(permission).toHaveBeenCalledTimes(1);
+    expect(listPhotos).toHaveBeenCalledWith({ first: 36 });
+  });
+
+  test('replaces the target first block reference and adds the material photo to the diary collection', async () => {
     const initialDiaries = useAppStore.getState().diaries;
     const target = initialDiaries[0];
     const otherDiary = initialDiaries[1];
@@ -133,7 +161,7 @@ describe('Library screen apply material photo to diary', () => {
     expect(draft?.sourceDiaryId).toBe(target.id);
     expect(draft?.diary.blocks.find(block => block.id === firstTextBlock.id)).toMatchObject({
       type: 'text',
-      photoIds: [...(firstTextBlock.photoIds ?? []), 'device-photo-p4'],
+      photoIds: ['device-photo-p4'],
     });
     expect(draft?.selectedPhotoIds).toEqual([...target.photoIds, 'device-photo-p4']);
     expect(draft?.diary.photoIds).toEqual([...target.photoIds, 'device-photo-p4']);
@@ -141,7 +169,7 @@ describe('Library screen apply material photo to diary', () => {
     expect(useAppStore.getState().diaries[1]).toEqual(otherDiary);
   });
 
-  test('appends to the current draft references without restoring saved content', async () => {
+  test('replaces the current draft reference without restoring saved content', async () => {
     const target = useAppStore.getState().diaries[0];
     if (!target) throw new Error('missing diary fixture');
     const savedFirstTextBlock = target.blocks.find(block => block.type === 'text');
@@ -157,8 +185,8 @@ describe('Library screen apply material photo to diary', () => {
     });
     useAppStore.getState().updateDraftBlock(existingDraftId, savedFirstTextBlock.id, '未保存正文');
     useAppStore.getState().setDraftBlockPhotos(existingDraftId, savedFirstTextBlock.id, ['photo-3']);
-      const draftBeforeApplication = useAppStore.getState().drafts[existingDraftId]?.diary;
-      if (!draftBeforeApplication) throw new Error('missing edited draft snapshot');
+    const draftBeforeApplication = useAppStore.getState().drafts[existingDraftId];
+    if (!draftBeforeApplication) throw new Error('missing edited draft snapshot');
 
     const screen = await render(<LibraryScreen />);
     await openPhotoTarget(screen, target.title);
@@ -166,16 +194,16 @@ describe('Library screen apply material photo to diary', () => {
     const draft = useAppStore.getState().drafts[existingDraftId];
     const currentFirstTextBlock = draft.diary.blocks.find(block => block.id === savedFirstTextBlock.id);
     expect(useAppStore.getState().activeDraftId).toBe(existingDraftId);
-      expect(draft.diary).toMatchObject({
-        title: draftBeforeApplication.title,
-        summary: draftBeforeApplication.summary,
-      });
+    expect(draft.diary).toMatchObject({
+      title: draftBeforeApplication.diary.title,
+      summary: draftBeforeApplication.diary.summary,
+    });
     expect(currentFirstTextBlock).toMatchObject({
       type: 'text',
       content: '未保存正文',
-      photoIds: ['photo-3', 'device-photo-p4'],
+      photoIds: ['device-photo-p4'],
     });
-    expect(draft.selectedPhotoIds).toContain('device-photo-p4');
+    expect(draft.selectedPhotoIds).toEqual([...draftBeforeApplication.selectedPhotoIds, 'device-photo-p4']);
     expect(useAppStore.getState().diaries[0]).toEqual(target);
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/diary/[id]/edit',

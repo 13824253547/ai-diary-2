@@ -1,4 +1,11 @@
-import type { DiaryItem, DiaryPrivacy, DiaryType } from '../types/diary';
+import type {
+  DiaryItem,
+  DiaryPrivacy,
+  DiaryType,
+  GenerationProgressMilestone,
+  GenerationProgressMilestoneId,
+  GenerationStage,
+} from '../types/diary';
 import { isDiaryType } from '../types/diary-capabilities';
 
 export const CORE_DIARY_CONTRACT_VERSION = 'core-diary-v1';
@@ -128,6 +135,7 @@ export type GenerationJobContract = {
   errorCode?: Extract<ContractErrorCode, 'timeout' | 'provider_failed'>;
   errorMessage?: string;
   retryable?: boolean;
+  progressMilestones?: GenerationProgressMilestone[];
   result?: GenerationResultContract;
 };
 
@@ -154,6 +162,11 @@ export type RewriteBlockRequestContract = {
   content: string;
   selectedPhotoIds: string[];
   photoIds?: string[];
+  contextBlocks?: Array<{
+    id: string;
+    type: 'text' | 'quote';
+    content: string;
+  }>;
 };
 
 export type RewriteBlockResultContract = {
@@ -177,6 +190,7 @@ export type SaveDraftResult = {
   diaryId: string;
   draftId: string;
   savedVersion: number;
+  date?: string;
 };
 
 export type MemoriesQuery = {
@@ -198,6 +212,19 @@ export type MemoriesQueryResult = {
 
 const GENERATION_JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const;
 const GENERATION_JOB_STAGES = ['queued', 'analyzing-photos', 'drafting', 'structuring', 'completed', 'failed', 'cancelled'] as const;
+const GENERATION_PROGRESS_MILESTONES: Record<
+  GenerationProgressMilestoneId,
+  { stage: GenerationStage; progressPercent: number }
+> = {
+  queued: { stage: 'queued', progressPercent: 0 },
+  'photo-processing-started': { stage: 'analyzing-photos', progressPercent: 0 },
+  'photos-ready': { stage: 'analyzing-photos', progressPercent: 15 },
+  'provider-submitted': { stage: 'drafting', progressPercent: 25 },
+  'provider-response-received': { stage: 'structuring', progressPercent: 80 },
+  'result-validated': { stage: 'structuring', progressPercent: 95 },
+  completed: { stage: 'completed', progressPercent: 100 },
+};
+const GENERATION_PROGRESS_MILESTONE_IDS = Object.keys(GENERATION_PROGRESS_MILESTONES) as GenerationProgressMilestoneId[];
 
 function isGenerationJobStatus(value: unknown): value is GenerationJobContract['status'] {
   return typeof value === 'string' && GENERATION_JOB_STATUSES.includes(value as GenerationJobContract['status']);
@@ -231,6 +258,53 @@ function isValidGenerationProgress(value: unknown) {
 
 function isValidAttemptCount(value: unknown) {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+export function isGenerationProgressMilestoneHistory(value: unknown): value is GenerationProgressMilestone[] {
+  if (!Array.isArray(value) || value.length > GENERATION_PROGRESS_MILESTONE_IDS.length) return false;
+  let previousProgress = -1;
+  let previousReachedAt = -1;
+  let previousIdIndex = -1;
+  let previousAttemptCount = 0;
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isRecord(item)
+      || typeof item.milestoneId !== 'string'
+      || !GENERATION_PROGRESS_MILESTONE_IDS.includes(item.milestoneId as GenerationProgressMilestoneId)
+      || !isValidAttemptCount(item.attemptCount)
+      || !Number.isSafeInteger(item.reachedAt)
+      || (item.reachedAt as number) < 0) return false;
+    const milestoneId = item.milestoneId as GenerationProgressMilestoneId;
+    const definition = GENERATION_PROGRESS_MILESTONES[milestoneId];
+    const idIndex = GENERATION_PROGRESS_MILESTONE_IDS.indexOf(milestoneId);
+    if (seen.has(milestoneId)
+      || item.stage !== definition.stage
+      || item.progressPercent !== definition.progressPercent
+      || definition.progressPercent < previousProgress
+      || (item.reachedAt as number) < previousReachedAt
+      || (item.attemptCount as number) < previousAttemptCount
+      || idIndex < previousIdIndex) return false;
+    seen.add(milestoneId);
+    previousProgress = definition.progressPercent;
+    previousReachedAt = item.reachedAt as number;
+    previousIdIndex = idIndex;
+    previousAttemptCount = item.attemptCount as number;
+  }
+  return true;
+}
+
+function isGenerationProgressHistoryCompatible(
+  milestones: GenerationProgressMilestone[] | undefined,
+  status: GenerationJobContract['status'],
+  progressPercent: number | undefined,
+) {
+  if (milestones === undefined) return true;
+  const includesCompletion = milestones.some(item => item.milestoneId === 'completed');
+  if (includesCompletion !== (status === 'succeeded')) return false;
+  const last = milestones.at(-1);
+  return !last
+    || progressPercent === undefined
+    || progressPercent >= last.progressPercent;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -307,7 +381,27 @@ export function isGenerationResultContract(value: unknown): value is GenerationR
   ) {
     return false;
   }
+  const textBlocks = value.blocks.filter((block): block is Extract<GenerationBlockContract, { type: 'text' }> =>
+    isRecord(block) && block.type === 'text');
+  if (
+    value.blocks.some(block => isRecord(block) && block.type === 'quote')
+    || textBlocks.length === 0
+    || textBlocks.some(block => !Array.isArray(block.photoIds) || block.photoIds.length !== 1)
+  ) {
+    return false;
+  }
   return value.people === undefined || isUniqueGenerationPersonArray(value.people);
+}
+
+export function isGenerationResultForSelectedPhotoIds(
+  value: unknown,
+  selectedPhotoIds: string[],
+): value is GenerationResultContract {
+  if (!isGenerationResultContract(value)) return false;
+  const textBlocks = value.blocks.filter((block): block is Extract<GenerationBlockContract, { type: 'text' }> =>
+    block.type === 'text');
+  return textBlocks.length === selectedPhotoIds.length
+    && textBlocks.every((block, index) => block.photoIds?.[0] === selectedPhotoIds[index]);
 }
 
 export function isDiaryContentContract(value: unknown): value is DiaryContentContract {
@@ -408,6 +502,17 @@ export function isGenerationJobContract(value: unknown): value is GenerationJobC
   if (!isGenerationJobStatus(value.status) || !isGenerationJobStage(value.stage)) return false;
   const attemptCount = typeof value.attemptCount === 'number' ? value.attemptCount : undefined;
   const maxAttempts = typeof value.maxAttempts === 'number' ? value.maxAttempts : undefined;
+  const progressMilestones = value.progressMilestones === undefined
+    ? undefined
+    : isGenerationProgressMilestoneHistory(value.progressMilestones)
+      ? value.progressMilestones
+      : null;
+  if (progressMilestones === null
+    || !isGenerationProgressHistoryCompatible(
+      progressMilestones,
+      value.status,
+      typeof value.progressPercent === 'number' ? value.progressPercent : undefined,
+    )) return false;
   return isNonEmptyString(value.jobId)
     && isNonEmptyString(value.draftId)
     && Number.isSafeInteger(value.draftVersion)
@@ -425,6 +530,7 @@ export function isGenerationJobContract(value: unknown): value is GenerationJobC
     && (value.errorCode === undefined || value.errorCode === 'timeout' || value.errorCode === 'provider_failed')
     && (value.errorMessage === undefined || typeof value.errorMessage === 'string')
     && (value.retryable === undefined || typeof value.retryable === 'boolean')
+    && (value.progressMilestones === undefined || progressMilestones !== undefined)
     && (
       (value.status === 'succeeded' && value.stage === 'completed')
         ? isGenerationResultContract(value.result)

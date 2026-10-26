@@ -20,7 +20,14 @@ describe('share privacy guard', () => {
     const guard: ShareGuard = (privacy, mode) => {
       const diaryId = 'diary-1';
       store.getState().savePrivacy(diaryId, privacy);
-      return store.getState().recordShareDemo(diaryId, mode as 'wechat' | 'x' | 'save');
+      const diary = store.getState().diaries.find(item => item.id === diaryId);
+      if (!diary) return false;
+      return store.getState().confirmShareDelivery({
+        diaryId,
+        mode: mode as 'wechat' | 'x' | 'save',
+        version: diary.version ?? 0,
+        operationId: `${mode}-${privacy}`,
+      });
     };
 
     expect(() => assertPrivatePlatformShareBlocked(guard)).not.toThrow();

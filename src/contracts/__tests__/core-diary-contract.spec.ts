@@ -1,4 +1,4 @@
-import { CORE_DIARY_CONTRACT_VERSION, isCreateGenerationJobRequestContract, isDiaryContentContract, isDiaryContentContractForPhotoIds, isDraftContract, isGenerationJobContract, isGenerationResultContract, isMemoriesQuery, isPhotoAssetContract, isRewriteBlockResultContract, type MemoriesQuery, type RemoteResult } from '../core-diary-contract';
+import { CORE_DIARY_CONTRACT_VERSION, isCreateGenerationJobRequestContract, isDiaryContentContract, isDiaryContentContractForPhotoIds, isDraftContract, isGenerationJobContract, isGenerationResultContract, isGenerationResultForSelectedPhotoIds, isMemoriesQuery, isPhotoAssetContract, isRewriteBlockResultContract, type MemoriesQuery, type RemoteResult } from '../core-diary-contract';
 
 describe('core diary contract', () => {
   test('CASE-BAS-001-002 validates photo asset and draft examples', () => {
@@ -125,6 +125,58 @@ describe('core diary contract', () => {
     expect(isMemoriesQuery({ month: '2026/02', page: 1, pageSize: 20 })).toBe(false);
   });
 
+  test('validates generation milestone history while accepting legacy snapshots without history', () => {
+    const base = {
+      jobId: 'job-milestones',
+      draftId: 'draft-1',
+      draftVersion: 2,
+      idempotencyKey: 'draft-1-round-2',
+      status: 'running',
+      stage: 'structuring',
+      progressPercent: 80,
+    };
+    const history = [
+      { milestoneId: 'queued', stage: 'queued', progressPercent: 0, reachedAt: 1, attemptCount: 0 },
+      { milestoneId: 'photo-processing-started', stage: 'analyzing-photos', progressPercent: 0, reachedAt: 2, attemptCount: 1 },
+      { milestoneId: 'photos-ready', stage: 'analyzing-photos', progressPercent: 15, reachedAt: 3, attemptCount: 1 },
+      { milestoneId: 'provider-submitted', stage: 'drafting', progressPercent: 25, reachedAt: 4, attemptCount: 1 },
+      { milestoneId: 'provider-response-received', stage: 'structuring', progressPercent: 80, reachedAt: 5, attemptCount: 1 },
+    ];
+
+    expect(isGenerationJobContract(base)).toBe(true);
+    expect(isGenerationJobContract({ ...base, progressMilestones: history })).toBe(true);
+    expect(isGenerationJobContract({
+      ...base,
+      progressMilestones: [...history, history[3]],
+    })).toBe(false);
+    expect(isGenerationJobContract({
+      ...base,
+      progressMilestones: [...history].reverse(),
+    })).toBe(false);
+    expect(isGenerationJobContract({
+      ...base,
+      progressPercent: 25,
+      progressMilestones: history,
+    })).toBe(false);
+    expect(isGenerationJobContract({
+      ...base,
+      status: 'succeeded',
+      stage: 'completed',
+      progressPercent: 100,
+      progressMilestones: history,
+      result: {
+        title: '海风把旅程写成一页',
+        summary: '把沿海散步的片段整理成可继续编辑的结果。',
+        location: '台南',
+        date: '2026.10.13',
+        companionName: '自己',
+        coverPhotoId: 'photo-1',
+        posterPhotoIds: ['photo-1'],
+        blocks: [{ id: 'block-1', type: 'text', content: '沿着海岸慢慢走。', photoIds: ['photo-1'] }],
+      },
+    })).toBe(false);
+  });
+
   test('validates rewrite block result payloads', () => {
     expect(isRewriteBlockResultContract({
       draftId: 'draft-1',
@@ -214,6 +266,34 @@ describe('core diary contract', () => {
       posterPhotoIds: ['photo-1'],
       blocks: [{ id: 'block-1', type: 'text', content: '正文。' }],
       people: duplicatePeople,
+    })).toBe(false);
+  });
+
+  test('requires one ordered photo reference per generated text block and forbids standalone quotes', () => {
+    const result = {
+      title: '一段完整旅程',
+      summary: '按顺序串起选中的场景。',
+      location: '台南',
+      date: '2026.10.20',
+      companionName: '自己',
+      coverPhotoId: 'photo-2',
+      posterPhotoIds: ['photo-2', 'photo-1'],
+      blocks: [
+        { id: 'block-1', type: 'text', content: '先从这里开始。', photoIds: ['photo-2'] },
+        { id: 'block-2', type: 'text', content: '再沿着线索往前。', photoIds: ['photo-1'] },
+      ],
+    };
+
+    expect(isGenerationResultContract(result)).toBe(true);
+    expect(isGenerationResultForSelectedPhotoIds(result, ['photo-2', 'photo-1'])).toBe(true);
+    expect(isGenerationResultForSelectedPhotoIds(result, ['photo-1', 'photo-2'])).toBe(false);
+    expect(isGenerationResultForSelectedPhotoIds({
+      ...result,
+      blocks: [result.blocks[0]],
+    }, ['photo-2', 'photo-1'])).toBe(false);
+    expect(isGenerationResultContract({
+      ...result,
+      blocks: [...result.blocks, { id: 'quote-1', type: 'quote', content: '独立引用句' }],
     })).toBe(false);
   });
 });

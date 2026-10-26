@@ -30,16 +30,6 @@ type ShareExportFileDeps = {
 };
 
 const EXPORT_DIRECTORY = 'share-exports';
-const IMAGE_WIDTH = 1080;
-const PAGE_PADDING = 64;
-const PAGE_INNER_WIDTH = IMAGE_WIDTH - PAGE_PADDING * 2;
-const IMAGE_BACKGROUND = 0xfffbf4ff;
-const IMAGE_TEXT = 0x422b17ff;
-const IMAGE_TEXT_SOFT = 0x9d8878ff;
-const IMAGE_MUTED = 0x8e7e6fff;
-const IMAGE_ACCENT = 0xd4864bff;
-const IMAGE_PANEL = 0xffffffff;
-const IMAGE_PANEL_SOFT = 0xfff0e0ff;
 
 function getDefaultOutputDirectory() {
   if (FileSystem.cacheDirectory ?? FileSystem.documentDirectory) {
@@ -83,23 +73,6 @@ async function writeBufferFile(uri: string, buffer: Buffer | Uint8Array) {
   });
 }
 
-async function readBufferFile(uri: string) {
-  const readableUri = uri.startsWith('/') ? `file://${uri}` : uri;
-  if (readableUri.startsWith('data:')) {
-    return Buffer.from(readableUri.replace(/^data:[^;]+;base64,/, ''), 'base64');
-  }
-  if (readableUri.startsWith('file://')) {
-    try {
-      const fs = require('fs');
-      return fs.readFileSync(toNodeFilePath(readableUri));
-    } catch {}
-  }
-  const base64 = await FileSystem.readAsStringAsync(readableUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  return Buffer.from(base64, 'base64');
-}
-
 function encodePdfCjkText(value: string) {
   const bytes: number[] = [];
   for (const character of value) {
@@ -131,10 +104,6 @@ function wrapText(value: string, maxChars: number) {
   }
   if (current) lines.push(current);
   return lines;
-}
-
-function estimateLineCount(value: string, maxChars: number) {
-  return Math.max(1, wrapText(value, maxChars).length);
 }
 
 function buildPdfLines(diary: DiaryItem, assets: PreparedShareAsset[]) {
@@ -199,122 +168,6 @@ function buildSimplePdf(lines: string[]) {
   return Buffer.from(pdf, 'utf8');
 }
 
-async function renderShareImageFile(
-  input: ShareExportFileInput,
-  outputUri: string,
-  writeFile: (uri: string, buffer: Buffer | Uint8Array) => Promise<void>,
-) {
-  const Jimp = require('jimp-compact');
-  const createBlock = (width: number, height: number, color: number) => new Jimp(width, height, color);
-  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-  const drawRect = async (canvas: any, x: number, y: number, width: number, height: number, color: number) => {
-    canvas.composite(await createBlock(width, height, color), x, y);
-  };
-  const drawTextSkeleton = async (canvas: any, x: number, y: number, width: number, lineCount: number, color: number) => {
-    for (let index = 0; index < lineCount; index += 1) {
-      const ratio = index === lineCount - 1 ? 0.58 : 0.92 - (index % 3) * 0.07;
-      const lineWidth = clamp(Math.round(width * ratio), 120, width);
-      await drawRect(canvas, x, y + index * 28, lineWidth, 12, color);
-    }
-  };
-
-  const orderedPhotoIds = input.diary.posterPhotoIds?.length ? input.diary.posterPhotoIds : input.diary.photoIds;
-  const orderedAssets = orderedPhotoIds
-    .map(photoId => input.assets.find(asset => asset.photoId === photoId))
-    .filter((asset): asset is PreparedShareAsset => Boolean(asset));
-  const posterAssets = (orderedAssets.length ? orderedAssets : input.assets).slice(0, 2);
-  const posterImages = await Promise.all(
-    posterAssets.map(async asset => {
-      const image = await Jimp.read(await readBufferFile(asset.uri));
-      const targetHeight = Math.max(280, Math.min(520, Math.round(PAGE_INNER_WIDTH * (image.bitmap.height / image.bitmap.width))));
-      return image.cover(PAGE_INNER_WIDTH, targetHeight);
-    }),
-  );
-
-  const printableBlocks = input.diary.blocks.slice(0, 6);
-  const titleLines = estimateLineCount(input.diary.title, 10);
-  const summaryLines = estimateLineCount(input.diary.summary || '生活很美好 值得被记录', 18);
-  const metaLines = estimateLineCount(`${input.diary.date} · ${input.diary.location}`, 22);
-  const titleHeight = 48 + titleLines * 30;
-  const summaryHeight = 28 + summaryLines * 22;
-  const metaHeight = 20 + metaLines * 18;
-  const blockHeights = printableBlocks.reduce((sum, block) => {
-    if (block.type === 'photo') {
-      return sum + 298;
-    }
-    const title = block.type === 'text' && block.title ? 34 : 0;
-    const contentLines = estimateLineCount(block.type === 'quote' ? `“${block.content}”` : block.content, 22);
-    return sum + 40 + title + contentLines * 28 + 32 + 18;
-  }, 0);
-  const posterHeight = posterImages.reduce((sum, image) => sum + image.bitmap.height, 0) + Math.max(0, posterImages.length - 1) * 18;
-  const footerHeight = input.diary.anonymous ? 60 : 24;
-  const totalHeight = 72 + titleHeight + 24 + posterHeight + 24 + summaryHeight + 18 + metaHeight + 28 + blockHeights + footerHeight + 72;
-  const canvas = await new Jimp(IMAGE_WIDTH, totalHeight, IMAGE_BACKGROUND);
-
-  let cursorY = 60;
-  await drawRect(canvas, PAGE_PADDING, cursorY, PAGE_INNER_WIDTH, titleHeight, IMAGE_PANEL);
-  await drawRect(canvas, PAGE_PADDING, cursorY, 18, titleHeight, IMAGE_ACCENT);
-  await drawTextSkeleton(canvas, PAGE_PADDING + 40, cursorY + 28, PAGE_INNER_WIDTH - 72, titleLines, IMAGE_TEXT);
-  cursorY += titleHeight + 24;
-
-  for (const image of posterImages) {
-    canvas.composite(image, PAGE_PADDING, cursorY);
-    cursorY += image.bitmap.height + 18;
-  }
-  cursorY -= posterImages.length ? 18 : 0;
-  cursorY += 24;
-
-  await drawRect(canvas, PAGE_PADDING, cursorY, PAGE_INNER_WIDTH, summaryHeight, IMAGE_PANEL_SOFT);
-  await drawTextSkeleton(canvas, PAGE_PADDING + 28, cursorY + 18, PAGE_INNER_WIDTH - 56, summaryLines, IMAGE_TEXT);
-  cursorY += summaryHeight + 18;
-
-  await drawRect(canvas, PAGE_PADDING, cursorY, PAGE_INNER_WIDTH, metaHeight, IMAGE_PANEL);
-  await drawTextSkeleton(canvas, PAGE_PADDING + 24, cursorY + 12, PAGE_INNER_WIDTH - 48, metaLines, IMAGE_MUTED);
-  cursorY += metaHeight + 28;
-
-  if (input.diary.anonymous) {
-    const badge = await new Jimp(264, 36, IMAGE_ACCENT);
-    canvas.composite(badge, PAGE_PADDING, cursorY);
-    await drawRect(canvas, PAGE_PADDING + 14, cursorY + 12, 164, 10, 0xffffffff);
-    await drawRect(canvas, PAGE_PADDING + 14, cursorY + 24, 108, 6, 0xffffffff);
-    cursorY += 54;
-  }
-
-  for (const block of printableBlocks) {
-    if (block.type === 'photo') {
-      await drawRect(canvas, PAGE_PADDING, cursorY, PAGE_INNER_WIDTH, 280, IMAGE_PANEL);
-      const asset = input.assets.find(item => item.photoId === block.photoId);
-      if (asset) {
-        const photo = await Jimp.read(await readBufferFile(asset.uri));
-        const visual = photo.cover(PAGE_INNER_WIDTH - 48, 188);
-        canvas.composite(visual, PAGE_PADDING + 24, cursorY + 24);
-      } else {
-        await drawRect(canvas, PAGE_PADDING + 24, cursorY + 24, PAGE_INNER_WIDTH - 48, 188, IMAGE_PANEL_SOFT);
-      }
-      await drawTextSkeleton(canvas, PAGE_PADDING + 24, cursorY + 228, PAGE_INNER_WIDTH - 80, estimateLineCount(`[图片] ${block.caption}`, 18), IMAGE_TEXT_SOFT);
-      cursorY += 298;
-      continue;
-    }
-    const text = block.type === 'quote' ? `“${block.content}”` : block.content;
-    const contentLines = estimateLineCount(text, 22);
-    const blockHeight = 40 + (block.type === 'text' && block.title ? 34 : 0) + contentLines * 28 + 32;
-    await drawRect(canvas, PAGE_PADDING, cursorY, PAGE_INNER_WIDTH, blockHeight, block.type === 'quote' ? IMAGE_PANEL_SOFT : IMAGE_PANEL);
-    await drawRect(canvas, PAGE_PADDING, cursorY, 10, blockHeight, block.type === 'quote' ? IMAGE_MUTED : IMAGE_ACCENT);
-    if (block.type === 'text' && block.title) {
-      await drawTextSkeleton(canvas, PAGE_PADDING + 28, cursorY + 20, PAGE_INNER_WIDTH - 56, 1, IMAGE_TEXT);
-      cursorY += 34;
-    }
-    await drawTextSkeleton(canvas, PAGE_PADDING + 28, cursorY + 18, PAGE_INNER_WIDTH - 72, contentLines, block.type === 'quote' ? IMAGE_MUTED : IMAGE_TEXT_SOFT);
-    cursorY += blockHeight + 18;
-  }
-
-  await drawRect(canvas, PAGE_PADDING, totalHeight - 30, PAGE_INNER_WIDTH, 8, IMAGE_MUTED);
-  await drawRect(canvas, PAGE_PADDING, totalHeight - 18, Math.min(PAGE_INNER_WIDTH, 220 + String(input.diary.version ?? 0).length * 20), 6, IMAGE_TEXT_SOFT);
-
-  const buffer = await canvas.getBufferAsync(Jimp.MIME_PNG);
-  await writeFile(outputUri, buffer);
-}
-
 async function renderSharePdfFile(
   input: ShareExportFileInput,
   outputUri: string,
@@ -330,6 +183,13 @@ export function createShareExportFileService(deps: ShareExportFileDeps = {}) {
 
   return {
     async exportFile(input: ShareExportFileInput): Promise<ShareExportFileResult> {
+      if (input.mode === 'save') {
+        return {
+          ok: false,
+          reason: 'unsupported',
+          message: '长图导出尚未接入真实文字渲染和系统相册保存。',
+        };
+      }
       const root = getOutputDirectory();
       if (!root) {
         return {
@@ -339,16 +199,11 @@ export function createShareExportFileService(deps: ShareExportFileDeps = {}) {
         };
       }
       const baseDir = `${root}${EXPORT_DIRECTORY}/`;
-      const extension = input.mode === 'pdf' ? 'pdf' : 'png';
-      const fileUri = `${baseDir}${encodeURIComponent(`${input.diary.id}::${input.diary.version ?? 0}::${input.operationId}::${input.mode}`)}.${extension}`;
+      const fileUri = `${baseDir}${encodeURIComponent(`${input.diary.id}::${input.diary.version ?? 0}::${input.operationId}::${input.mode}`)}.pdf`;
 
       try {
         await ensureDirectory(baseDir);
-        if (input.mode === 'pdf') {
-          await renderSharePdfFile(input, fileUri, writeFile);
-        } else {
-          await renderShareImageFile(input, fileUri, writeFile);
-        }
+        await renderSharePdfFile(input, fileUri, writeFile);
         return { ok: true, fileUri };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'unknown error';

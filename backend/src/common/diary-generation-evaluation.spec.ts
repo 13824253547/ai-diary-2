@@ -46,4 +46,46 @@ describe('Diary generation evaluation baseline', () => {
 
     expect(checks.find(check => check.id === 'photo-reference')?.passed).toBe(false);
   });
+
+  test('evaluation requires one ordered text block per selected image and no quote block', () => {
+    const fixture = DIARY_GENERATION_FIXTURES[0];
+    const base = {
+      title: '旅途的一页',
+      summary: '按照片顺序连起来。',
+      location: '台南',
+      date: '2026.10.20',
+      companionName: '同行人',
+      coverPhotoId: fixture.input.selectedPhotoIds[0],
+      posterPhotoIds: fixture.input.selectedPhotoIds.slice(0, 2),
+      people: [],
+    };
+    const checks = evaluateDiaryGenerationResult(fixture, {
+      ...base,
+      blocks: fixture.input.selectedPhotoIds.map((photoId, index) => ({
+        id: `block-${index + 1}`,
+        type: 'text' as const,
+        content: `沿着这一站继续前进 ${index + 1}。`,
+        photoIds: [photoId],
+      })),
+    });
+    expect(checks.find(check => check.id === 'one-text-per-photo')?.passed).toBe(true);
+    expect(checks.find(check => check.id === 'text-photo-order')?.passed).toBe(true);
+    expect(checks.find(check => check.id === 'no-quote-blocks')?.passed).toBe(true);
+
+    const malformed = evaluateDiaryGenerationResult(fixture, {
+      ...base,
+      blocks: [
+        { id: 'block-1', type: 'text', content: '段落错序。', photoIds: [fixture.input.selectedPhotoIds[1]] },
+        ...fixture.input.selectedPhotoIds.slice(1).map((photoId, index) => ({
+          id: `block-${index + 2}`,
+          type: 'text' as const,
+          content: '其它段落。',
+          photoIds: [photoId],
+        })),
+        { id: 'extra-quote', type: 'quote', content: '多出的引用句。' },
+      ],
+    });
+    expect(malformed.find(check => check.id === 'text-photo-order')?.passed).toBe(false);
+    expect(malformed.find(check => check.id === 'no-quote-blocks')?.passed).toBe(false);
+  });
 });

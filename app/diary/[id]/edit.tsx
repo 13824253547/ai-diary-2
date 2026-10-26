@@ -8,11 +8,20 @@ import { Button } from '../../../src/components/common/button';
 import { Photo } from '../../../src/components/diary/photo';
 import { useDraftRoute, leaveDraft } from '../../../src/hooks/use-diary-flow';
 import { validateReadableDevicePhotoIds } from '../../../src/services/photo-library';
-import { appSelectors, useAppStore } from '../../../src/store/use-app-store';
+import { useAppStore } from '../../../src/store/use-app-store';
 import { colors } from '../../../src/theme/tokens';
 
 function getRewriteFailureMessage(issue?: string) {
   if (!issue?.startsWith('段落重写失败：')) return undefined;
+  if (issue.includes('当前设备已有一项日记生成或重写任务正在执行')) {
+    return '当前设备已有一项日记生成或重写任务正在执行，请等待完成后重试。';
+  }
+  if (issue.includes('仅用于整理日记和已选照片')) {
+    return '重写内容超出日记范围，请修改原文后重试。';
+  }
+  if (issue.includes('生成结果超出日记内容范围')) {
+    return '重写结果超出日记范围，未写回原文，请稍后重试。';
+  }
   if (issue.includes('timed out')) return '重写超时，请稍后重试。';
   if (issue.includes('response is invalid')) return '重写结果异常，请稍后重试。';
   if (issue.includes('cancelled')) return '本次重写已取消。';
@@ -27,6 +36,7 @@ export default function Edit() {
   const [pick, setPick] = useState<string[]>([]);
   const [photoPickError, setPhotoPickError] = useState<string>();
   const [confirmingPhotoPick, setConfirmingPhotoPick] = useState(false);
+  const photoCatalog = useAppStore(state => state.photos);
   const saveLockedRef = useRef(false);
   const [saveLocked, setSaveLocked] = useState(false);
   const latestIssue = useAppStore(state => state.issueLog[state.issueLog.length - 1]);
@@ -34,6 +44,9 @@ export default function Edit() {
   const handledIssueCountRef = useRef(issueLogCount);
   const remoteSaving = useAppStore(state => draft ? state.savingDraftIds.includes(draft.id) : false);
   const saving = remoteSaving || saveLocked;
+  const rewriting = useAppStore(state => draft
+    ? state.rewritingDraftBlockKeys.some(key => key.startsWith(`${encodeURIComponent(draft.id)}:`))
+    : false);
 
   useEffect(() => {
     if (draft && params.openPhotos === '1') {
@@ -50,7 +63,7 @@ export default function Edit() {
       return;
     }
     setPhotoBlock(targetBlock.id);
-    setPick('photoIds' in targetBlock ? targetBlock.photoIds ?? [] : []);
+    setPick('photoIds' in targetBlock ? (targetBlock.photoIds ?? []).slice(0, 1) : []);
     setPhotoPickError(undefined);
     router.setParams({ openBlockPhotos: '' });
   }, [draft, params.openBlockPhotos, router]);
@@ -88,11 +101,14 @@ export default function Edit() {
   }
 
   const currentDraft = draft;
+  const selectedPhotos = currentDraft.selectedPhotoIds
+    .map(id => photoCatalog.find(photo => photo.id === id))
+    .filter((photo): photo is NonNullable<typeof photo> => photo !== undefined);
   const paragraphs = currentDraft.diary.blocks.filter(block => block.type === 'text' || block.type === 'quote');
   const selectedBlock = blockId ? paragraphs.find(block => block.id === blockId) : paragraphs[0];
   const selected = selectedBlock?.id;
   const rewriteTargetMissing = !!blockId && !selectedBlock;
-  const rewriteDisabled = !selected;
+  const rewriteDisabled = !selected || rewriting || saving;
   const rewriteHint = !paragraphs.length
     ? '当前没有可重写的文字段落'
     : rewriteTargetMissing
@@ -105,7 +121,7 @@ export default function Edit() {
   }
 
   async function save() {
-    if (saveLockedRef.current) return;
+    if (saveLockedRef.current || rewriting) return;
 
     saveLockedRef.current = true;
     setSaveLocked(true);
@@ -170,7 +186,7 @@ export default function Edit() {
   }
 
   function rewriteSelectedBlock() {
-    if (!selected) return;
+    if (!selected || rewriting || saving) return;
     void useAppStore.getState().rewriteDraftBlock(currentDraft.id, selected);
   }
 
@@ -181,7 +197,7 @@ export default function Edit() {
   }
 
   async function confirmPhotoPick() {
-    if (!photoBlock || confirmingPhotoPick) return;
+    if (!photoBlock || confirmingPhotoPick || rewriting) return;
 
     setPhotoPickError(undefined);
     setConfirmingPhotoPick(true);
@@ -206,12 +222,13 @@ export default function Edit() {
     <Screen
       header={(
         <TopBar
+          backDisabled={rewriting}
           onBackPress={() => leaveDraft(draft.id, () => {
             router.dismissAll();
             router.replace(currentDraft.sourceDiaryId ? `/diary/${currentDraft.sourceDiaryId}` : '/(tabs)/home');
           })}
           trailing={(
-            <Pressable onPress={() => void save()} disabled={saving} accessibilityRole="button">
+            <Pressable onPress={() => void save()} disabled={saving || rewriting} accessibilityRole="button" accessibilityState={{ disabled: saving || rewriting }}>
               <Text style={[styles.save, saving && styles.saveDisabled]}>{saving ? '保存中' : '保存'}</Text>
             </Pressable>
           )}
@@ -224,67 +241,80 @@ export default function Edit() {
         accessibilityLabel="日记标题"
         style={styles.title}
         value={currentDraft.diary.title}
+        editable={!rewriting}
         onChangeText={title => useAppStore.getState().updateDraft(currentDraft.id, { title })}
       />
 
       <Pressable
         style={styles.photos}
         accessibilityLabel="更换照片"
+        accessibilityRole="button"
+        accessibilityState={{ disabled: rewriting }}
+        disabled={rewriting}
         onPress={() => router.push({ pathname: '/album/select', params: { draftId: currentDraft.id, mode: 'replace' } })}
       >
         {currentDraft.selectedPhotoIds.slice(0, 3).map(id => (
-          <Photo key={id} id={id} style={styles.topPhoto} />
+          <Photo key={id} id={id} diaryId={currentDraft.sourceDiaryId} style={styles.topPhoto} />
         ))}
       </Pressable>
 
-      {paragraphs.map(block => (
-        <View key={block.id} style={{ gap: 9 }}>
-          <View style={styles.editRow}>
-            <TextInput
-              accessibilityLabel={`编辑段落${paragraphs.indexOf(block) + 1}`}
-              multiline
-              value={'content' in block ? block.content : ''}
-              onFocus={() => setBlockId(block.id)}
-              onChangeText={text => useAppStore.getState().updateDraftBlock(currentDraft.id, block.id, text)}
-              style={[styles.paragraph, block.id === selected && styles.active]}
-            />
+      {paragraphs.map((block, index) => {
+        const paragraphNumber = index + 1;
+        const referencedPhotoId = 'photoIds' in block ? block.photoIds?.[0] : undefined;
 
-            <Pressable
-              style={styles.reference}
-              accessibilityRole="button"
-              accessibilityLabel={`为第${paragraphs.indexOf(block) + 1}段选择引用图片`}
-              onPress={() => {
-                setPhotoBlock(block.id);
-                setPick('photoIds' in block ? block.photoIds ?? [] : []);
-                setPhotoPickError(undefined);
-              }}
-            >
-              <Ionicons name="add-circle" size={27} color={colors.borderStrong} />
-              <Text style={styles.refText}>引用图片</Text>
-            </Pressable>
-          </View>
+        return (
+          <View key={block.id} style={{ gap: 9 }}>
+            <View style={styles.editRow}>
+              <TextInput
+                accessibilityLabel={`编辑段落${paragraphNumber}`}
+                multiline
+                value={'content' in block ? block.content : ''}
+                editable={!rewriting}
+                onFocus={() => setBlockId(block.id)}
+                onChangeText={text => useAppStore.getState().updateDraftBlock(currentDraft.id, block.id, text)}
+                style={[styles.paragraph, block.id === selected && styles.active]}
+              />
 
-          {'photoIds' in block && block.photoIds?.length ? (
-            <View style={styles.inlinePhotos}>
-              {block.photoIds.map(id => (
-                <Photo key={id} id={id} style={{ width: 68, height: 56, borderRadius: 6 }} />
-              ))}
+              <Pressable
+                style={[styles.reference, referencedPhotoId && styles.referenceFilled]}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: rewriting }}
+                disabled={rewriting}
+                accessibilityLabel={referencedPhotoId
+                  ? `更换第${paragraphNumber}段引用图片`
+                  : `为第${paragraphNumber}段选择引用图片`}
+                onPress={() => {
+                  setPhotoBlock(block.id);
+                  setPick('photoIds' in block ? (block.photoIds ?? []).slice(0, 1) : []);
+                  setPhotoPickError(undefined);
+                }}
+              >
+                {referencedPhotoId ? (
+                  <Photo id={referencedPhotoId} diaryId={currentDraft.sourceDiaryId} style={styles.referencePhoto} />
+                ) : (
+                  <>
+                    <Ionicons name="add-circle" size={27} color={colors.borderStrong} />
+                    <Text style={styles.refText}>引用图片</Text>
+                  </>
+                )}
+              </Pressable>
             </View>
-          ) : null}
-        </View>
-      ))}
+          </View>
+        );
+      })}
 
       <View style={styles.actions}>
         <View style={{ flex: 1 }}>
           <Button
             variant="secondary"
             label="更换排版师"
+            disabled={rewriting}
             onPress={() => router.push({ pathname: '/create/character', params: { draftId: currentDraft.id, mode: 'replace' } })}
           />
         </View>
 
         <View style={{ flex: 1 }}>
-          <Button variant="secondary" label="重写本段" disabled={rewriteDisabled} onPress={rewriteSelectedBlock} />
+          <Button variant="secondary" label={rewriting ? '重写中…' : '重写本段'} disabled={rewriteDisabled} onPress={rewriteSelectedBlock} />
         </View>
       </View>
 
@@ -292,17 +322,19 @@ export default function Edit() {
 
       <Sheet visible={!!photoBlock} title="选择要引用的图片" onClose={closePhotoSheet}>
         <ScrollView horizontal contentContainerStyle={{ gap: 8 }}>
-          {appSelectors.photos.map((photo, index) => (
+          {selectedPhotos.map((photo, index) => (
             <Pressable
               key={photo.id}
-              accessibilityRole="checkbox"
+              accessibilityRole="radio"
               accessibilityLabel={`引用图片${index + 1}`}
-              accessibilityState={{ checked: pick.includes(photo.id) }}
-              onPress={() => setPick(current => current.includes(photo.id) ? current.filter(id => id !== photo.id) : [...current, photo.id])}
+              accessibilityState={{ checked: pick[0] === photo.id, disabled: rewriting }}
+              disabled={rewriting}
+              onPress={() => setPick(current => current[0] === photo.id ? [] : [photo.id])}
               style={{ gap: 7 }}
             >
               <Photo
                 id={photo.id}
+                diaryId={currentDraft.sourceDiaryId}
                 style={{
                   width: 73,
                   height: 85,
@@ -320,7 +352,7 @@ export default function Edit() {
 
         <Button
           label={confirmingPhotoPick ? '处理中…' : '引用所选图片'}
-          disabled={confirmingPhotoPick}
+          disabled={confirmingPhotoPick || rewriting}
           onPress={() => { void confirmPhotoPick(); }}
         />
       </Sheet>
@@ -367,9 +399,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 9,
+    overflow: 'hidden',
   },
+  referenceFilled: { borderWidth: 0 },
+  referencePhoto: { width: '100%', height: '100%', borderRadius: 8 },
   refText: { fontSize: 11, color: colors.textSecondary, textAlign: 'center' },
-  inlinePhotos: { flexDirection: 'row', gap: 7 },
   actions: { flexDirection: 'row', gap: 12 },
   helper: { fontSize: 12, color: colors.textSecondary },
 });

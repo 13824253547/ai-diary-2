@@ -1,3 +1,9 @@
+import {
+  createDiagnosticRequestId,
+  isDevDiagnosticsEnabled,
+  logDevDiagnostic,
+} from './dev-diagnostics';
+
 export type ApiClientOptions = {
   baseUrl: string;
   headers?: Record<string, string>;
@@ -8,6 +14,7 @@ export type ApiClientOptions = {
 export type ApiRequestOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
+  transport?: 'xhr';
 };
 
 export type ApiResponse<T> = {
@@ -30,6 +37,14 @@ export class ApiRequestError extends Error {
 }
 
 export const DEFAULT_API_REQUEST_TIMEOUT_MS = 15_000;
+export const PROVIDER_REQUEST_CLIENT_TIMEOUT_MS = 360_000;
+
+function getDiagnosticBodyKind(body: RequestInit['body']) {
+  if (body == null) return 'none';
+  if (typeof body === 'string') return 'text';
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return 'multipart';
+  return 'binary';
+}
 
 function mergeHeaders(base: Record<string, string>, extra?: HeadersInit) {
   const merged: Record<string, string> = {};
@@ -49,6 +64,47 @@ function mergeHeaders(base: Record<string, string>, extra?: HeadersInit) {
   }
 
   return merged;
+}
+
+function requestWithXhr(
+  url: string,
+  init: RequestInit,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    const cleanup = () => signal.removeEventListener('abort', abort);
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const abort = () => xhr.abort();
+
+    try {
+      xhr.open(String(init.method ?? 'GET'), url, true);
+      xhr.responseType = 'text';
+      for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+      xhr.onload = () => finish(() => resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        json: async () => JSON.parse(xhr.responseText),
+      } as Response));
+      xhr.onerror = () => finish(() => reject(new TypeError('Network request failed')));
+      xhr.onabort = () => finish(() => reject(new TypeError('Request aborted')));
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) {
+        abort();
+      } else {
+        xhr.send(init.body as XMLHttpRequestBodyInit | null);
+      }
+    } catch (error) {
+      finish(() => reject(error));
+    }
+  });
 }
 
 export class ApiClient {
@@ -78,11 +134,25 @@ export class ApiClient {
     }
 
     const timeoutMs = options.timeoutMs ?? this.options.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS;
+    const diagnosticsEnabled = isDevDiagnosticsEnabled();
+    const requestId = diagnosticsEnabled ? createDiagnosticRequestId() : undefined;
+    const method = String(init.method ?? 'GET').toUpperCase();
+    const bodyKind = getDiagnosticBodyKind(init.body);
+    const startedAt = Date.now();
+    if (requestId) {
+      logDevDiagnostic('info', 'api.request.started', {
+        requestId,
+        route: path,
+        method,
+        bodyKind,
+      });
+    }
     const controller = new AbortController();
     let timeoutReached = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let removeAbortListener: (() => void) | undefined;
     let rejectCancellation: ((error: ApiRequestError) => void) | undefined;
+    let failureStage: 'headers' | 'fetch' | 'response_body' = 'headers';
     const cancellation = new Promise<never>((_, reject) => {
       rejectCancellation = reject;
     });
@@ -106,6 +176,7 @@ export class ApiClient {
 
     const performRequest = async (): Promise<ApiResponse<T>> => {
       const headers = mergeHeaders(await this.getHeaders(), init.headers);
+      if (requestId) headers['x-request-id'] = requestId;
       if (controller.signal.aborted) {
         throw new ApiRequestError(
           timeoutReached ? 'timeout' : 'cancelled',
@@ -114,25 +185,63 @@ export class ApiClient {
         );
       }
 
-      const response = await fetch(this.buildUrl(path), {
-        ...init,
-        headers,
-        signal: controller.signal,
-      });
+      failureStage = 'fetch';
+      const response = options.transport === 'xhr'
+        ? await requestWithXhr(this.buildUrl(path), init, headers, controller.signal)
+        : await fetch(this.buildUrl(path), {
+            ...init,
+            headers,
+            signal: controller.signal,
+          });
 
       let data: T;
       try {
+        failureStage = 'response_body';
         data = await response.json() as T;
       } catch {
         throw new ApiRequestError('provider_failed', '服务器返回的数据格式异常。', false);
       }
 
+      const envelope = data as { error?: { code?: unknown } } | null;
+      const errorCode = typeof envelope?.error?.code === 'string'
+        && /^[A-Za-z0-9_.:-]{1,80}$/.test(envelope.error.code)
+        ? envelope.error.code
+        : undefined;
+      if (requestId) {
+        logDevDiagnostic(response.ok ? 'info' : 'warn', 'api.response.received', {
+          requestId,
+          route: path,
+          method,
+          status: response.status,
+          durationMs: Date.now() - startedAt,
+          ...(errorCode ? { errorCode } : {}),
+        });
+      }
       return { ok: response.ok, status: response.status, data };
     };
 
     try {
       return await Promise.race([performRequest(), timeout, cancellation]);
     } catch (error) {
+      if (requestId) {
+        const errorCode = error instanceof ApiRequestError
+          ? error.code
+          : timeoutReached
+            ? 'timeout'
+            : callerSignal?.aborted
+              ? 'cancelled'
+              : 'network_error';
+        logDevDiagnostic('warn', 'api.request.failed', {
+          requestId,
+          route: path,
+          method,
+          bodyKind,
+          failureStage,
+          durationMs: Date.now() - startedAt,
+          errorCode,
+          ...(error instanceof Error ? { errorName: error.name } : {}),
+        });
+      }
       if (error instanceof ApiRequestError) throw error;
       if (timeoutReached) {
         throw new ApiRequestError('timeout', '请求超时，请稍后重试。', true);

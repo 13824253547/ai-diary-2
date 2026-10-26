@@ -1,6 +1,6 @@
 import { CORE_DIARY_CONTRACT_VERSION, isCreateGenerationJobRequestContract, isDiaryContentContractForPhotoIds, isDraftContract, isGenerationJobContract, isMemoriesQuery, isRewriteBlockResultContract, MEMORIES_PAGE_SIZES, type CreateGenerationJobRequestContract, type DiaryContract, type DraftContract, type GenerationJobContract, type MemoriesQuery, type MemoriesQueryResult, type RemoteError, type RemoteResult, type RewriteBlockRequestContract, type RewriteBlockResultContract, type SaveDiaryRequestContract, type SaveDraftResult } from '../contracts/core-diary-contract';
 import { ApiClient, ApiRequestError, type ApiRequestOptions, type ApiResponse } from '../services/api-client';
-import type { CoreDiaryRepository, IdentityContract } from './core-diary-repository';
+import type { CoreDiaryRepository, GenerationPhotoUpload, IdentityContract } from './core-diary-repository';
 import type { DiaryItem } from '../types/diary';
 
 type OkEnvelope<T> = { ok: true; data: T };
@@ -100,6 +100,29 @@ function buildDiaryItem(value: unknown): DiaryItem | undefined {
   };
 }
 
+function buildPhotoMultipartBody(
+  fields: Record<string, unknown>,
+  photos: GenerationPhotoUpload[],
+) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    form.append(key, typeof value === 'string' ? value : JSON.stringify(value));
+  }
+  photos.forEach((photo, index) => {
+    const extension = photo.mimeType === 'image/jpeg'
+      ? 'jpg'
+      : photo.mimeType.split('/')[1] || 'img';
+    const file = {
+      uri: photo.uri,
+      name: `photo-${String(index + 1).padStart(3, '0')}.${extension}`,
+      type: photo.mimeType,
+    };
+    form.append('photos', file as unknown as Blob);
+  });
+  return form;
+}
+
 export class HttpCoreDiaryRepository implements CoreDiaryRepository {
   constructor(private readonly client: ApiClient) {}
 
@@ -114,7 +137,11 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     }, options);
   }
 
-  async createGenerationJob(input: CreateGenerationJobRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>> {
+  async createGenerationJob(
+    input: CreateGenerationJobRequestContract,
+    options?: ApiRequestOptions,
+    photos?: GenerationPhotoUpload[],
+  ): Promise<RemoteResult<GenerationJobContract>> {
     if (!isCreateGenerationJobRequestContract(input)) {
       return {
         ok: false,
@@ -122,20 +149,39 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
         error: { code: 'invalid_input', message: '生成任务请求参数无效。', retryable: false },
       };
     }
+    const body = photos === undefined ? JSON.stringify(input) : buildPhotoMultipartBody({
+      ...input,
+      photoMetadata: photos.map(({ photoId, date }) => ({ photoId, date })),
+    }, photos);
     return this.requestGenerationJobResult('/generation/jobs', {
       method: 'POST',
-      body: JSON.stringify(input),
-    }, options, job =>
+      headers: photos === undefined ? { 'Content-Type': 'application/json' } : {},
+      body,
+    }, photos === undefined ? options : { ...options, transport: 'xhr' }, job =>
       job.draftId === input.draftId
       && job.draftVersion === input.draftVersion
       && job.idempotencyKey === input.idempotencyKey);
   }
 
-  async rewriteBlock(input: RewriteBlockRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<RewriteBlockResultContract>> {
+  async rewriteBlock(
+    input: RewriteBlockRequestContract,
+    options?: ApiRequestOptions,
+    photos?: GenerationPhotoUpload[],
+  ): Promise<RemoteResult<RewriteBlockResultContract>> {
+    const body = photos === undefined
+      ? JSON.stringify(input)
+      : buildPhotoMultipartBody({
+          ...input,
+          photoIds: input.photoIds ?? [],
+          selectedPhotoIds: input.selectedPhotoIds,
+          contextBlocks: input.contextBlocks ?? [],
+          photoMetadata: photos.map(({ photoId, date }) => ({ photoId, date })),
+        }, photos);
     return this.requestRewriteResult('/generation/rewrite', {
       method: 'POST',
-      body: JSON.stringify(input),
-    }, options, input);
+      headers: photos === undefined ? { 'Content-Type': 'application/json' } : {},
+      body,
+    }, photos === undefined ? options : { ...options, transport: 'xhr' }, input);
   }
 
   async getGenerationJob(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>> {
@@ -153,11 +199,23 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     }, options, job => job.jobId === jobId);
   }
 
-  async saveDiary(input: SaveDiaryRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<SaveDraftResult & { id?: string }>> {
+  async saveDiary(
+    input: SaveDiaryRequestContract,
+    options?: ApiRequestOptions,
+    photos?: GenerationPhotoUpload[],
+  ): Promise<RemoteResult<SaveDraftResult & { id?: string }>> {
+    const multipart = photos !== undefined;
+    const body = multipart
+      ? buildPhotoMultipartBody({
+          ...input,
+          photoMetadata: photos.map(({ photoId, date }) => ({ photoId, date })),
+        }, photos)
+      : JSON.stringify(input);
     return this.requestSaveResult('/diaries/save', {
       method: 'POST',
-      body: JSON.stringify(input),
-    }, options);
+      headers: multipart ? {} : { 'Content-Type': 'application/json' },
+      body,
+    }, multipart ? { ...options, transport: 'xhr' } : options);
   }
 
   async updateDiaryVisibility(input: {
@@ -380,12 +438,10 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     init: RequestInit,
     options?: ApiRequestOptions,
   ): Promise<RemoteResult<SaveDraftResult & { id?: string }>> {
-    let response: ApiResponse<OkEnvelope<{ id?: string; diaryId: string; draftId: string; savedVersion: number }> | ErrorEnvelope>;
+    let response: ApiResponse<OkEnvelope<{ id?: string; diaryId: string; draftId: string; savedVersion: number; date?: string }> | ErrorEnvelope>;
     try {
       response = await this.client.request(path, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: init.headers ?? { 'Content-Type': 'application/json' },
         ...init,
       }, options);
     } catch (error) {
@@ -407,6 +463,9 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
         draftId: json.data.draftId,
         savedVersion: json.data.savedVersion,
         id: json.data.id ?? json.data.diaryId,
+        ...(typeof json.data.date === 'string' && /^\d{4}\.\d{2}\.\d{2}$/.test(json.data.date)
+          ? { date: json.data.date }
+          : {}),
       },
     };
   }
@@ -462,9 +521,7 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     let response: ApiResponse<OkEnvelope<GenerationJobContract> | ErrorEnvelope>;
     try {
       response = await this.client.request(path, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: init.headers ?? { 'Content-Type': 'application/json' },
         ...init,
       }, options);
     } catch (error) {
@@ -512,9 +569,7 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     let response: ApiResponse<OkEnvelope<RewriteBlockResultContract> | ErrorEnvelope>;
     try {
       response = await this.client.request(path, {
-        headers: {
-        'Content-Type': 'application/json',
-        },
+        headers: init.headers ?? { 'Content-Type': 'application/json' },
         ...init,
       }, options);
     } catch (error) {

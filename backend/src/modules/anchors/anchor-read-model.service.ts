@@ -486,10 +486,10 @@ export class AnchorReadModelService {
           d.\`id\` AS \`diaryId\`,
           d.\`version\` AS \`diaryVersion\`,
           d.\`title\`,
-          d.\`date\` AS \`diaryDate\`,
+          d.\`createdAt\` AS \`diaryDate\`,
           JSON_UNQUOTE(JSON_EXTRACT(d.\`contentSnapshot\`, '$.coverPhotoId')) AS \`coverPhotoId\`
         ${fromAndWhere}
-        ORDER BY d.\`date\` DESC, d.\`id\` ASC, a.\`anchorId\` ASC, a.\`id\` ASC
+        ORDER BY d.\`createdAt\` DESC, d.\`id\` ASC, a.\`anchorId\` ASC, a.\`id\` ASC
         LIMIT ${pageSize} OFFSET ${start}
       `);
       return {

@@ -7,14 +7,22 @@ export type IdentityContract = {
   type: 'anonymous-device';
 };
 
+export type GenerationPhotoUpload = {
+  photoId: string;
+  uri: string;
+  mimeType: string;
+  date?: string;
+  cleanupUri?: string;
+};
+
 export interface CoreDiaryRepository {
   getIdentity(options?: ApiRequestOptions): Promise<IdentityContract>;
   createDraft(input: DraftContract, options?: ApiRequestOptions): Promise<RemoteResult<DraftContract>>;
-  createGenerationJob(input: CreateGenerationJobRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
-  rewriteBlock?(input: RewriteBlockRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<RewriteBlockResultContract>>;
+  createGenerationJob(input: CreateGenerationJobRequestContract, options?: ApiRequestOptions, photos?: GenerationPhotoUpload[]): Promise<RemoteResult<GenerationJobContract>>;
+  rewriteBlock?(input: RewriteBlockRequestContract, options?: ApiRequestOptions, photos?: GenerationPhotoUpload[]): Promise<RemoteResult<RewriteBlockResultContract>>;
   getGenerationJob(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
   cancelGenerationJob?(jobId: string, options?: ApiRequestOptions): Promise<RemoteResult<GenerationJobContract>>;
-  saveDiary(input: SaveDiaryRequestContract, options?: ApiRequestOptions): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
+  saveDiary(input: SaveDiaryRequestContract, options?: ApiRequestOptions, photos?: GenerationPhotoUpload[]): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
   updateDiaryVisibility?(input: {
     diaryId: string;
     privacy: string;

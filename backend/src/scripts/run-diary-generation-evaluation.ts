@@ -9,18 +9,28 @@ import {
 import { DiaryGenerationService } from '../common/diary-generation.service';
 
 async function main() {
+  const provider = process.env.DIARY_GENERATION_EVAL_PROVIDER?.trim() || 'deterministic';
+  if (provider !== 'deterministic') {
+    throw new Error('The fixture runner has no approved photo files; use a separately authorized evaluation set for real-provider calls.');
+  }
+  const previousDiaryProvider = process.env.DIARY_GENERATION_PROVIDER;
+  process.env.DIARY_GENERATION_PROVIDER = 'deterministic';
   const service = new DiaryGenerationService();
-  const provider = (process.env.AI_PROVIDER ?? 'deterministic').trim();
   const generatedAt = new Date().toISOString();
   const results = [];
 
-  for (const fixture of DIARY_GENERATION_FIXTURES) {
-    try {
-      const result = await service.generate(fixture.input);
-      results.push(buildDiaryGenerationEvaluationResult(fixture, result));
-    } catch (error) {
-      results.push(buildDiaryGenerationFailureResult(fixture, error));
+  try {
+    for (const fixture of DIARY_GENERATION_FIXTURES) {
+      try {
+        const result = await service.generate(fixture.input);
+        results.push(buildDiaryGenerationEvaluationResult(fixture, result));
+      } catch (error) {
+        results.push(buildDiaryGenerationFailureResult(fixture, error));
+      }
     }
+  } finally {
+    if (previousDiaryProvider === undefined) delete process.env.DIARY_GENERATION_PROVIDER;
+    else process.env.DIARY_GENERATION_PROVIDER = previousDiaryProvider;
   }
 
   const reportDir = path.resolve(__dirname, '../../../docs/reference/delivery/reports');

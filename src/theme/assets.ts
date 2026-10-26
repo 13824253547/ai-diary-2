@@ -37,8 +37,6 @@ export const art = {
   bookGreen: require('../../assets/reference/bookGreen.png'),
   bookPink: require('../../assets/reference/bookPink.png'),
   stamp: require('../../assets/reference/stamp.png'),
-  stampKyoto: require('../../assets/reference/stampKyoto.png'),
-  stampKamakura: require('../../assets/reference/stampKamakura.png'),
   tape: require('../../assets/reference/tape.png'),
   stickerHappy: require('../../assets/reference/stickerHappy.png'),
   stickerCool: require('../../assets/reference/stickerCool.png'),

@@ -1,8 +1,162 @@
 # 开发轮台账
 
-## 当前轮次更正（TEST-14 后）
+## DEV-53 写实摄影画风与 AI 配图操作溢出菜单（2026-10-26）
 
-DEV-9/TEST-11 与 DEV-10/TEST-12/DEV-11/TEST-13 历史保留。TEST-13 已关闭 BAS-004-A01；DEV-12 随后补齐 discovery/chat/anchor 的后端 HTTP+MySQL 集成子集，并发现、修复 GRW-003 JSON_TABLE 查询在 MySQL 下误返空集合。TEST-14 当前完整 backend e2e 49/49、backend unit 17/17 suites、199/199 tests；root typecheck、backend build、migrate status、schema diff、diff check 通过。验收通过项仍为 96/225（42.7%），DEV-12 不改变任何完整 CASE passed。
+- AI 配图结果预览保留“保存到相册”显式主操作；“用于日记”和“用于明信片”移至标题栏溢出菜单。菜单动作仍分别打开日记选择和跳转明信片并传递同一素材 ID；非 AI 生成素材、贴纸和印章预览操作不变。
+- 后端 Seedream provider 将用户原始描述包装进服务端固定风格策略：仅真实摄影/照片级写实，明确禁止动漫、卡通、插画、漫画、绘画、油画、水彩、素描、3D/CGI、游戏美术及其它非摄影风格。用户原始描述和 `generationPrompt` 持续原样保存，风格规则不能被用户输入覆盖。写入 MAT-005 契约、AC 与 Q-002 局部决策；质量门槛及其它 Q-002 决定保持未确认。
+- 验证：素材页 AI 预览定向 2/2；Ark provider 与生成持久化服务 2 suites / 9 tests；root typecheck、backend build、`git diff --check` 通过。未发起真实模型请求；提示词回归不代替实际输出风格质量验收，不新增 CASE passed。
+
+## DEV-52 Seedream Flash 真实接口与素材读取（2026-10-26）
+
+- 用户确认继续完善后，先只读确认本地 `ai_diary` 的 11 条 migration 状态为 up to date；使用模拟器已有设备身份，不伪造或覆盖其他设备数据。
+- 单次真实模型调用：`doubao-seedream-5-0-flash-260915`、`1.5K`，接口 HTTP 201，source 为 provider，request ID `seedream-flash-live-1792979610899`，photo ID `91aba05a-8b24-48e4-a991-378443fbc1ca`。同设备素材列表 GET 200 且可查到该照片；鉴权内容 GET 200，`image/jpeg` / 597376 bytes；独立 `sips` 解码成功，1872×1248。真实请求一次，费用按标准价估算约 ¥0.12，最终金额以方舟账单为准。
+- 验证范围到真实 provider、数据库/文件入库、素材枚举、鉴权下载和图片解码；未从 App 页面触发/打开预览，未执行日记/明信片引用、故障 CASE 或系统相册保存。因此 CASE-MAT-005-002 部分执行，CASE-MAT-005-001/003/005 不变，其余待决策 CASE 不变，不新增通过数。
+- 后端已按 `start:watch` 重启并加载配置，当前开发服务保持运行，日志在 `.dev-logs/backend.log`。iOS Photos 权限声明仍需重建原生 App 后设备验证；本地真实生成素材保留在模拟器当前身份素材库。
+
+## DEV-51 Seedream Flash 本地配置（2026-10-26）
+
+- 按用户确认配置模型 `doubao-seedream-5-0-flash-260915` 和默认尺寸 `1.5K`。后端优先使用独立 `AI_IMAGE_API_KEY`，为空时复用用户指定的 `PET_CHAT_API_KEY`；密钥仍只从 backend 环境读取、不复制到客户端。
+- 移除 Flash 单图请求中不兼容的 `sequential_image_generation` 字段。`.env.example` 同步模型、尺寸和 Key fallback 说明。
+- 验证：Ark provider、AI 生图 service/controller、PhotoAssetService 定向 4 suites / 23 tests，backend build 和 root typecheck 通过；截至 DEV-51 仅 mock 网络测试，未发出真实/计费模型请求。
+- provenance migration 已按 DEV-43 记录随本地 `migrate deploy` 应用；本次不重跑迁移。真实调用和素材读回见 DEV-52；iOS 系统相册仍需重建原生包后实机/模拟器验证。
+
+## DEV-50 扩展 Wikidata 英文别名城市匹配（2026-10-26）
+
+- Wikidata 候选采集从仅查英文主标签扩展为英文 `rdfs:label` 和 `skos:altLabel`，继续要求准确匹配 WUP 英文名、中文标签和 50 公里内唯一最近坐标；不生成音译或猜测名称。20 城市小样查询成功。500 名称批次全量查询在第 24/33 批收到 QLever HTTP 500，未写最终 TSV；采集器现对 429、5xx 及暂时网络错误退避重试。
+- 为避免重复查询，采集器新增仅按未解决报告中的 WUP 城市筛选，并将新候选与既有 Wikidata TSV 合并的能力。250 名称批次的全量尝试在 7/65 批后停止并改为仅查当前 6,843 条未解决记录；这次定向候选采集正在进行，结果与新一轮全量目录审计尚未完成。未生成不完整运行时目录，CASE-MAT-003-006 未执行。
+
+## DEV-49 接入 OSM 城市中文名候选并落实 ODbL（2026-10-26）
+
+- 用户已确认接受 ODbL。城市名构建器新增 OSM `city`/`town` 候选解析与严格匹配：WUP 英文名标准化后精确相同、WUP 中心点 50 公里内唯一最近的 OSM POINT；同一 OSM ID 被多个 WUP 条目认领时拒绝该候选。随包目录含 OSM 派生名称时，目录数据库按 ODbL-1.0 发布，城市目录页直接显示 OpenStreetMap 贡献者署名，并提供所有来源的许可证、引用和链接；App 源代码不因此改许可。
+- 新增可重复执行的 QLever OSM Planet 分批采集器。第一次全量尝试在第 7 批遇到超长 WKT 字段后中断且未写最终 TSV；将查询限制为 POINT 几何并调高 TSV 字段上限后，完整 33/33 批采集成功，生成 9,595 条候选。结合全部已有来源重新审计后，仍有 6,843/16,828 条 WUP 记录缺少合格中文名；未解决报告已写入本机缓存，构建器按失败关闭规则未写入运行时目录。候选条数不是命中数，目录尚不完整。
+- OSM/Wikidata 查询构造、来源解析、严格名称/最近点、并列拒绝及临时错误重试测试共 13/13 通过；城市来源署名/许可面板组件测试 1/1、`npm run typecheck` 及印章字号与旧装饰 ID 定向回归 2 suites / 15 tests 通过。CASE-MAT-003-006 仍未执行，数据相关目录/UI CASE 不计通过。
+
+## DEV-48 扩大城市名称匹配范围并核对数据许可（2026-10-26）
+
+- GeoNames 匹配扩展到 `allCountries` 和英文别名，仍按 WUP 中心点邻近度及名称候选校验；Wikidata 另外按 WUP 英文名和坐标提供补充候选。对 16,828 条 WUP 记录全量构建后，仍有 7,934 条待核对；报告包括 1,858 条没有邻近 GeoNames 名称候选、4,790 条名称/实体候选仍无合格中文名、140 条 GeoNames 实体匹配存在歧义，其余来自近邻候选但中文名未解决。结果目录未写入 App，CASE-MAT-003-006 仍未执行。扩展候选没有降低待核对总量，不宣称目录完整。
+- 检索了覆盖更多中文地名的 OSM/GeoKeo/OSMNames 类来源；其数据衍生自 OpenStreetMap，涉及 ODbL 署名与数据库相同许可发布义务，不在未确认许可接受方式前纳入运行时目录。已查的 MCGD 地名库为 CC BY 4.0，但其主 CSV 没有可用的中文城市名字段，不能补足本目录。后续若继续追求全量覆盖，需要确认可否接入 ODbL 数据并按其条件发布目录，或提供其它具备足够中译覆盖及清晰授权的数据源/人工审定方案。
+- 历史 `stampKyoto`、`stampKamakura`、`stamp` 在目录缺失或新目录载入前，可按其既有中英文城市名的完整地点片段解锁；新目录目标仍通过 WUP 城市匹配正常映射。验证：素材库印章 suite 10/10、字号 suite 5/5、城市来源 Python 单测 4/4、`npm run typecheck`、`git diff --check` 通过。目录依赖用例和城市分区页面仍无法验收，因正式目录尚未生成。
+
+## DEV-47 全球城市名录来源扩展与覆盖审计（2026-10-26）
+
+- 为 WUP 2025 F21 城市目录构建器增加 Wikidata 补充来源：一类按 GeoNames 稳定编号取唯一中文标签；另一类按 WUP 英文名精确匹配候选，并要求候选坐标距 WUP 中心点不超过 50 公里且最近项唯一。新增可重跑的分批 QLever 数据采集工具；来源输入及命中规则写入 MAT-003 规格、任务和工具说明。动态字号沿用现有固定安全宽度、缩小与省略逻辑，不改印章尺寸/版式。
+- 全量源文件在持久化本机缓存重新下载并通过 ZIP 校验。补充来源后构建审计覆盖 16,828 个 WUP 条目，仍有 9,905 条待核对（5,616 条未匹配候选城市、4,266 条有 GeoNames 实体但仍缺合格中文名、23 条候选匹配歧义）；构建器按失败关闭规则未写出目录，CASE-MAT-003-006 继续未执行。此轮新增 Wikidata 直连 WUP 的批量采集已通过 20 条样本冒烟，完整采集和重新审计待完成。
+- 验证：印章字号单测 5/5、WUP 构建器及采集器 `py_compile`、根目录 `npm run typecheck`、`git diff --check` 通过。未生成不完整运行时目录，未宣称地区浏览/解锁或模拟器验收完成。
+
+## DEV-46 修复 iOS 日记照片 URL 中的斜杠 ID（2026-10-23）
+
+- iOS 图片请求可能将路径中的相册资产 ID（如 `UUID/L0/001`）拆为多个路径段，造成日记图片接口无法匹配。客户端日记副本 URL 改为 `/photos/diaries/:diaryId/photo-content?photoId=...`，照片 ID 经 query 参数编码；后端新增对应读取路由，继续按设备、日记和照片 ID 校验，旧路径接口保留兼容。
+- 验证：客户端 API、Photo、Store 定向测试 3 suites / 16 tests，后端 PhotosController 4/4，root typecheck、backend build、`git diff --check` 通过。iPhone 17 模拟器重启开发客户端后，首页与日记详情照片均正常显示；重启后 27 个现存副本请求均返回 `200 image/jpeg`。
+- 只读盘点当前设备 6 篇日记共 28 个照片引用、27 个日记副本；唯一缺失引用 `9F983DBA-EC35-42B8-8773-B597CF782EDD/L0/001` 在素材库没有匹配素材，无法安全恢复，未执行手工数据库回填。该缺图与 URL 路由问题分开跟踪；CASE-MAT-001-010 仍部分执行，不增加验收通过数。
+
+## DEV-45 日记图片不可用与副本身份隔离（2026-10-23）
+
+- 修复已保存日记图片共用全局照片 ID 导致的副本错配：日记详情、回忆卡、分享预览、编辑、锚点、月度回忆和保存完成页将 `diaryId` 传给 `Photo`；存在远端身份头时按 `(diaryId, photoId)` 请求精确日记副本。详情直接读取远端日记时也载入对应副本资产；素材目录仍使用素材自身的 URI。
+- 历史 `photoIds` 为设备来源 ID 且匹配多条独立上传素材时，后端不再按创建时间任意挑选；仅在来源素材唯一时回填，歧义引用保持未恢复并允许列表中的其他照片正常显示。逐张回填时，单张源文件缺失/损坏不会阻断同一日记其它照片返回。保存的新日记仍以 multipart 原图建立精确副本。
+- 验证：客户端定向覆盖合并后 7 suites / 154 tests，后端照片/日记保存 3 suites / 14 tests，root typecheck、backend build、`git diff --check` 通过；saved diary screen suite 存在既有 React `act(...)` 环境 warning，断言通过。未对开发库执行回填写入、未重启/联调后端、未在 iOS 设备复验；多候选历史图片仍需可靠来源证据才能安全恢复，CASE-MAT-001-010 保持部分执行，不新增 CASE passed。
+
+## DEV-44 城市印章参数化 SVG（2026-10-23）
+
+- 素材库京都、镰仓、台南印章改为共享 `react-native-svg` 模板；城市名、拉丁字母名、编号、地区标记及印色均由配置属性提供，后续城市可复用同一组件。素材库预览与明信片装饰共用组件，并保留既有 decoration ID。后续视觉微调放大圆印、移除波纹与四条短刻线；SVG 视口收为以圆心为中心的 `75×75` 正方形，避免删除右侧元素后图形偏左；上下小字沿圆弧排版，`TRAVEL POST` 居中。
+- 更新 Expo 兼容 SVG 依赖并同步 iOS Pods（RNSVG 15.15.4）。验证：素材库装饰与明信片 2 suites / 12 tests、root typecheck、`git diff --check` 通过；重新构建并安装 iPhone 17 模拟器 App 后，素材库三枚城市印章均正常显示且无 `Unimplemented component` 占位。未运行实体设备验收，未新增 CASE 通过数。
+
+## DEV-43 素材照片允许重复上传（2026-10-23）
+
+- 按用户新决定，历史上传照片在本地相册不显示已选标记且仍可再次选择；每次成功上传创建新的素材 ID 与独立磁盘文件，重复来源照片分别计入 100 张总量。移除后端 `sourceAssetId` 唯一约束，新增普通索引迁移；单次 12 张限制不变。
+- 验证：素材页 9/9、Store 导入/配额 5/5、后端照片资产服务 6/6、root typecheck、backend build 通过；当前 11 条迁移的隔离库旧库升级、全新库部署、基线接管及 schema diff 均通过，临时库已清理。经用户授权，对本地 `ai_diary` 应用重复来源索引迁移；同次 `migrate deploy` 还应用了工作区新增的 `20261023180000_generated_material_provenance`，此项超出本次单条迁移确认范围。素材行数迁移前后均为 27，Prisma 状态 up to date 且 schema diff 无差异。真实 iOS multipart、MySQL 并发与设备相册仍待验；CASE-MAT-001-001/009 仍部分执行，不新增 CASE 通过数。
+
+## DEV-42 游记日期按发布时间（2026-10-23）
+
+- 游记生成预览日期不再从照片拍摄日期推导；首次保存写入发布时间，编辑保留首次发布时间。回忆列表、详情、日历筛选、排序和锚点摘要统一按 `Diary.createdAt` 展示，保存响应回传同一日期以保持当前会话即时一致。无需新增数据库字段或迁移。
+- 收紧全文生成提示词：照片拍摄日期默认不进入正文，只有自然且确有必要交代时间时才按照片日期及既有近14天模糊表达规则提及。DEV-32 关于从照片日期推导元信息的记载保留为历史实现，不再代表当前规则。
+- 验证：后端 5 suites / 108 tests，前端 4 suites / 169 tests、root typecheck、backend build、`git diff --check` 通过。详情屏幕测试有既存 React `act(...)` 环境警告，不影响断言。未调用真实 Provider、未新增 CASE 验收通过数。
+
+## DEV-41 灵感卡仅发送回答（2026-10-23）
+
+- 修正灵感卡提交内容：卡片问题保留为页面引导，聊天用户消息只包含输入框中的回答，不再把问题拼入同一消息。同步更新 MAT-004 业务 AC、任务验收和 CASE 预期。
+- 验证：`app/__tests__/library-screen-inspiration.spec.tsx` 5/5，新增断言输入“今天彩票中奖了”后发送消息严格等于该文本且不含引导问题；root typecheck 通过。CASE-MAT-004-002～005 仍因正式入口未接 PET-001 持久服务/真实 Provider 而阻塞，不扩大验收通过数。
+
+## DEV-40 移除 iOS bundle 中的 Node 图片依赖（2026-10-23）
+
+- Metro 报错来自正式分享服务对 `jimp-compact` 的静态引用；该 Node 包内部依赖 `querystring`，无法进入 React Native bundle。移除长图导出的不可达 Jimp 渲染代码，并移除匿名照片遮挡的 Node 实现。PDF 导出保持可用；PNG 长图导出及需要人脸遮挡的匿名分享在没有原生渲染器时失败关闭，不会将未遮挡照片作为匿名素材交付。
+- 验证：分享导出、匿名素材、交付编排和 Store 分享保护 4 suites / 25 tests 通过；`npm run typecheck` 通过；`npx expo export --platform ios` 成功，iOS bundle 约 4.6 MB。该导出仅验证 Metro 打包，不代表设备端分享能力验收。
+
+## DEV-39 App 真实数据隔离（2026-10-23）
+
+- 正式 Store 默认日记、照片、聊天记录和素材成员均为空；聊天、AI 配图、洞察报告未配置服务时失败关闭。示例日记/照片及 mock provider 仅由测试专用 `createTestStore()` 显式注入，领域测试对默认 Store 的断言继续验证正式默认值为空。
+- 删除统计固定基数、首页虚构照片数、成长/洞察预设进度和结论、社区静态故事、相册/明信片示例照片及分享伪成功记录。发现页、记忆锚点和纠正使用现有后端 repository；报告、成长事件、月度文件导出、明信片导出及未接入的分享出口显示不可用/失败，不伪报完成。
+- 素材库两个添加入口统一读取真实设备相册；明信片仅预览已注册的设备照片。设备相册名只保留为相册元数据，不再冒充照片拍摄地点；没有地点依据时不提供地点值。开发验收路由不再依赖固定 diary ID 或本地假生成完成，只使用已有真实日记/草稿。
+- 追加清理：个人页不再显示固定用户名/VIP 或虚构头像，聊天与同行人页面在无真实头像时改为中性占位；移除未使用的示例同行者列表及可本地直接完成生成的旧 Store 入口。固定排版师/模板目录和插画仅作为产品配置与装饰，不用于填充用户记录。
+- 验证：此前受影响的 App、Store、分享和相册测试共 30 suites / 297 tests 通过；本轮追加变更后定向复测 7 suites / 120 tests 通过，`npm run typecheck`、`git diff --check` 通过。此结果只证明本地测试夹具与业务边界；未完成真实 iOS 权限/照片资源、已部署服务、真实 provider 或外部分享验收，CRE-002 与全局 CASE 统计不据此通过。
+
+## DEV-38 等待进度提速（2026-10-23）
+
+- 应用户反馈，将生成页等待态限幅缓动由 `0.2` 提至 `0.6` 个百分点/秒；仍封顶在下一后端里程碑前 1 个百分点，后端快照、任务百分比、轮询与成功导航规则不变。
+- 验证：生成页 23/23；新增速度断言确认等待 60 秒至少推进至 `55%` 且低于下一个 `80%` 里程碑，长等待仍封顶 `79%`。root typecheck、`git diff --check` 通过；CASE-CRE-005-001 仍为部分执行，验收统计不变。
+
+## DEV-37 等待期间进度限幅缓动（2026-10-23）
+
+- 生成页先平滑追赶已确认后端节点，再以 `0.2` 个百分点/秒向下一里程碑前 1 个百分点缓慢推进并封顶；新里程碑到达后继续以服务端节点为锚点。该限幅缓动仅影响展示，不写入任务状态，不改变 3 秒串行轮询、关键清单步骤最短展示时间或成功导航规则。
+- 按用户授权，在本地 `127.0.0.1:33306/ai_diary` 开发库应用 `20261021000000_app_attest_identity` 与 `20261023000000_generation_progress_milestones`；`prisma migrate status` 复核为 schema up to date。未运行数据库 E2E、真实 Provider 或模拟器验收。
+- 验证：生成页 23/23、root typecheck、`git diff --check` 通过；覆盖等待期间进度增长及长时间等待封顶于下一节点之前。CASE-CRE-005-001 仍为部分执行，验收统计不变。
+
+## DEV-36 生成里程碑与关键阶段停留（2026-10-23）
+
+- 将生成进度改为可验证的后端工作节点：排队 0%、照片读取校验完成 15%、Provider 请求提交 25%、完整响应收到 80%、结果解析及结构校验通过 95%、结果持久化完成 100%。百分比表示业务节点权重而非耗时比例；Provider 等待没有真实流式进度时停留在已达节点。服务端将有限里程碑历史持久化并随任务快照返回，便于客户端补回 3 秒串行轮询之间发生的短节点。
+- 加载页百分比只平滑追赶后端目标值；三条清单仅概括照片检查、模型创作、结果整理，每个可见步骤至少停留 3 秒。任务成功时先保留结果和导航意图，完成展示队列后才跳转；重新进入已完成任务也不绕过展示。失败、取消和 Provider 等待不被伪装成成功或进度。
+- 定向验证：生成页 22/22、日记 Store 109/109、contract 8/8，`npm run typecheck` 与 `git diff --check` 通过；后端 Provider/任务锁定向 2 suites / 70 tests、backend build 通过。Prisma migration 未应用；未运行 E2E、真实 Provider 或模拟器，CASE-CRE-005-001 及总验收统计不变。
+
+## DEV-35 生成进度平滑显示（2026-10-23）
+
+- 仅调整 `app/create/generating.tsx` 的进度展示：后端任务快照/阶段兜底仍是唯一目标值，百分比与进度条使用同一 `Animated.Value` 从当前显示位置过渡到目标；新快照中途到达时继续追赶，新轮次重新从 0 开始。目标不变时动画停止，不基于耗时伪造后端完成进度；生成轮询与成功导航不变。
+- 生成页定向测试 20/20、root typecheck、`git diff --check` 通过；新增中间值、目标值更新及换轮次重置断言。尚未在模拟器/真实 Provider 上目测验收，CASE-CRE-005-001 和总验收统计不变。
+
+## DEV-34 三位排版师文字风格细化（2026-10-23）
+
+- 按角色页原设计，仅修改服务端全文生成与正文重写共用的角色提示词，不改 UI、角色目录、模型参数和照片/日期/JSON 契约。tsuki 强调局部细节与轻快长短句，路易强调真实风景与舒展的来信口吻，拉尔夫强调少量确切细节与简洁停顿；分别限制套话、虚构旅伴、过度怀旧和刻意碎句。标题和摘要延续所选风格。
+- 参考官方公开提示词指南关于明确输出行为、示例和可重复评测的做法；本轮选择具体叙事规则与禁忌，不植入可能被模型误当成照片事实的写作样例。资料：[OpenAI Prompt Engineering](https://platform.openai.com/docs/guides/prompt-engineering)、[Anthropic Prompting Best Practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices)。在现有 AI 质量评测契约补充同照片、同参数、隐去角色标签的对照方法。
+- 本地提示词与生成服务定向测试 2 suites / 73 tests 通过、后端 build 通过；未调用真实 Provider、未使用用户照片，也未进行盲评。CASE-CRE-005-010 仍未执行，验收总数不变。
+
+## DEV-33 更换排版师后重生成与真实加载进度（2026-10-22）
+
+- 已有日记编辑中选择不同排版师后，先同步远端草稿，再更新本地角色并进入生成页；远端同步失败时不提交本地角色变更，也不导航。选择当前排版师仍直接返回，不额外生成。
+- 后端在照片读取完成、Provider 调用前写入 `drafting / 45%`，与既有 `analyzing-photos / 18%`、`structuring / 82%`、`completed / 100%` 形成实际任务阶段。加载页直接展示快照百分比；仅有阶段事件时采用阶段基准兜底，阶段等待期间不按本地时间递增。活动阶段显示转圈，完成阶段显示勾选。
+- 删除加载页固定“3 个地点”；照片数取当前草稿所选照片数量。当前设备照片流程不读取 GPS，导入照片地点为空；相册名称不作为地点事实，因此无可信地点时隐藏。
+- 更新 DIA-004、Q-008、CRE-005 规格和案例：新生成成功后替换当前工作稿文字，任务未成功或同步失败时保留原稿；此决定不延伸到其它换图场景。补充同步失败、生成准备、成功覆盖和加载阶段回归。
+- 验证：`app/__tests__/generating-screen.spec.tsx` 19/19、`app/__tests__/character-screen-replace.spec.tsx` 2/2、`src/store/__tests__/diary-domain.spec.ts` 108/108、`memory-store.generation-task-lock.spec.ts` 3/3；root typecheck、backend build、`git diff --check` 通过。未调用真实 Provider、未在模拟器复验；CASE-DIA-004-002/003/006 与 CASE-CRE-005-001 不新增完整验收通过，验收统计维持 96/225（42.7%）。
+
+## DEV-32 日记元信息日期回退（2026-10-22）
+
+- Provider 结果日期改由照片元数据确定：采用所选照片中最新的有效过去拍摄日期；无有效日期时回退至后端本地今天，并统一格式为 `YYYY.MM.DD`。未知、无效及未来拍摄日期不参与选择；正文日期提示规则不变。
+- 新增日记生成服务回归覆盖最新照片日期优先，以及拍摄日期缺失/无效/未来时回退到今天；定向 1 suite / 66 tests、backend build、`git diff --check` 通过。未调用真实 Provider，未改变 CASE 状态或验收通过统计；设备本地时区尚未由 API 传递。
+
+## DEV-31 正文日期表达窗口（2026-10-22）
+
+- 全文与段落重写提示词动态提供后端本地今天日期；正文仅可在确有需要时用口语模糊提及过去14天内拍摄日期，禁止具体年月日，窗口外或未来日期省略。节假日只在日期可靠且确实对应时提及。
+- 当前 API 未传设备时区，本地开发环境时区为 `+0800`，因此以运行后端主机的本地日期作参考。提示词和生成服务定向测试 2 suites / 71 tests、backend build 通过；未调用真实 Provider，CASE-CRE-005-010 不据此通过。
+
+## DEV-30 Provider 正文块类型兼容（2026-10-22）
+
+- Provider 缺少正文块 `type` 时，提示词提供明确 JSON 示例；后端仅在正文与所选照片绑定仍完全符合契约时将缺省类型归一为 `text`，显式未知类型和非法块继续拒绝。
+- 日记生成服务与提示词定向测试共 2 suites / 71 tests 通过，backend build 通过。未调用真实 Provider，CASE 状态和验收统计不变。
+
+## DEV-29 日记叙事弱化时间提示（2026-10-22）
+
+- 拍摄时间从显眼的正文写作要求降为辅助信息：正文通常无需提及，只有自然帮助理解时才带出；重写不再要求延续“时间顺序”。日期元数据契约、缺失信息不猜测和段落自然衔接约束保持不变。
+- `backend/src/common/diary-prompt-templates.spec.ts` 定向 6/6 通过，backend build 通过。未调用真实 Provider，不宣称文风质量 CASE 通过。
+
+## DEV-28 全文生成状态轮询节奏（2026-10-22）
+
+- `app/create/generating.tsx` 对已建任务的状态 GET 改为每轮响应后等待 3 秒再发起下一轮；上一请求未完成时不会启动新请求。等待远端 job ID 阶段的 250ms 本地检查未改变。
+- `app/__tests__/generating-screen.spec.tsx` 新增延迟响应回归，验证请求未返回期间推进 15 秒仍只有一轮，响应完成后 2999ms 不发起新请求、满 3000ms 才开始下一轮。定向 screen suite 18/18、root typecheck 通过。CASE-CRE-005-001 维持既有状态，不新增完整 CASE passed；验收统计仍为 96/225（42.7%）。
+
+## 当前轮次更正（DEV-31 / TEST-14 后）
+
+DEV-9/TEST-11 与 DEV-10/TEST-12/DEV-11/TEST-13 历史保留。TEST-14 仍是最近完整测试轮：backend e2e 49/49、backend unit 17/17 suites、199/199 tests；root typecheck、backend build、migrate status、schema diff、diff check 通过。DEV-14 照片引用规则、DEV-15 DIA-003 右侧照片替换入口及 DEV-16 PET-001 SSE 流式回复记录保留。DEV-17 已接通照片多模态全文生成与目标段局部重写；DEV-18 为 PET-001 增加服务端内容范围/明显有害请求拦截和单设备单活动任务。DEV-19 仅收紧 CRE-005/DIA-002 的内容范围、模型结果检查及单设备全文生成/段落重写互斥；前端 3 suites / 166 tests、后端 6 suites / 105 tests、root typecheck、backend build、diff check 通过。DEV-20 修复 PET-001 本地失败 turn 在新消息成功后重试而掉到末尾的排序回归，并补充 Store 集成测试。DEV-27 将 AI Provider 单次请求默认等待上限明确为 4 分钟，并延长重写/聊天客户端外层超时。未执行完整 TEST、多 Nest 实例锁或真实模型红队评测；没有新增完整 CASE passed，验收通过项仍为 96/225（42.7%）。
+
+以下 TEST-6 前后的 DEV-5 摘要是历史快照；其中“当前 DEV-5”等表述仅指当时状态，不代表本轮当前阶段。DEV-13/DEV-14 增量与当前验证记录见文末。
+
+42 项明细表保留各任务的原始盘点基线；PET-001 当前状态以 DEV-13/DEV-16/DEV-18/DEV-20 记录及同名 task 为准，DIA-003/MAT-002 当前状态以 DEV-14/DEV-15 记录及同名 task/CASE 为准，CRE-005/DIA-002 当前增量以 DEV-17/DEV-19 记录及同名 task/CASE 为准。
 
 日期：2026-10-16。当前轮次：`DEV-5`（TEST-6 后的缺陷修复轮；DEV-1/2/3 历史保留）。DEV-1 完成 42 项 task/CASE/源码盘点；DEV-2/3 修复 MAT-005 Store 缺陷、建设 DSC 自有后端/API/客户端 repository，为 GRW-003 增加版本化持久读模型 API/repository、为 GRW-004 增加纠正边界，并为 PET-001 增加持久会话/turn/message API 和 client repository。DEV-3 历史增量还包括收紧 GRW-003 数据库分页、可信 provider fail-closed 与 GRW-004 anchor 来源校验，为 MAT-001 新增设备照片导入服务/Store action，并修复 MAT-002 已有草稿引用被 saved diary 覆盖的问题；BAS-001/CRE-005 增加 generation create runtime 校验、同设备幂等载荷绑定与并发冲突恢复，DIA-005/BAS-002 收紧保存命令重放前 runtime 校验及同设备 key 的草稿/来源版本绑定，CRE-003/BAS-002 补齐草稿建单 body runtime 校验，SHR-001/BAS-002 补齐 sharing API body runtime guard，DIA-002/BAS-001/BAS-002 补齐 rewrite body runtime contract；DIA-006 严格校验 decimal page/pageSize 与重复 query 参数，并修正历史 e2e 日期 wire-format fixture；DSC-001 增加 query wire encoding 与重复参数运行时防线；BAS-004 为直接 Jest e2e 增加第二层隔离数据库 guard。TEST-5/6 与 DEV-4 的缺陷证据和当前 DEV-5 队列见本文末尾及各 task/CASE。迁移未应用，MAT-001 上传 sheet 未接新 action。
 
@@ -72,7 +226,7 @@ TEST-1 初测：`npm test -- --silent`，45 suites / 340 tests，338 passed、2 
 
 | 任务 | 状态 | 源码依据 | 本轮开发内容 | mock / 外部能力 | 缺口与待测范围 |
 | --- | --- | --- | --- | --- | --- |
-| PET-001 | 实施中 | `src/services/chat-reply-provider.ts`、`src/store/create-app-store.ts`、`src/types/diary.ts`、`backend/src/modules/chat/chat-sessions.{controller,service,module}.ts`、`backend/src/modules/chat/chat-sessions.{controller,service}.spec.ts`、`backend/prisma/schema.prisma`、`backend/prisma/migrations/20261016001000_pet_chat_sessions/migration.sql`、`src/contracts/pet-chat-contract.ts`、`src/repositories/http-pet-chat-repository.ts`、`src/repositories/__tests__/http-pet-chat-repository.spec.ts`、`src/store/adapters/backend-pet-chat-adapter.ts` | 在既有 provider/request state 外新增设备归属会话列表/详情、用户消息 pending turn、回复完成、固定失败码、显式重试 attempt、稳定 turn 排序和幂等重放；前后端 contract 与 HTTP repository 已建并注入 adapter。DEV-3 本轮另加严格分页 query wire guard 及 service 二次校验；正式页面与 Store send/retry 未接 repository，UI/UX 未改。默认 chat/image/report mock 已额外限定 `hybrid-dev` 开发运行时 | 回复仍由现有 `ChatReplyProvider` 提供；hybrid-dev 开发 mock 标注 `source: mock`；当前无可信服务端 provider，production 在创建/重试/回复写入前 fail closed，所有非测试运行环境拒绝客户端自报 `source: provider`。开发 mock 不混标 provider。服务不硬编码回复或静默将持久化失败当成功。真实模型与质量评测受 Q-002；migration 已在 TEST-13 disposable schema 部署，但不建立 Q-001 未确认的 retention/TTL/跨设备承诺 | TEST-13 schema 部署 6/6 migrations 无 drift；backend unit 17/199 通过。CASE-PET-001-001～009 仍未执行，持久 API 尚无数据库 e2e 断言；正式页面 send/retry 未接 repository；Q-001/Q-002/Q-003 及可见失败/重试接线仍待处理 |
+| PET-001 | 实施中 | `backend/src/modules/chat/ark-pet-chat-provider.ts`、`backend/src/modules/chat/chat-sessions.controller.ts`、`src/repositories/http-pet-chat-repository.ts`、`src/store/create-app-store.ts`、`app/(tabs)/pet.tsx` 及同名测试 | DEV-13 接通服务端 Ark provider 和 Store/page；DEV-16 增加 `/generate/stream` SSE delta/complete/error、原生 XHR `onprogress` 增量接收、pending 气泡逐段回显与三个动画点。既有 JSON `generate` endpoint 保留，页面布局参数不变 | 本机 Ark provider smoke 与持久化 smoke 是 DEV-13 证据，不代表本轮流式端到端；Q-001/Q-002/Q-003 和 Expo 实机链路仍未闭环 | DEV-16 前端定向 13/13、后端 provider/controller 21/21、root typecheck、backend build 通过。未执行真实 provider SSE 或 iOS/Android 设备回归，不新增 CASE passed；矩阵仍为 96/225（42.7%） |
 | BAS-001 | 已有契约，扩展待实施 | `src/contracts/core-diary-contract.ts`、`src/contracts/ai-image-generation-contract.ts`、`src/contracts/insight-report-contract.ts`、`docs/reference/delivery/contracts/core-diary-v1.md`、`docs/reference/delivery/contracts/ai-image-generation-v1.md`、`docs/reference/delivery/contracts/insight-report-v1.md`、`docs/reference/delivery/contracts/discovery-read-v1.md`、`backend/src/modules/generation/generation.controller.ts`、`backend/src/common/diary-generation-evaluation.ts` | DEV-3 已补配图/洞察版本 contract、回忆日期校验、generation create 字段/版本运行时校验及同键幂等载荷保护；保存、草稿和 rewrite API 进一步明确 body runtime guard 与 identity precedence。新增 regression 均待集中 TEST | 社区发布写入、匿名投影、推荐/同城与撤回规则仍受 Q-007/Q-013；成长统计/导出业务规则及 AI 正式质量标准仍受相关 Q 限制 | CASE-BAS-001-004 质量通过仍受真实 provider/Q-002 限制；CASE-BAS-001-005 进行中；本轮 request/controller/repository/e2e regression 待集中 TEST |
 | BAS-002 | 已有基础服务，发布/投影/其他对象待实施 | `backend/src/common/device-identity.ts`、`backend/src/common/memory-store.service.ts`、`backend/src/modules/{diaries,memories,sharing,discovery}/*.controller.ts`、`backend/src/modules/generation/generation.controller.ts`、`backend/src/modules/drafts/drafts.controller.ts`、`src/services/api-client.ts`、`src/repositories/http-core-diary-repository.ts` | 已有设备身份、日记保存/读取、回忆查询、隐私范围写入；DEV-2 增加显式 published snapshot 社区读取/点赞；DEV-3 generation、draft、sharing、rewrite 在服务边界验证请求字段，保存命令重放前校验结构并按草稿/来源版本绑定幂等 key | 不从 Diary privacy 自动发布；公开投影/匿名与撤回受 Q-007/Q-013；真实账号范围受 Q-012；未配置 AI 服务不得回退 mock 成功 | 社区 read model 来源/客户端接线和完整对象权限矩阵仍缺；本轮 generation/save/draft/sharing/rewrite 新回归未运行；CASE-BAS-002-003 partial、A05 双环境部分未执行 |
 | BAS-003 | 已有部分持久化，留存/资产待决策 | `backend/prisma/schema.prisma`、`backend/src/common/memory-store.service.ts`、`backend/test/app.e2e-spec.ts`、`src/services/draft-snapshot-storage.ts`、`src/services/__tests__/draft-snapshot-storage.spec.ts`、`src/contracts/core-diary-contract.ts`、`src/repositories/http-core-diary-repository.ts`、`src/store/create-app-store.ts`、`src/store/__tests__/diary-domain.spec.ts` | DEV-3 串行化本地草稿快照 save/clear、持久化 `editRevision`，修复 localStorage/文件系统坏快照 fail-open，并收紧日记正文读取 contract；数据库 scalar/array 坏快照下发 invalid marker、Store 隔离；回忆 hydration/search 恢复远端 `publicBlockIds`；release 默认不注入样例日记/照片，空 `currentDiaryId`、月份 selector 不再指向样例记录，无种子日记时可创建空白草稿。新增延迟写、修订恢复、损坏快照、公开选段及 release runtime 回归待测。`npm run typecheck`、backend build、隔离 e2e 文件 `tsc --noEmit` 与 `git diff --check` 通过；未运行 Jest/e2e/数据库持久化复验 | Q-001/Q-015 限定完整留存范围；Q-005/Q-016/Q-012 仍限制正式统计、锚点与资料/VIP 语义；未增加数据库字段或迁移 | 聊天/锚点等仓库、资产 URI 生命周期、历史正文回填及更广泛数据库损坏恢复仍缺；CASE-BAS-003-001/002/005/006/007 未闭环 |
@@ -81,11 +235,11 @@ TEST-1 初测：`npm test -- --silent`，45 suites / 340 tests，338 passed、2 
 | CRE-002 | 已有实现待复验/环境延期 | `src/services/photo-library.ts`、`app/album/select.tsx`、`src/components/diary/photo.tsx`、`src/store/create-app-store.ts` | 真实相册目录、分页、暂存确认、可读性复核和竞态隔离已实现；本轮按启动/变更门槛复核既有阻塞，不重跑 14 项 CASE | 使用 `expo-media-library`，不是第三方供应商 API；原生权限异常 E_NO_PERMISSIONS 及 Q-003/Q-008/Q-018 仍隔离记录 | CASE-CRE-002-007 设备读取阻塞；本轮未重试已知模拟器失败。集中 TEST 轮复验未被本轮代码影响的本地范围 |
 | CRE-003 | 已有实现待复验 | `src/types/diary-capabilities.ts`、`app/create/template.tsx`、`src/store/create-app-store.ts`、`backend/src/common/memory-store.service.ts`、`backend/src/modules/drafts/drafts.controller.ts` | 旅行类型显式写入；客户端领域与真实后端拒绝未开放类型；DEV-3 服务层新增草稿 body 字段/枚举/版本 runtime 校验，历史 emotion 读取/编辑仍保留 | 无第三方依赖；照片数量/去重和历史来源存在性不在本次校验中新增规则 | 新 malformed-input e2e 未运行；既有 CASE-CRE-003-001～005 结果不变，TEST 轮集中复验 |
 | CRE-004 | 已有实现待复验/规则延期 | `src/types/character-capabilities.ts`、`src/services/character-catalog.ts`、`app/create/character.tsx`、`src/store/create-app-store.ts`、`backend/src/common/memory-store.service.ts` | 角色目录白名单、草稿同步、浏览链路角色保留、无效角色拒绝及目录失败恢复已有实现 | 角色目录目前来自本地 catalog，不需第三方服务；角色更换是否重生成与浏览后是否二次确认受 Q-008/Q-009 | 代码无新的独立缺口；CASE-CRE-004-006 与决策相关分支保留待定，其他既有 CASE 集中复验 |
-| CRE-005 | 本轮实施中/真实接入延期 | `backend/src/common/diary-generation.service.ts`、`backend/src/common/diary-generation.service.spec.ts`、`backend/.env.example`、`backend/src/common/memory-store.service.ts`、`backend/src/modules/generation/generation.controller.ts` | 增加 provider 生产门禁；DEV-3 补 generation create runtime 校验、同设备幂等键载荷一致性和并发 P2002 重放恢复。新增 request/controller/e2e regression 未运行 | deterministic mock 限于非生产；生产只允许显式配置的真实 provider。保留既有 `openai-compatible` 适配器，不发起外部请求 | 真实 provider 凭据、质量评测与 Q-002 策略延期；新增 generation validation/idempotency CASE 证据待集中 TEST |
+| CRE-005 | 本轮实施中/真实质量验收延期 | `backend/src/common/diary-generation.service.ts`、`backend/src/common/diary-generation-policy.ts`、`backend/src/common/memory-store.service.ts`、`backend/src/common/diary-prompt-templates.ts`、`backend/src/modules/generation/generation.controller.ts`、`src/services/diary-photo-upload.ts`、`src/repositories/http-core-diary-repository.ts`、对应测试 | DEV-17 接入按序图片 multipart、Ark 多模态全文联合生成、N 图 N 段结构校验和三套排版师提示词；DEV-19 增加日记范围的请求/输出规则检查及同设备生成/重写互斥。上传仅附拍摄日期，服务端丢弃文件名/相册名；临时图像签名和请求总字节有防护 | 可复用已配置 Ark provider，但未发起真实日记生成或使用真实用户照片；确定性文本规则不是完整语义审核，固定质量 runner 仍锁 deterministic | 前端 3 suites / 166 tests、后端 6 suites / 105 tests、typecheck/build/diff check 通过；`CASE-CRE-005-012` partial，`CASE-CRE-005-010` 未执行；E2E_DATABASE_URL 缺失，真实 provider/多实例与设备图片传输仍未验 |
 | CRE-006 | 已有实现待复验/边界延期 | `app/companion/naming.tsx`、`src/store/create-app-store.ts`、`src/store/diary-domain.ts`、`backend/src/common/diary-generation.service.ts` | 命名只更新当前草稿人物元数据；保存失败保留输入，跳过保留候选；人物候选由生成结果而非旧草稿兜底 | deterministic 结果仅供开发，不当作真实识别；Q-003 命名边界、Q-010 跨作品记忆、Q-001 留存待定 | CASE-CRE-006-007 真实 AI/留存未验；正式输入计量待决策，其余既有 CASE 留待集中复验 |
 | DIA-001 | 已有实现待复验/入口延期 | `app/diary/[id]/index.tsx`、`src/store/create-app-store.ts`、`src/repositories/http-core-diary-repository.ts`、`src/components/diary/{diary-paper,photo}.tsx` | 真实单篇读取、loading/not-found/error 区分、旧回包保护、角色布局及坏图占位已有实现 | 公开菜单入口受 Q-009；锚点业务依赖 GRW-003/004 | CASE-DIA-001-001/006 部分执行，真实设备坏 URI未验证；A04/A05 依赖项未闭环 |
-| DIA-002 | 已有实现待复验/新关联 guard 待静态检查/AI质量延期 | `app/diary/[id]/edit.tsx`、`src/store/create-app-store.ts`、`backend/src/common/diary-generation.service.ts`、`backend/src/modules/generation/generation.controller.ts`、`src/repositories/http-core-diary-repository.ts`、`src/contracts/core-diary-contract.ts` | 草稿隔离、逐块编辑、provider rewrite 接线、失败保留原文已有实现；DEV-3 controller/Store body guard 后又增加上下文指纹、目标响应关联、正安全整数版本和请求 ID 键编码 | `deterministic` rewrite 是非生产 mock；真实改写质量与策略受 Q-002/Q-003/Q-008 | 新增 Store/repository/contract 回归未运行；最新静态检查需重跑；CASE-DIA-002-008 真实质量未执行，CASE-DIA-002-009 待决策 |
-| DIA-003 | 已有实现待复验/规则延期 | `src/store/create-app-store.ts`、`src/store/diary-domain.ts`、`app/diary/[id]/edit.tsx`、`app/album/select.tsx` | 整篇照片引用归一化、段落引用合并、关联图片块同步、取消/失败不提交及换图后重生成门禁已有实现 | 继续使用真实相册资产；Q-003/Q-008/Q-001 决定上限、既有作品换图规则与留存 | CASE-DIA-003-009 待决策；本轮未重跑已记录 CASE |
+| DIA-002 | 已有实现待复验/真实质量延期 | `app/diary/[id]/edit.tsx`、`src/store/create-app-store.ts`、`backend/src/common/diary-generation-policy.ts`、`backend/src/common/memory-store.service.ts`、`backend/src/common/diary-generation.service.ts`、`backend/src/common/diary-prompt-templates.ts`、`backend/src/modules/generation/generation.controller.ts`、`src/repositories/http-core-diary-repository.ts`、`src/contracts/core-diary-contract.ts` | DEV-17 重写携带目标照片和全文只读上下文，独立提示并只更新目标文字；DEV-19 在服务端读取上传图片及调用 provider 前拒绝明确越界原文、校验模型输出并与全文生成共用同设备锁；目标引用保持不变 | `deterministic` rewrite 是非生产 mock；确定性规则不等于完整语义审核，真实改写质量与策略受 Q-002/Q-003/Q-008 | 前端 3 suites / 166 tests、后端 6 suites / 105 tests、typecheck/build 通过；`CASE-DIA-002-011` partial，`CASE-DIA-002-008` 真实质量未执行，`CASE-DIA-002-009` 待决策；未运行隔离 DB E2E、真实 Ark 或多实例锁 |
+| DIA-003 | 已有实现待复验/规则延期 | `src/store/create-app-store.ts`、`src/store/diary-domain.ts`、`app/diary/[id]/edit.tsx`、`app/album/select.tsx` | DEV-14 已实现草稿已选照片候选按选择顺序展示、正文/引用块单图写入，以及 mock/provider 生成结果按文本块顺序自动分配；素材替换不移除整篇集合中的旧照片 | 继续使用真实相册资产；Q-003 其余总上限/元数据/输入边界、Q-008 既有作品换图规则与 Q-001 留存仍待确认 | CASE-DIA-003-010 本地定向回归已执行；CASE-DIA-003-009 仍待决策；未执行全量测试或真实设备读取 |
 | DIA-004 | 已有实现待复验/规则延期 | `app/create/character.tsx`、`src/store/create-app-store.ts`、`src/components/diary/diary-paper.tsx` | 更换角色复用原编辑草稿，保留正文/照片引用，保存仍用原日记 ID；目录失败与取消有既有保护 | Q-008 尚未确认更换角色是否需重生成 | CASE-DIA-004-006 待决策；本轮未重跑既有页面/领域 CASE |
 | DIA-005 | 已有实现待复验/规则延期 | `src/store/create-app-store.ts`、`src/types/diary.ts`、`src/repositories/http-core-diary-repository.ts`、`backend/src/common/memory-store.service.ts`、`backend/prisma/schema.prisma` | DEV-3 追加持久 `editRevision` 并纳入保存幂等键；保存期间修改时保留较新草稿并 rebase；后端保存命令重放前验证基本输入，并拒绝同设备 key 跨 `draftId` 或来源版本复用，保持同命令身份首次结果重放语义。新增 Store/MySQL 回归未运行 | Q-001 决定完整恢复范围，Q-008 决定既有作品换图下限；已有真实保存服务保留 | 新增保存键身份冲突 e2e 与并发保存 Store regression 待集中 TEST；CASE-DIA-005-010 仍待决策 |
 | DIA-006 | 本轮实施中/Q规则延期 | `backend/src/modules/memories/memories.controller.ts`、`backend/src/modules/memories/memories.controller.spec.ts`、`src/repositories/http-core-diary-repository.ts`、`src/repositories/__tests__/http-core-diary-repository.spec.ts`、`src/store/create-app-store.ts`、`src/contracts/core-diary-contract.ts`、`app/(tabs)/memories.tsx` | 已有全页聚合防截断；DEV-3 校验 Gregorian 月/日并统一 wire format；controller 现拒绝非十进制/重复分页 query 和非字符串关键词，在读取数据前返回 `invalid_input`，设备身份优先。修改了一个旧 e2e 点分隔日期夹具为合法 wire format，保留原断言。新增 contract/repository/controller/store/UI 回归未运行；backend build、typecheck、diff check 通过 | 查询仍走自有后端；Q-004 的跨日月/近期分组规则未改；未约束时区 | CASE-DIA-006-010 与本轮 query/date 校验回归待集中 TEST；Q-004 下的 CASE-DIA-006-008/009 保持待决策 |
@@ -95,11 +249,11 @@ TEST-1 初测：`npm test -- --silent`，45 suites / 340 tests，338 passed、2 
 | SHR-003 | 已有实现待复验/真实视觉延期 | `src/store/diary-domain.ts`、`src/services/share-asset-preparation.ts`、`src/services/__tests__/share-asset-preparation.spec.ts`、`src/components/diary/photo.tsx`、`app/share/result.tsx` | 已知姓名/别名匿名投影、选段组合、人脸坐标裁切及 PNG 像素遮挡均已有实现；DEV-3 默认可读性校验实际读取本地文件并核对 PNG signature/IHDR/尺寸，拒绝非本地 URI 和损坏文件；新增 regression 待测，typecheck/diff check 通过 | 不依赖模型 API；Q-013 限定无标记/漏检/元数据语义，Q-014 限定正式导出规格 | CASE-SHR-003-002/005/006 仍 partial；新 regression 未运行，正式页没有接入匿名资产失败状态 |
 | SHR-004 | 已有实现待复验/页面状态延期 | `app/share/result.tsx`、`src/store/diary-domain.ts`、`src/services/share-asset-preparation.ts` | 海报/全文预览共用当前投影、无效目标空态、关闭回原页及目标切换保护已有实现 | 本地预览不要求第三方；Q-014 阻塞正式版式/真实二维码，Q-009 阻塞常规入口 | CASE-SHR-004-005/007 未闭环；异步渲染加载/错误反馈证据未补，正式 UI/UX 本轮未改 |
 | SHR-005 | 已有编排与本地文件，平台/页面接线延期 | `src/services/share-delivery-orchestrator.ts`、`src/services/share-export-file-service.ts`、`src/services/share-asset-preparation.ts`、`app/share/result.tsx` | 服务层有私密外部分享拦截、准备/确认分离、按作品+版本+出口去重；本地 PNG/PDF 可写文件，PDF CJK 字体映射已有 macOS 预览证据 | 正式页面仍调用 `recordShareDemo(...)`；平台 adapter 明确 unsupported，不写真实成功记录。Q-013/Q-014/Q-001 限制平台、规格、权限和文件留存 | CASE-SHR-005 多项 partial/待决策；本轮未运行文件/系统分享/外部渠道测试，不擅自接线改变反馈 |
-| MAT-001 | 实施中：设备照片导入 service/Store action 已建，页面待接线 | `src/services/photo-library.ts`、`src/services/__tests__/photo-library.spec.ts`、`src/store/create-app-store.ts`、`src/store/__tests__/material-photo-import.spec.ts`、`app/library/index.tsx`、`src/components/diary/photo.tsx`、`app/postcard/index.tsx` | 新增可注入真实 MediaLibrary 资产导入、现有权限读取、顺序 Image.getSize 解码探测、非网络 URI/source 校验、整批失败隔离、设备 ID 去重及 mock ID 冲突拒绝；Store 只在校验后原子登记资产与素材成员，同系统 ID 重导刷新当前 URI。原有目录隔离/多消费者 URI 解析保留，正式上传 sheet 仍未接 action | 不主动请求权限、不下载 iCloud 资源、不改正式 UI/UX；URI 重启留存受 Q-001/Q-015，格式/容量/元数据受 Q-003，设备权限矩阵受 Q-018 | 本轮 `npm run typecheck`、`git diff --check` 通过；新服务/Store Jest 已编写未运行；无真实 iOS 解码/导入证据，CASE-MAT-001-001/003/004/005/006 状态不变；页面接线需 UI/UX 授权 |
-| MAT-002 | 实施中：修复当前草稿素材追加覆盖，真实资产链路待接 | `app/library/index.tsx`、`app/__tests__/library-screen-material-apply.spec.tsx`、`src/store/create-app-store.ts`、`src/store/diary-domain.ts`、`backend/src/common/memory-store.service.ts`、`backend/test/app.e2e-spec.ts` | `applyPhoto(...)` 现基于被复用草稿的当前首个 text block 追加去重照片 ID；保留未保存正文/标题/摘要/引用，不再用 saved diary 引用覆盖草稿；目标不存在/无正文仍在新建草稿前阻断，页面反馈/导航不变。已有 store→repository 请求断言及隔离 MySQL保存/读回证据保留 | 新真实设备导入 service 仍未接素材页，fixture 不证明 P4 文件真实可读或单次 app-to-backend 联调；Q-015 的 A04 CASE 语义仍待确认，Q-001/Q-015 的 URI 留存范围不推断 | 新增现有草稿保留 regression 已写未运行；CASE-MAT-002-004 仍待决策，002/005 仍 partial；本轮未运行数据库 e2e |
+| MAT-001 | 实施中：本地功能已实现，真实设备/服务验收延期 | `src/services/photo-library.ts`、`src/services/material-photo-api.ts`、`src/services/material-photo-search.ts`、`src/contracts/material-photo-contract.ts`、`src/store/create-app-store.ts`、`app/library/index.tsx`、`app/library/wall.tsx`、`app/__tests__/library-screen-search.spec.tsx`、`app/__tests__/library-screen-material-management.spec.tsx`、`app/__tests__/library-photo-wall.spec.tsx`、`src/services/__tests__/material-photo-search.spec.ts`、`src/store/__tests__/material-photo-import.spec.ts`、`backend/src/modules/photos/*`、`backend/src/modules/diaries/diaries.controller.ts`、`backend/src/common/memory-store.service.ts`、`backend/prisma/migrations/20261023170000_allow_duplicate_material_sources/migration.sql` | 设备相册多选、历史照片可再次选取且每次上传创建独立素材 ID/磁盘副本、单次最多 12 张/素材库最多 100 张、设备隔离磁盘仓库、列表/上传/读取/删除 API、日记原文件独立副本已实现；搜索日记信息/正文并返回日记引用的素材照片；主素材页显示最多 9 张并展开独立照片墙；删除按 `(diaryId, photoId)` 核验副本，副本登记纳入日记保存事务；照片选取沿用本地相册切换、分页和共享图片渲染 | 用户已确认后端磁盘、12/100 配额、允许同一照片重复上传、日记搜索规则、三行预览/照片墙及被引用照片复制原文件。生产持久性依赖 `PHOTO_ASSET_STORAGE_DIR` 持久卷；系统资产 URI 生命周期仍待验收 | 本轮素材页重复上传/配额 9 项、Store 配额 5 项、后端照片服务 6 项、root typecheck、backend build 通过；本地重复来源索引已应用，素材记录 27 条迁移前后不变，当前 11 条 migration status up to date 且 schema diff 无差异。真实 multipart 上传、配额并发、iOS 上传及持久卷重启验收未完成；CASE-MAT-001-002 本地验证完成、CASE-009/010 仍 partial，MAT-001 仍进行中 |
+| MAT-002 | 实施中：当前草稿素材应用改为替换首段引用，真实资产链路待验 | `app/library/index.tsx`、`app/__tests__/library-screen-material-apply.spec.tsx`、`src/store/create-app-store.ts`、`src/store/diary-domain.ts`、`backend/src/common/memory-store.service.ts`、`backend/test/app.e2e-spec.ts` | DEV-14 后 `applyPhoto(...)` 使用当前草稿首个正文块并将引用替换为素材照片；原照片继续保留在整篇集合，标题/摘要/正文及其它未保存状态不被覆盖。目标不存在/无正文仍在新建草稿前阻断；既有 store→repository 请求及隔离 MySQL保存/读回证据仅覆盖分层保存形态 | 注册照片 fixture 不证明设备文件真实可读，也不是素材页到 backend 的单次端到端联调；Q-015 的真实导入/留存/其它目标范围及 Q-001 URI 留存仍待确认 | CASE-MAT-002-001/003/004 本地页面回归已执行；002/005 仍 partial，006 未执行，007 仍待决策；本轮未运行数据库 e2e |
 | MAT-003 | 已有预览映射待真实明信片输出 | `app/library/index.tsx`、`src/theme/assets.ts`、`app/postcard/index.tsx` | 八种开放贴纸/印章有稳定资源映射，关闭无副作用；`stampKyoto` 路由可传到卡片预览 | PCD-001 当前 `make()` 不产生实际图像文件；未知装饰语义受 Q-015/Q-009 | CASE-MAT-003-002 partial、004 未执行、005 待决策；不把卡片预览当生成资产 |
 | MAT-004 | 页面输入骨架已有，服务链路依赖 PET-001 | `app/library/index.tsx`、`src/store/create-app-store.ts`、`src/services/chat-reply-provider.ts`、`backend/src/modules/chat/*`、`src/repositories/http-pet-chat-repository.ts` | 空白提交拦截、灵感卡与未提交关闭无副作用已有实现；页面把当前问题与回答拼成一条用户消息，Store 为本地 mock turn 生成 request ID。DEV-3 已新增 PET-001 持久会话/turn/message API 与 client repository，但素材入口/Store 未调用该 repository | 问题/回答未经 PET 持久 API 关联，失败和恢复也未接入页面；真实 provider 未配置。网络等待/失败反馈受 UI/UX 冻结，Q-001/Q-002/Q-003 未决；migration 已在 TEST-13 disposable schema 验证，但不建立产品留存承诺 | CASE-MAT-004-002～005 保持阻塞/未完成；正式入口接线需满足可观察恢复授权；本轮不将本地 mock 或未测 PET API 计为真实 CASE |
-| MAT-005 | 实施中：本地 Store 增量已复测，真实能力延期 | `src/services/ai-image-generation-provider.ts`、`src/contracts/ai-image-generation-contract.ts`、`docs/reference/delivery/contracts/ai-image-generation-v1.md`、`src/store/create-app-store.ts`、`src/store/__tests__/material-image-generation.spec.ts`、`app/library/index.tsx` | 历史 TEST-2 定向 7/7、全量前端 340/340 通过；DEV-3 增加配图版本契约与 Store runtime 校验，新回归待测 | `source: mock` 明确，仅混合开发模式启用；非开发模式 fail closed；真实图片模型/文件持久化未接。正式页面仍走 `photo-9` 示例路径；UI/UX 未获授权前不接线 | 新 contract regression 待集中 TEST；历史本地回归通过不替代真实 CASE；真实资产、MAT-002/PCD-001、Q-001/Q-002/Q-003/Q-015 与页面反馈边界仍待闭环 |
+| MAT-005 | 实施中：真实 provider→持久素材→鉴权读取已通过一次 smoke；页面/系统相册验收待完成 | `backend/src/modules/ai-images/*`、`backend/src/modules/photos/photo-asset.service.ts`、`backend/prisma/migrations/20261023180000_generated_material_provenance/`、`src/services/http-ai-image-generation-provider.ts`、`src/services/save-generated-image.ts`、`src/store/create-app-store.ts`、`app/library/index.tsx`、`app/__tests__/library-screen-ai-image.spec.tsx` | DEV-4 页面与服务接线；DEV-52 一次真实 Flash 生成 HTTP 201、素材列表命中、内容读取 HTTP 200、独立图片解码成功；后端生图/素材定向 4 suites / 23 tests、客户端 provider/save service 2 suites / 4 tests、typecheck、backend build 通过 | 本地配置 `doubao-seedream-5-0-flash-260915`、`1.5K`，复用 `PET_CHAT_API_KEY`；仅请求 1 张，估算约 ¥0.12。provenance migration 按 DEV-43 记录已应用；iOS 保存相册未在重建 App 后验证 | CASE-MAT-005-002 部分执行；001/003/005 未执行，004/006/007/008 待 Q 决策。仍需真实页面预览、日记/明信片入口、失败处理及重建 iOS 后系统相册验证；部署需持久化 `PHOTO_ASSET_STORAGE_DIR` |
 | PCD-001 | 已有预览/真实渲染暂停 | `app/postcard/index.tsx`、`app/__tests__/postcard-screen-assets.spec.tsx`、`src/theme/assets.ts` | 当前可读取预设/注册素材与装饰 ID；`make()` 仍仅设置 `generated=true`，无真实卡片渲染资产 | 用户此前暂停决定继续有效；增加渲染依赖并改成功时序/失败反馈需重新授权 | CASE-PCD-001-003/004/005 继续暂停；本轮不加依赖、不改页面、不制造假 PNG |
 | PCD-002 | 已有出口演示/平台及输出待决策 | `app/postcard/index.tsx`、`docs/reference/delivery/tasks/PCD-002.md` | 页面现有微信/朋友圈/保存选项只显示本地 Alert；无真实文件、系统保存或平台 adapter | 依赖 PCD-001 当前卡片真实资产；渠道/权限/输出语义受 Q-013/Q-014，文件留存受 Q-001 | 所有真实出口 CASE 未执行/待决策；保留演示与正式交付区分，不接平台或生产出口 |
 | NAV-001 | 已有实现待复验/入口决策延期 | `src/hooks/use-diary-flow.ts`、`src/components/navigation/bottom-tabs.tsx`、`app/modal/more-actions.tsx`、`app/diary/[id]/replace-photos.tsx` | 草稿离开确认、more-actions ID 传递与换图草稿复用已有实现；页面映射覆盖和路由安全边界已盘点 | 正式详情入口受 Q-009；权限恢复/深链受 Q-018；未新增正式 UI/路由 | CASE-NAV-001-003 待决策；001/002/004/006 矩阵仍 partial，集中 TEST 轮验证 |
@@ -304,3 +458,147 @@ SHR-001 契约补充：`POST /sharing/project` 先要求有效设备身份，再
 - TEST-14 最终完整隔离 MySQL e2e 49/49、backend unit 17 suites / 199 tests、root typecheck、backend build、migrate status up-to-date、schema diff 无 drift、git diff check 全通过。与 TEST-13 相同，本轮未访问开发库/生产库、未调用真实 AI/provider、未接入设备媒体库或真实渠道。
 - CASE-DSC-001/002/003、PET-001、GRW-003/004 根据真实 HTTP+MySQL 证据更新为部分执行；无整项 CASE 新增 passed，coverage 仍 96/225。Synthetic published rows 与 `source: provider` test-only anchor fixture 不代表正式发布流程或真实 AI 质量，正式 UI/UX 继续未接。
 - TEST schema `ai_diary_test_dev12` 在本轮创建，迁移/e2e 结束后删除；下一阶段仍需推进全范围 task 依赖队列，并在新增真实证据前不扩大通过结论。
+
+## DEV-13 PET-001 服务端 provider 边界
+
+- 将旧服务端 Ark endpoint 与 `doubao-seed-character-260628` 配置到隔离的 `PET_CHAT_*` provider，未改变 CRE-005/DIA-002 的 `AI_PROVIDER_*`。旧服务端 `.env` 的 Ark key/base/model 已迁移到新 `backend/.env`；目标文件权限为 `0600` 且由 `.gitignore` 排除，不含旧 API 的其他配置。
+- 新增 NestJS Ark-compatible provider 与 `POST /api/chat/conversations/:conversationId/turns/:requestId/generate`。服务端从指定设备拥有的持久会话读取上下文、生成回复并写入 `source: provider`；客户端提交的回复内容/来源不参与生成。失败只写固定 `timeout` / `provider_failed`。同一服务实例重复请求共享正在执行的 promise，完成后的重放返回既有结果。
+- `HttpPetChatRepository.generateReply(...)` 已由 Store send/retry 调用，`app/(tabs)/pet.tsx` 在原小橘气泡内显示等待状态，并允许点击失败气泡执行显式重试；未改布局或视觉参数。跨进程 provider 请求去重、上次会话自动恢复，以及正式质量、安全、时限和取消语义仍未闭环。Q-001/Q-002/Q-003 保持待决策，不把旧项目提示词或参数视为产品确认。
+- `npm run typecheck`、`npm --prefix backend run build`、后端 chat provider/controller/service 定向 31/31、客户端 chat repository 定向 7/7、Store/server integration 2/2、PET 页面 retry 1/1 通过。新 `backend/.env` 的凭据通过真实 smoke test；另在 disposable schema 实际执行 HTTP begin turn → provider generate → Prisma 持久化，读回 1 conversation/1 turn/2 messages，测试 schema 已清理。`ai_diary` 的 6/6 migrations up-to-date 且 schema diff 无漂移。无个人数据之外的内容未发送；没有新增 CASE passed，验收矩阵仍为 96/225（42.7%）。
+
+## DEV-14 DIA-003 / MAT-002 照片引用规则（2026-10-20）
+
+- 编辑页候选仅从当前草稿已选照片生成，并保持用户选择顺序；引用面板为单选，Store 写入也强制每个正文/引用块最多一张。
+- mock 与服务端生成结果按正文/引用文本块顺序自动分配照片；照片不足时后续文本块不关联照片。素材应用将首段引用替换为素材照片，旧照片仍保留在整篇照片集合，草稿其它未保存内容保持不变。
+- `CASE-DIA-003-010`、`CASE-MAT-002-001/003/004` 已有本地页面/领域回归证据；coverage 将 DIA-003-010 映射至 AC02/AC03，AC05 的重复/无效 ID 仍由 CASE-DIA-003-006 覆盖。
+- 定向 Jest 3 suites / 135 tests、`npm run typecheck`、`git diff --check` 通过。编辑页 suite 仍有 overlapping `act()` 警告；未运行全量测试、backend、数据库或真实 iOS 媒体读取。不据此增加完整 CASE passed，验收矩阵仍为 96/225（42.7%）。
+- Q-003 的照片总上限、格式/容量及其它输入边界未确认；Q-015 的真实素材导入、留存及其它目标范围未关闭。不得将本轮局部产品确认扩展为这些问题已解决。
+
+## DEV-15 DIA-003 右侧引用照片替换入口（2026-10-20）
+
+- 编辑页已有引用照片现显示在段落右侧引用控件内，移除了段落下方重复缩略图；点击该控件复用原选择面板，打开时预选当前照片，选择并确认另一张后更新引用。空引用控件维持原尺寸和样式。
+- 新增 `CASE-DIA-003-011` 页面回归，验证控件内显示、旧缩略图不重复、当前照片预选及替换结果；该回归已通过。编辑页定向 suite 28/28、`npm run typecheck`、`git diff --check` 通过。
+- React 测试仍输出 overlapping `act()` 警告，未影响结果。`Photo` 在页面测试中使用组件替身，真实 iOS 渲染、设备照片可读性及全量 CASE 未由本轮验证。没有新增 coverage passed；验收矩阵仍为 96/225（42.7%）。
+
+## DEV-16 PET-001 SSE 流式回复（2026-10-20）
+
+- Ark-compatible provider 在流式路径请求 `stream: true`，解析 SSE `delta.content` 并逐段发给 Nest；新增受设备身份与 attempt 校验的 `/generate/stream` endpoint。只有完整回复持久化成功后才发送完整 conversation；失败发送固定错误码。保留原 JSON endpoint，同进程并发请求继续合并。
+- `HttpPetChatRepository` 通过 React Native XHR `onprogress` 读取 SSE 并携带 `x-device-id`；Store 将各段文本追加到 pending assistant message，成功后以持久化快照收口。宠物页在原气泡内显示三个渐变动画点，收到文本期间保留动画；错误重试文案和气泡布局未变。
+- 前端定向 3 suites / 13 tests、后端 provider/controller 2 suites / 21 tests、root `npm run typecheck`、backend `npm run build` 通过。2026-10-20 实际调用发现本机 3001 端口仍由旧 Nest 进程提供服务，新增 `/generate/stream` 返回 404；重启当前 backend 后，真实 Ark stream endpoint 对同一 pending turn 返回 4 个 delta（首段约 883ms），约 1.0s 后以 `completed/provider` 收口。iPhone 17 模拟器聊天页发送 `SSE runtime check` 后收到并持久化真实 provider 回复，页面出现输入中动画；OS network log 确认请求到本机 backend，但未单独捕获 App 精确 stream URL/XHR delta 时间戳。未执行全量 TEST；代理缓冲、native XHR 增量时序、断连取消和 Q-002 时限/取消策略仍待独立验证/决策，不据此新增 CASE passed。
+
+## DEV-17 照片理解与段落生成（2026-10-20）
+
+- 全文将所有选中图片按照片顺序组成一次 Ark 多模态请求；服务端依三个可选排版师风格选择对应提示词，要求 N 张照片恰好生成 N 个同序单图正文块，并保持全文连贯。单段重写使用独立提示词，提供目标图片和其它段落只读上下文，只接受目标文字。
+- 设备照片上传只携带格式有效的拍摄日期提示，不发送原文件名或相册名称；Controller 也会丢弃遗留请求中的 `title/location` 字段。提示词禁止从相册/文件名推断地点或事实，缺少可信地点时不虚构具体地点。
+- 临时服务端图片存储增加 JPEG/PNG/WebP/GIF 签名核验；Multer 流式缓冲受每请求累计字节上限保护，单文件限制沿用接口配置，不推导产品照片数量上限。临时文件仍按设备/草稿/轮次隔离，任务终态清理、异常残留 TTL 清理。
+- 定向前端 6 suites / 193 tests、后端 6 suites / 84 tests、root typecheck、backend build、`git diff --check` 通过。完整 TEST 轮未执行；`E2E_DATABASE_URL` 缺失，未运行隔离 MySQL E2E；未调用真实 Ark 生成/重写、未上传用户照片或执行 iOS 设备传输验证。`CASE-CRE-005-011` 与 `CASE-DIA-002-010` 均保持部分执行，`CASE-CRE-005-010` 和 `CASE-DIA-002-008` 未执行；没有新增完整 CASE passed，验收仍为 96/225（42.7%）。
+
+## DEV-18 PET-001 聊天范围拦截与单设备并发（2026-10-20）
+
+- `pet-chat-safety-policy.ts` 在服务端 turn 持久化前拦截显式代码/脚本、小说/剧本、营销/商业代写、提示词覆盖和规则可识别的有害操作；响应使用固定 `out_of_scope` / `unsafe_request` 错误，客户端展示不可重试的中文范围/安全说明。拒绝输入不写数据库也不调用 Ark。
+- Ark system prompt 收紧至日常经历、情绪陪伴、旅行回忆与日记表达；SSE delta 累计文本在输出代码样式/明显危险步骤前执行规则检查，触发时不再发送违规 delta、删除该 pending turn。历史中被策略识别的 completed turns 从后续模型上下文排除。
+- Store 和 Pet 页面在设备有 pending 请求时阻止新发送/重试；controller 在 `/turns`、retry 和 generation 路径以 `x-device-id` 做单进程互斥，其他 flight 返回 `chat_busy`，同 request idempotent flight 继续合并。
+- 前端 chat 3 suites / 20 tests，后端 policy/controller/service/provider 4 suites / 59 tests，root typecheck、backend build、`git diff --check` 通过。另在重启后的本机 Nest 对代码与危险操作请求做 HTTP probe，分别收到 400 `out_of_scope` / `unsafe_request`，开发库确认没有写入对应会话/turn/message，未调用 Ark。未运行完整 TEST、隔离 MySQL E2E、真实 Ark 红队或跨 Nest 实例锁测试；无完整 CASE passed，验收仍为 96/225（42.7%）。
+- 限制：策略为确定性关键词/结构模式和 prompt，不是完整语义审核；混淆或新型表达可能绕过。`x-device-id` 是客户端自报标识，无法防身份轮换；并发锁仅在单 Nest 进程有效，多实例需共享锁/正式鉴权。Q-002 其余质量、综合审核、超时/取消/重试和费用规则仍待确认。
+
+## DEV-19 排版生成范围与设备级互斥（2026-10-20）
+
+- 本轮只修改 CRE-005 / DIA-002 的排版相关 AI 路径；PET-001 代码和 DEV-18 记录保留，不纳入此次实施。
+- 新增 `backend/src/common/diary-generation-policy.ts`：重写目标文字/只读上下文在服务端先判定，明确代码/脚本、小说/剧本、商业推广、提示词覆盖及规则可识别的有害操作在服务端临时图片读取/模型请求前拒绝；multipart 文件仍会先由 HTTP 层接收。全文生成从固定日记任务提示出发，不接收自由提示；provider 结果的标题、摘要、段落、图片说明和同行者字段均经过范围校验，越界结构不能进入成功快照。
+- `MemoryStoreService` 对全文生成和单段重写共用按 `ownerDeviceId` 的活动任务锁；锁跨 provider 自动重试持续到终态，取消、错误或成功后释放；相同生成幂等请求继续复用既有任务，其他同设备任务返回 `version_conflict`。当前锁限定在单 Nest 进程，多实例部署仍需共享锁。
+- 前端 3 suites / 166 tests、后端 6 suites / 105 tests、root typecheck、backend build、`git diff --check` 通过。未运行隔离 MySQL E2E、真实 Ark 质量/红队或多实例锁验证；deterministic 模式/替身测试不作为真实内容安全证据。`CASE-CRE-005-012`、`CASE-DIA-002-011` 保持部分执行，无完整 CASE passed 增量，验收仍 96/225（42.7%）。
+
+## DEV-20 PET-001 失败 turn 重试后的消息顺序（2026-10-21）
+
+- 当旧消息首次 `beginTurn` 因网络/服务失败、只留在当前 Store，而较新的 turn 已成功持久化时，Store 旧逻辑会把 local-only request 追加到服务端快照末尾；随后重试旧 turn 使其得到较大的服务端 sequence，造成旧失败气泡/回复落在新消息之后。
+- Store 合并逻辑改为在当前会话生命周期内保留原 request 顺序，并按 request ID 分组重建每轮 user/assistant/status 消息。旧 local-only turn 后续持久化后继续留在最初位置；页面布局和发送/重试交互不变。
+- 新增 Store integration 回归：旧 turn 首次写入失败 → 新 turn 成功 → 旧 turn 重试成功；断言两轮顺序稳定且消息不重复。前端 chat 3 suites / 21 tests、root typecheck、`git diff --check` 通过。未触及服务端/数据库，不改验收通过数。若 App 在 local-only turn 落库前退出，其恢复仍由 Q-001 决定。
+
+## DEV-21 BAS-002 App Attest 匿名设备认证（2026-10-21）
+
+- 身份层实现服务端 challenge、Apple attestation verifier、每个 key 唯一绑定、服务端新 ID、30 天 JWT、assertion token recovery，以及生产全局 auth guard。`x-device-id` 必须匹配 JWT subject；Challenge 默认以 HMAC 来源地址为 key 限制 20 次/小时，底层 MySQL 计数支持多实例。
+- iOS 使用 Expo `@expo/app-integrity`；Key ID 与凭证保存在 Keychain，私钥由 Secure Enclave 管理。5 个 backend adapters 和 PET SSE 统一使用新的 identity headers 工厂；entitlement 同步写入 Expo public config 与原生 plist。
+- 新增 3 个 Prisma 模型和 migration，仅执行 `prisma generate`。没有执行 migration、重置/读取/改写日记数据库；Prisma CLI 按默认流程加载 `backend/.env`，本轮未手动查看、输出或改写该文件及其中凭据。
+- 定向结果：backend build、root typecheck、后端 3 suites / 9 tests、客户端设备身份 1/1、`git diff --check` 通过；Expo entitlement、iOS module autolinking 与 ESM verifier 加载/畸形证明拒绝烟测通过；Debug iOS simulator target 原生编译成功但未签名/安装。完整测试和数据库 e2e 未执行。
+- 分类：BAS-002 本轮身份 hardening 代码完成待测试；Team ID `JWTMTK2F34` 与随机 JWT secret 已配置于忽略的本地 `backend/.env`，未输出密钥；真实 Apple proof、profile、EAS/实机签名构建和设备验收延期。旧设备数据不迁移；用户确认 Android 不需要支持，本方案仅覆盖 iOS。未更新 CASE 状态或验收 passed（96/225）；后端 Prisma tooling 的 npm audit 显示 3 条现存 `deepmerge-ts` high advisory，未做 breaking upgrade。
+- 用户反馈旧模拟器因缺少 App Integrity native module 报错；客户端现将 App Integrity/Secure Store 延迟加载，development 对缺少 native module 兼容 legacy，以避免旧 dev client import-time crash；Release 仍 fail closed。新原生包尚未安装到模拟器。
+
+## DEV-22 本地开发诊断日志（2026-10-21）
+
+- 增加开发专用前端结构化 JSONL logger：仅 `__DEV__` 生效，字段白名单、资源路由 ID 归一化，写入 App Documents；当前文件 256 KB 上限并保留一个轮转文件。记录启动/恢复阶段、JS 未处理异常栈帧、身份初始化、统一 API 请求/响应、宠物聊天 SSE 首片段/片段数及相册读取失败，不记录正文、照片 URI、设备身份、凭证或响应消息。
+- 前端请求开发模式加入 `x-request-id`；Nest 仅在 `NODE_ENV=development` 启用请求中间件，回传相同 ID 并写入规范化路由、状态码、耗时；不记录 body、headers、IP。后端 JSONL 限 512 KB 并保留一份轮转文件。
+- Metro / backend 启动脚本通过本地日志包装器保留结构化诊断与启动/构建记录；`.dev-logs/` 被 Git 忽略，输出大小有界。`npm run diagnostics:collect` 可直接汇总启动模拟器 App 沙盒日志、Metro 与后端日志；`--native` 可选读取最近 10 分钟仅限 App 进程的 iOS 统一日志。未新增界面、生产遥测或完整 CASE。
+- 验证：前端 4 suites / 32 tests、后端中间件 1 suite / 3 tests、root typecheck、backend build、iOS Expo Router bundle（HTTP 200）通过；本机 health 请求回显 `diag-smoke-final-002`，采集命令实际读回对应后端记录。首次安装后尚未重载 App 时，沙盒暂时没有客户端 logger 文件。
+- 本轮重启了本地 Metro 与 Nest 开发服务，均由日志包装器启动；启动时未清库、未执行 migration。此前 DEV-21 记录中的“新原生包尚未安装”已被后续 simulator build 覆盖：Debug 包已安装且包含 App Integrity、Secure Store；真实 Apple attestation 仍待实体设备验证。
+- 2026-10-22 启动 iPhone 17 simulator 并打开 App 后，`diagnostics:collect` 已读到 App Documents JSONL 及 Metro / backend 对应 request ID。启动 hydration 记录两次 `POST /drafts` HTTP 400 `invalid_input`、一次 201，以及 `/memories` HTTP 200；未查看请求正文或人工查询/修改/清理数据，其中 201 是 App 自动请求，可能创建或确认了一个草稿。未运行完整 TEST / DB E2E，无新增 CASE passed，验收仍 96/225（42.7%）。
+- 随后复现截图中的生成失败：客户端记录 `/generation/jobs` 的 request ID `diag-mvj161dg-9` 在约 2 ms 后以 `network_error` 结束，后端 request log 中没有该 ID；紧接着的 `/drafts` 请求返回 201。现有证据指向生成请求未获得后端 HTTP 响应，但因日志刻意不含 payload，具体触发原因仍待诊断；不将此记录计为 CASE 结果。
+- 复核用户打开的 iOS crash report：TCC 因相册访问缺少 `NSPhotoLibraryUsageDescription` 主动终止 App。该报告时间为 2026-10-20；当前 Expo `expo-media-library.photosPermission`、原生 `ios/AIDiary2/Info.plist` 与 iPhone 17 已安装包（build 6）均包含中文用途说明，当前 hydration 的 `photo_permission` 阶段成功；因此这是旧包崩溃，当前包配置已修正，无需清除 App 数据。
+- 加强 API 失败诊断：请求/失败事件只增加请求体类别和失败阶段（headers/fetch/response_body），用于区分准备身份头、网络发送和解析响应；不记录 multipart 字段、照片数量或文件内容。此前 generation `network_error` 缺少这两个字段，无法仅凭旧日志确认更深层触发原因；保留为待新证据的缺陷，不计 CASE 结果。定向客户端/脱敏测试 2 suites / 8 tests、root typecheck、`git diff --check` 通过；验收仍为 96/225（42.7%）。
+
+## DEV-23 iOS 生成照片 multipart 传输（2026-10-22）
+
+- 失败证据：`diag-mvj6t1fx-b` 的 `/generation/jobs` 请求为 `bodyKind=multipart`、`failureStage=fetch`，约 1 ms 失败；后端无对应 request ID，邻近 `/drafts` 请求成功，iOS 原生日志同一时间无生成网络任务。
+- 根因确认：Expo SDK 57 默认 Expo Fetch 的 multipart 转换器拒绝 React Native `{ uri, name, type }` 文件部件，并在网络启动前抛出 `Unsupported FormDataPart implementation`；React Native 原生 XHR/FormData 支持该本地文件字段。
+- 修正：`ApiClient` 增加可取消、沿用超时与脱敏 request ID 的 XHR transport；仅照片 multipart 生成/重写请求使用该路径，不改普通 fetch、界面或表单请求头。测试继续覆盖照片顺序、元数据与身份头。
+- 验证：API client 与 core diary repository 定向 2 suites / 39 tests、root typecheck、`git diff --check` 通过。`diag-mvj75rv5-c` 的 multipart `/generation/jobs` 在 53 ms 内返回 HTTP 201，后端创建任务 `cmvj75rwf00008oyjj207j1mh`，确认照片上传链路已到达后端。
+- 该任务随后被客户端轮询约 30 秒，GET 返回 200/304；当轮运行早于任务快照遥测，日志没有终态、阶段或错误码，不能据此认定 Provider 超时。现已新增 `generation.job.snapshot` 开发诊断，记录状态、阶段、进度、尝试次数、受限错误码和是否可重试；遥测加入后尚无新的生成请求。
+- 验证：诊断相关 4 suites / 146 tests、root typecheck 通过。下一轮需从模拟器重新触发带照片生成并采集任务快照；当前不记 CASE passed，验收仍为 96/225（42.7%）。
+- 遥测启用后的模拟器任务 `cmvj7icx400018oyjjt45vwjo` 在 18% 进入 `analyzing-photos` 后约 11 秒失败；快照为 `attempt=1/2`、`outcome=provider_failed`、`retryable=false`。截图错误为 `provider result is missing companionName`，排除 multipart 网络失败和超时假设；服务端 `requireProviderString` 会在模型缺字段、返回非字符串或空白时拒绝整个结果。
+- 修正：保留模型返回的有效 `companionName`；缺失/空白时依据规范化后的人物候选补为“同行人”或“自己”，不改变正文、照片引用和其它结构校验。
+- 验证：`diary-generation.service.spec.ts` 57 tests、backend TypeScript build、root typecheck 通过。后端已重启以加载修正；真实模型/模拟器修复后复测尚待用户触发，不记 CASE passed，验收仍为 96/225（42.7%）。
+- 后续任务 `cmvj7rugf00008o3dfib5vgd9`、`cmvj7y66100008o8jrd4mdy91` 均再次失败，数据库只读记录的错误为 `provider blocks contain invalid identifiers`。该错误由 `type` 或 `id` 非字符串触发；为保护隐私未保存 provider 原始 JSON，因此无法确认这两次具体缺的是哪个字段。已确认提示词要求 `type=text` 但未要求模型提供 `id`，与解析器必填规则不一致。
+- 修正：块 `id` 缺失或非字符串时允许进入服务端 ID 兜底，`type` 仍严格校验；提示词明确由服务端生成块 ID，并只生成正文块、通过 `photoIds` 关联照片。未放宽正文和照片 ID 校验；真实 Provider 复测用于确认此缺口是否为本轮触发项。
+- 另核对 crash report：TCC 报告发生于 2026-10-20，旧 build 6 缺少相册用途说明；当前模拟器安装的 build 6 `Info.plist` 已含 `NSPhotoLibraryUsageDescription`，该旧报告不代表本轮任务失败。
+- 验证：`diary-generation.service.spec.ts` 59 tests、backend build、`git diff --check` 通过。用户在 Trae 终端启动的后端早于本次修正且不热重载，需在该终端 Ctrl+C 后重新运行启动命令再做真实 Provider 复测；暂不记 CASE passed，验收仍为 96/225（42.7%）。
+- 用户随后发起的任务 `cmvj8ajx600018o8jt3wm4314` 仍返回相同错误；但 3001 后端进程于 15:27:20 启动，ID 兜底源码于 15:32:59 修改，`ts-node` 进程不热重载，因此该次请求实际使用旧代码，不能作为补丁复测。等待用户在其终端 Ctrl+C 并重新运行 `npm --prefix backend run start:dev` 后再验证；不记 CASE passed。
+
+## DEV-24 DIA-002 重写等待期间锁定编辑（2026-10-22）
+
+- Store 新增可订阅的重写中草稿段落状态，由统一请求清理逻辑覆盖成功、provider/仓库失败、输入或照片上下文失效及草稿保存/放弃等结束路径。
+- 编辑页在重写期间显示“重写中…”，并禁用标题/段落编辑、整篇换图、段落引用图片、排版师切换、保存与返回；结束后恢复对应操作。未改动布局尺寸或后端重写契约。
+- 定向验证：编辑页与日记 Store 2 suites / 135 tests、root typecheck 通过。页面测试单独运行无警告；完整编辑页 suite 输出既有 overlapping `act()` console warning，但测试通过。未运行完整 TEST、backend、真实 Provider 或设备验收；未新增完整 CASE passed，验收矩阵仍为 96/225（42.7%）。
+
+## DEV-25 游记叙事提示词调整（2026-10-22）
+
+- 全文生成及正文重写提示词现允许照片细节引出的克制第一人称感受，并要求日期/地点按叙事需要择要出现、相近日期自然合并；段落有依据时自然衔接，素材无关时不强造连续事件。仍禁止揣测画中人物心理、编造照片外经历或无依据地点。
+- 定向验证：`diary-prompt-templates.spec.ts` 与 `diary-generation.service.spec.ts` 共 2 suites / 65 tests 通过，`npm --prefix backend run build` 通过。确定性 development mock 不执行这些提示词；未调用真实 Provider 或用户照片，不能宣称文风质量已验证。CASE-CRE-005-010 保持未执行，不增加完整 CASE passed，验收矩阵仍为 96/225（42.7%）。
+
+## DEV-26 后端源码自动重启（2026-10-22）
+
+- 保留现有 `npm --prefix backend run start:dev` 单次启动方式，新增 `npm --prefix backend run start:watch`，通过 Node 原生 `--watch` 监视后端入口及已加载模块变化并自动重启，继续复用现有开发环境变量与 `run-dev-process.js` 日志包装。
+- 已确认本机 Node v22.20.0 支持 `--watch` 与 `--watch-preserve-output`，npm 可识别新命令，`git diff --check` 通过。未启动服务或验证真实文件变更触发重启，避免占用用户当前后端端口；命令已记录至 `docs/reference/delivery/development-diagnostics.md`。
+
+## DEV-27 AI Provider 单次请求时限（2026-10-22）
+
+- 按用户确认，全文生成、段落重写及宠物聊天的后端 Provider 默认超时均为 `240000` ms；请求计时在请求体准备完成、即将实际提交模型时启动。排队与模型请求前的照片准备不计入。
+- 每次后端自动重试的 Provider 提交各自开始新的 4 分钟窗口；用户主动重新生成不沿用前次计时，全文生成会创建新 job，聊天重试仍按既有 turn/request/attempt 契约推进，但新 Provider 提交单独计时。正式自动重试次数、取消与结果覆盖策略仍未确认。
+- 同步重写与聊天 SSE 的前端传输保护调整为 `360000` ms，避免 45 秒/120 秒客户端超时提前截断后端 Provider 窗口。全文生成仍是异步建单与轮询，不将其建单/轮询超时混为模型等待时限。
+- 验证：生成/重写 Provider 时限 4 项、聊天 Provider 时限 2 项、客户端回归 2 suites / 116 tests、root typecheck、backend build 与 `git diff --check` 通过；覆盖默认 240 秒、300 秒配置封顶及请求体准备后启动计时。未执行真实 Provider 四分钟等待或隔离 MySQL e2e。CASE-CRE-005-007 保持 partial，不新增 CASE passed，验收统计仍为 96/225（42.7%）。
+
+## DEV-28 素材库云端磁盘、多选与删除（2026-10-23）
+
+- 按用户确认完成素材库多选上传至后端磁盘，单次和总库各最多 12 张；素材表按设备身份隔离，重复系统资产 ID 去重，顶部菜单增加多选删除。
+- 被日记引用时复制原文件到独立日记目录；日记保存前先创建副本并在保存后幂等补齐，素材删除前检查已保存引用副本，hydration 用日记副本 URL 替换素材 URL。素材页显示云端内容地址，不继续依赖本地设备 URI。
+- `PHOTO_ASSET_STORAGE_DIR` 支持部署路径，默认本地 `backend/var/photo-assets` 已忽略；生产/部署须挂载持久卷，磁盘代码本身不能证明容器重建后留存。
+- 后续收紧：删除前按每篇日记与照片 ID 的组合确认副本，避免一篇日记已有副本掩盖另一篇缺失；日记照片副本元数据登记加入日记保存事务，失败时回滚新复制文件。重复引用同一素材时，各篇日记仍保存独立文件，客户端通过设备隔离的稳定照片副本 URL 读取。首次云端列表同步会检查本地素材变更版本，避免迟到响应覆盖已完成上传或删除。
+- 上传照片面板的提交按钮固定在 BottomSheet 底部，设备相册网格独立滚动；保留原按钮样式及网格尺寸间距。
+- 修正素材上传选择与一键生成选图不一致：此前素材面板只读取“全部照片”首 36 张且无相册切换；现已使用共享本地相册目录、相册分页和 `Photo` 组件，切换相册时保留多选状态。
+- migration 应用前的验证：相册/素材页面、PhotoLibrary、API/Store 回归 6 suites / 34 tests，后端照片服务与 controller 最近验证 2 suites / 7 tests，root typecheck、backend build、`git diff --check` 通过。当时未运行 migration、真实 HTTP multipart、隔离 MySQL、iOS 实机或重启验收；不新增完整 CASE passed，MAT-001 保持进行中。
+- 故障闭环进展：模拟器此前 `POST /photos/materials` 返回 500 `storage_failed`，只读确认本地 `ai_diary` 缺少 `MaterialPhoto`、`MaterialPhotoQuota`、`DiaryPhotoCopy`；已按用户确认应用 `20261023100000_persistent_photo_assets`，migration status 为 up to date，三表存在。原 9 张照片选择状态已消失，未擅自重新上传其他个人照片；实际 HTTP multipart/iOS 上传仍待用户重新选图验证。
+
+## DEV-29 日记搜索、照片墙与素材容量（2026-10-23）
+
+- 搜索已按用户确认改为匹配日记标题、副标题、地点、摘要、日期、同行者/人物及正文、引用、图片说明；命中日记后，按日记引用 ID 或素材 `sourceAssetId` 返回照片，不从照片标题/地点、GPS/EXIF 或图像识别中推断。
+- 主素材页只展示前 9 张，展开进入 `/library/wall` 并保留搜索词；照片墙显示完整匹配集合。素材页无导航历史时返回首页，照片墙无历史时回素材页。
+- 配额拆分为单次上传 12 张、素材库总量 100 张，覆盖上传面板、Store、客户端 API 和后端磁盘服务；后端服务回归已分别验证单次 13 张拒绝及总量第 101 张拒绝。
+- 定向验证：素材搜索/照片墙/上传删除及 Store 配额 5 suites / 20 tests，后端照片服务 1 suite / 6 tests，root typecheck 与 backend build 通过；本轮未执行完整 Jest、MySQL 并发压力、真实 multipart/iOS 上传或持久卷重启验收。先前返回按钮 `GO_BACK` 复现路径已有无历史时回首页回归覆盖。
+
+## DEV-30 MAT-005 Seedream 接入、生成 UX 与保存相册（2026-10-23；本节记录当日状态，后续以 DEV-51/52 为准）
+
+- 服务端新增 Ark Seedream image provider 和设备身份保护的 `POST /api/photos/materials/ai`。密钥只从 backend 环境读取；provider 请求 Base64 响应，限制最大图片体积、校验图片签名，保存为持久素材后才返回鉴权内容 URL。按设备/request ID 复用已完成资产并合并同进程相同请求；同 request ID 不同描述拒绝。单次模型等待上限 240 秒，断连可 abort。
+- 新增生成素材 provenance 字段及唯一索引 migration `20261023180000_generated_material_provenance`。当日记录时该 migration 尚未应用；后续按 DEV-43 记录已随本地 `migrate deploy` 应用。
+- 正式素材页已接入 HTTP provider，不再将 `photo-9` 示例当成生成成功。页面提交时锁定描述、显示旋转加载、阻止重复提交，支持取消；失败保留输入并可重试；仅成功持久化的 provider 资产可进预览，并提供保存到系统相册、用于日记及用于明信片入口。
+- 取消会 abort 在途模型请求，并在模型返回后、资产保存前检查 signal；若取消发生在检查之后的磁盘/数据库保存区间，服务端可能仍留下该任务素材。Q-002 尚未确定正式取消语义，CASE-MAT-005-006 继续待决策。
+- 保存相册通过带设备身份头的后端内容下载至临时缓存，再使用 `expo-media-library/legacy` 写入系统相册并清理临时文件；Expo 插件与 iOS plist 已增加写入用途说明。保存权限尚未通过重建原生包的 iOS 实机/模拟器测试。生产仍需持久卷承载 `PHOTO_ASSET_STORAGE_DIR`。
+- 验证：页面交互 1 suite / 2 tests；客户端 HTTP provider/保存服务 2 suites / 4 tests；后端 Ark provider、生图 service/controller、PhotoAssetService 4 suites / 17 tests；backend build、root typecheck、client secret-boundary 3 tests 通过。UI 测试期间修复测试事件同步：等待受控输入提交后再调用异步 handler，最终运行无失败且无 act 警告。
+- 当日未配置模型 endpoint、未执行任何真实/可能计费模型请求；未验证真实图片质量、provenance migration、持久卷重启或设备系统相册落盘。后续模型与 Key 来源见 DEV-51；CASE-MAT-005-001/002/003/005 状态仍未执行；CASE-MAT-005-004/006/007/008 仍待决策。当前自动化证据不提升正式验收通过数。

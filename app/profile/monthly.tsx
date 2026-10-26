@@ -7,9 +7,9 @@ import { TopBar } from '../../src/components/layout/top-bar';
 import { Button } from '../../src/components/common/button';
 import { EmptyResult, supportStyles as u } from '../../src/components/common/support-ui';
 import { getHistoryGroups, useAppStore } from '../../src/store/use-app-store';
-import { mockPhotos } from '../../src/mocks/photos';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
+import { Photo } from '../../src/components/diary/photo';
 
 const covers = [art.bookOrange, art.bookBlue, art.bookGreen, art.bookPink];
 const coverColors = ['#ffa132', '#84c5e6', '#b5ce75', '#eabfc1'];
@@ -43,7 +43,7 @@ export default function MonthlyScreen() {
     }
     lastHandledExportRequestId.current = monthlyExport.requestId;
     if (monthlyExport.status === 'succeeded' && monthlyExport.result) {
-      Alert.alert('月度装订演示', monthlyExport.result.previewMessage);
+      Alert.alert('导出已完成', monthlyExport.result.previewMessage);
       return;
     }
     if (monthlyExport.status === 'cancelled') {
@@ -114,7 +114,7 @@ export default function MonthlyScreen() {
                 router.push(`/diary/${id}`);
               }}
             >
-              <Image source={mockPhotos.find(p => p.id === diary.coverPhotoId)?.image ?? art.temple} style={s.diaryImage} />
+              <Photo id={diary.coverPhotoId} diaryId={diary.id} style={s.diaryImage} />
               <View style={s.diaryMeta}>
                 <Text style={u.body}>{diary.title}</Text>
                 <Text style={u.muted}>{diary.date}</Text>

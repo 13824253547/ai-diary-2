@@ -1,13 +1,16 @@
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 
 const requiredConfirmation = '--confirm-current-schema-is-final';
-const migrationNames = [
-  '20261015000000_initial_schema',
-  '20261015001000_diary_content_snapshot',
-];
 const backendRoot = path.resolve(__dirname, '..');
+const migrationNames = fs.readdirSync(path.join(backendRoot, 'prisma', 'migrations'), {
+  withFileTypes: true,
+})
+  .filter(entry => entry.isDirectory())
+  .map(entry => entry.name)
+  .sort();
 const prismaCliPath = require.resolve('prisma/build/index.js');
 
 function runPrisma(args: string[]) {

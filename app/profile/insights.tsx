@@ -15,7 +15,7 @@ export default function InsightsEntry() {
       <Image source={art.mascot} resizeMode="contain" style={s.mascot} />
       <View style={s.heroCopy}>
         <Text style={s.title}>小橘眼中的你</Text>
-        <Text style={s.subtitle}>{stats.diaries} 篇日记 · 12 个记忆锚点</Text>
+        <Text style={s.subtitle}>{stats.diaries} 篇日记</Text>
       </View>
       <Pressable accessibilityRole="button" accessibilityLabel="返回我的" onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/profile')} style={s.back}>
         <Ionicons name="chevron-back" size={23} color="#68513B" />
@@ -23,7 +23,7 @@ export default function InsightsEntry() {
     </View>} contentStyle={s.screen}>
     <GrowthArtwork kind="tree" width={contentWidth} onLabelPress={({ id }) => router.push({ pathname: '/profile/anchors', params: { tag: id } })} onFlowerPress={() => router.push('/profile/flowers')} />
     <Pressable accessibilityRole="button" accessibilityLabel="查看记忆花朵" onPress={() => router.push('/profile/flowers')} style={({ pressed }) => [s.grow, pressed && { opacity: 0.75 }]}>
-      <Ionicons name="leaf" size={17} color="#88B64E" /><Text style={s.growText}>再长 3 片叶子就会开花啦</Text>
+      <Ionicons name="leaf" size={17} color="#88B64E" /><Text style={s.growText}>成长记录将根据真实回忆更新</Text>
     </Pressable>
   </GrowthScreen>;
 }

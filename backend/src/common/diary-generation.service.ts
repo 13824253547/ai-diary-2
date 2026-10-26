@@ -1,4 +1,19 @@
 import { Injectable } from '@nestjs/common';
+import {
+  buildFullDiaryPhotoLabel,
+  buildFullDiarySystemPrompt,
+  buildFullDiaryUserPrompt,
+  buildRewriteSystemPrompt,
+  buildRewriteUserPrompt,
+} from './diary-prompt-templates';
+import {
+  classifyDiaryGenerationInput,
+  classifyDiaryGenerationOutput,
+  getDiaryGenerationPolicyMessage,
+} from './diary-generation-policy';
+export type GenerationProgressReporter = (
+  milestoneId: 'provider-submitted' | 'provider-response-received' | 'result-validated',
+) => void | Promise<void>;
 
 export type GenerationInputSnapshot = {
   draftId: string;
@@ -8,6 +23,19 @@ export type GenerationInputSnapshot = {
   selectedPhotoIds: string[];
   privacy: string;
   sourceDiaryId?: string;
+};
+
+export type GenerationPhotoInput = {
+  photoId: string;
+  mimeType: string;
+  base64: string;
+  date?: string;
+};
+
+export type RewriteContextBlock = {
+  id: string;
+  type: 'text' | 'quote';
+  content: string;
 };
 
 export type GenerationBlockRecord =
@@ -43,6 +71,7 @@ export type RewriteInputSnapshot = {
   content: string;
   selectedPhotoIds: string[];
   photoIds?: string[];
+  contextBlocks?: RewriteContextBlock[];
 };
 
 export type RewriteResultRecord = {
@@ -96,6 +125,15 @@ function requireProviderString(value: unknown, field: string) {
     throw new Error(`provider result is missing ${field}`);
   }
   return value.trim();
+}
+
+function resolveGenerationDate() {
+  const now = new Date();
+  return [
+    String(now.getFullYear()).padStart(4, '0'),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+  ].join('.');
 }
 
 function stripMarkdownFence(value: string) {
@@ -171,11 +209,6 @@ function normalizePeople(value: unknown, selectedPhotoIds: string[]) {
   return people.length ? people : undefined;
 }
 
-function normalizeRewritePhotoIds(value: unknown, selectedPhotoIds: string[]) {
-  const normalized = normalizePhotoIds(value, selectedPhotoIds, 'rewrite photoIds');
-  return normalized.length ? normalized : undefined;
-}
-
 function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
   if (!Array.isArray(value)) throw new Error('provider blocks must be an array');
   const blocks = value
@@ -183,36 +216,26 @@ function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
       if (!isRecord(block)) {
         throw new Error('provider blocks contain invalid entries');
       }
-      if (typeof block.type !== 'string' || typeof block.id !== 'string') {
-        throw new Error('provider blocks contain invalid identifiers');
-      }
-      if (block.type === 'text') {
+      // Full generation accepts text blocks only; photo binding below validates this fallback.
+      const blockType = block.type === undefined ? 'text' : block.type;
+      if (typeof blockType !== 'string') throw new Error('provider block type is invalid');
+      const id = typeof block.id === 'string' ? block.id : '';
+      if (blockType === 'text') {
         if (typeof block.content !== 'string' || !block.content.trim()) {
           throw new Error('text block content is missing');
         }
         return {
-          id: block.id,
+          id,
           type: 'text' as const,
           title: block.title === undefined ? undefined : requireProviderString(block.title, 'text block title'),
           content: block.content,
           photoIds: normalizePhotoIds(block.photoIds, input.selectedPhotoIds, 'text block photoIds'),
         };
       }
-      if (block.type === 'quote') {
-        if (typeof block.content !== 'string' || !block.content.trim()) {
-          throw new Error('quote block content is missing');
-        }
-        return {
-          id: block.id,
-          type: 'quote' as const,
-          content: block.content,
-          photoIds: normalizePhotoIds(block.photoIds, input.selectedPhotoIds, 'quote block photoIds'),
-          relatedBlockId: block.relatedBlockId === undefined
-            ? undefined
-            : requireProviderString(block.relatedBlockId, 'quote block relatedBlockId'),
-        };
+      if (blockType === 'quote') {
+        throw new Error('provider result must not contain standalone quote blocks');
       }
-      if (block.type === 'photo') {
+      if (blockType === 'photo') {
         if (
           typeof block.photoId !== 'string'
           || !block.photoId.trim()
@@ -225,7 +248,7 @@ function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
           throw new Error('photo block references a photo outside the selected set');
         }
         return {
-          id: block.id,
+          id,
           type: 'photo' as const,
           photoId: block.photoId,
           caption: block.caption,
@@ -234,14 +257,23 @@ function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
             : requireProviderString(block.relatedBlockId, 'photo block relatedBlockId'),
         };
       }
-      throw new Error(`unsupported generation block type: ${block.type}`);
+      throw new Error(`unsupported generation block type: ${blockType}`);
     });
 
   if (!blocks.length) {
     throw new Error('provider did not return any generation blocks');
   }
-  if (!blocks.some(block => block.type === 'text')) {
-    throw new Error('provider result must contain at least one text block');
+  const textBlocks = blocks.filter(block => block.type === 'text');
+  if (textBlocks.length !== input.selectedPhotoIds.length) {
+    throw new Error('provider result must contain exactly one text block per selected photo');
+  }
+  textBlocks.forEach((block, index) => {
+    if (block.type !== 'text' || block.photoIds.length !== 1 || block.photoIds[0] !== input.selectedPhotoIds[index]) {
+      throw new Error('provider text blocks must reference photos in selected order, exactly one per block');
+    }
+  });
+  if (blocks.some(block => block.type === 'text' && !block.photoIds.length)) {
+    throw new Error('provider text blocks must reference one selected photo');
   }
 
   return blocks.map((block, index) => ({
@@ -250,13 +282,16 @@ function normalizeBlocks(value: unknown, input: GenerationInputSnapshot) {
   }));
 }
 
-function normalizeResult(raw: unknown, input: GenerationInputSnapshot): GenerationResultRecord {
+function normalizeResult(
+  raw: unknown,
+  input: GenerationInputSnapshot,
+  photos: GenerationPhotoInput[],
+): GenerationResultRecord {
   if (!isRecord(raw)) throw new Error('provider result must be an object');
   const title = requireProviderString(raw.title, 'title');
   const summary = requireProviderString(raw.summary, 'summary');
   const location = requireProviderString(raw.location, 'location');
-  const date = requireProviderString(raw.date, 'date');
-  const companionName = requireProviderString(raw.companionName, 'companionName');
+  const date = resolveGenerationDate();
   const coverPhotoId = requireProviderString(raw.coverPhotoId, 'coverPhotoId');
   if (!input.selectedPhotoIds.includes(coverPhotoId)) {
     throw new Error('coverPhotoId references a photo outside the selected set');
@@ -269,7 +304,13 @@ function normalizeResult(raw: unknown, input: GenerationInputSnapshot): Generati
   }
   const blocks = normalizeBlocks(raw.blocks, input);
   const posterPhotoIds = normalizePhotoIds(raw.posterPhotoIds, input.selectedPhotoIds, 'posterPhotoIds').slice(0, 2);
-  return {
+  const people = normalizePeople(raw.people, input.selectedPhotoIds);
+  const companionName = typeof raw.companionName === 'string' && raw.companionName.trim()
+    ? raw.companionName.trim()
+    : people?.some(person => person.id !== 'person-self')
+      ? '同行人'
+      : '自己';
+  const result = {
     title,
     summary,
     location,
@@ -278,29 +319,52 @@ function normalizeResult(raw: unknown, input: GenerationInputSnapshot): Generati
     coverPhotoId,
     posterPhotoIds,
     blocks,
-    people: normalizePeople(raw.people, input.selectedPhotoIds),
+    people,
   };
+  const generatedText = [
+    title,
+    summary,
+    location,
+    companionName,
+    ...blocks.flatMap(block => {
+      if (block.type === 'text') return [block.title, block.content];
+      if (block.type === 'photo') return [block.caption];
+      return [];
+    }),
+    ...(people ?? []).map(person => person.name),
+  ].filter((value): value is string => Boolean(value)).join('\n');
+  const policyCode = classifyDiaryGenerationOutput(generatedText);
+  if (policyCode) {
+    throw new DiaryGenerationProviderError(
+      'provider_failed',
+      getDiaryGenerationPolicyMessage(policyCode, 'output'),
+      false,
+    );
+  }
+  return result;
 }
 
 function normalizeRewriteResult(raw: unknown, input: RewriteInputSnapshot): RewriteResultRecord {
   if (!isRecord(raw) || typeof raw.content !== 'string' || !raw.content.trim()) {
     throw new Error('provider rewrite result is missing content');
   }
+  const content = raw.content.trim();
+  const policyCode = classifyDiaryGenerationOutput(content);
+  if (policyCode) {
+    throw new DiaryGenerationProviderError(
+      'provider_failed',
+      getDiaryGenerationPolicyMessage(policyCode, 'output'),
+      false,
+    );
+  }
   return {
     draftId: input.draftId,
     blockId: input.blockId,
     draftVersion: input.draftVersion,
     blockType: input.blockType,
-    content: raw.content.trim(),
-    photoIds: normalizeRewritePhotoIds(raw.photoIds, input.selectedPhotoIds) ?? input.photoIds,
+    content,
+    photoIds: input.photoIds,
   };
-}
-
-function buildPhotoFactsPrompt(selectedPhotoIds: string[]) {
-  return selectedPhotoIds.map(photoId => {
-    const fact = PHOTO_FACTS[photoId];
-    return `- ${photoId}: ${fact?.title ?? '旅途片段'} / ${fact?.location ?? '未知地点'} / ${fact?.date ?? '未知日期'}`;
-  }).join('\n');
 }
 
 function truncateText(value: string, maxLength: number) {
@@ -356,12 +420,18 @@ function resolveOpenAIResponseFormat() {
 function buildOpenAICompatibleChatBody(input: {
   model: string;
   temperature: number;
-  messages: Array<{ role: 'system' | 'user'; content: string }>;
+  messages: Array<{
+    role: 'system' | 'user';
+    content: string | Array<
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string; detail: 'high' } }
+    >;
+  }>;
 }) {
   const body: {
     model: string;
     temperature: number;
-    messages: Array<{ role: 'system' | 'user'; content: string }>;
+    messages: typeof input.messages;
     response_format?: { type: 'json_object' };
   } = {
     model: input.model,
@@ -373,6 +443,71 @@ function buildOpenAICompatibleChatBody(input: {
     body.response_format = responseFormat;
   }
   return body;
+}
+
+function buildImageDataUrl(photo: GenerationPhotoInput) {
+  const mimeType = photo.mimeType.trim().toLowerCase();
+  if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimeType)) {
+    throw new DiaryGenerationProviderError('provider_failed', `unsupported image MIME type: ${mimeType}`, false);
+  }
+  if (!photo.base64.trim()) {
+    throw new DiaryGenerationProviderError('provider_failed', `photo content is unavailable: ${photo.photoId}`, false);
+  }
+  return `data:${mimeType};base64,${photo.base64}`;
+}
+
+function assertGenerationPhotos(input: GenerationInputSnapshot, photos: GenerationPhotoInput[]) {
+  if (
+    photos.length !== input.selectedPhotoIds.length
+    || photos.some((photo, index) => photo.photoId !== input.selectedPhotoIds[index])
+  ) {
+    throw new DiaryGenerationProviderError(
+      'provider_failed',
+      'generation photo assets do not match the selected photo order',
+      false,
+    );
+  }
+}
+
+function resolveConfiguredProvider() {
+  const explicitDiaryProvider = process.env.DIARY_GENERATION_PROVIDER?.trim();
+  if (explicitDiaryProvider) return explicitDiaryProvider;
+
+  if (
+    process.env.PET_CHAT_PROVIDER?.trim() === 'ark-openai-compatible'
+    && process.env.PET_CHAT_BASE_URL?.trim()
+    && process.env.PET_CHAT_MODEL?.trim()
+    && process.env.PET_CHAT_API_KEY?.trim()
+  ) {
+    return 'ark-openai-compatible';
+  }
+  return process.env.AI_PROVIDER?.trim() || 'deterministic';
+}
+
+function resolveProviderConfiguration(provider: string) {
+  const ark = provider === 'ark-openai-compatible';
+  return {
+    baseUrl: (ark ? process.env.PET_CHAT_BASE_URL : process.env.AI_PROVIDER_BASE_URL)?.trim(),
+    model: (ark ? process.env.PET_CHAT_MODEL : process.env.AI_PROVIDER_MODEL)?.trim(),
+    apiKey: (ark ? process.env.PET_CHAT_API_KEY : process.env.AI_PROVIDER_API_KEY)?.trim(),
+  };
+}
+
+function providerTemperature(provider: string, task: 'generation' | 'rewrite') {
+  if (provider === 'ark-openai-compatible') {
+    return parseTemperature(
+      task === 'generation'
+        ? process.env.DIARY_GENERATION_TEMPERATURE
+        : process.env.DIARY_REWRITE_TEMPERATURE,
+      parseTemperature(process.env.PET_CHAT_TEMPERATURE, 0.7),
+    );
+  }
+  return parseTemperature(
+    task === 'generation'
+      ? process.env.AI_PROVIDER_GENERATION_TEMPERATURE
+      : process.env.AI_PROVIDER_REWRITE_TEMPERATURE,
+    0.7,
+  );
 }
 
 function isAbortError(error: unknown) {
@@ -430,37 +565,78 @@ function isRetryableStatus(status: number) {
 export class DiaryGenerationService {
   async generate(
     input: GenerationInputSnapshot,
-    options: { signal?: AbortSignal } = {},
+    options: {
+      signal?: AbortSignal;
+      photos?: GenerationPhotoInput[];
+      onProgress?: GenerationProgressReporter;
+    } = {},
   ): Promise<GenerationResultRecord> {
     if (options.signal?.aborted) {
       throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
     }
     const provider = this.resolveProvider();
     if (provider === 'deterministic') {
-      return this.buildDeterministicGenerationResult(input);
+      await options.onProgress?.('provider-submitted');
+      const result = this.buildDeterministicGenerationResult(input);
+      await options.onProgress?.('provider-response-received');
+      await options.onProgress?.('result-validated');
+      return result;
     }
-    if (provider === 'openai-compatible') {
-      return this.generateWithOpenAICompatible(input, options.signal);
+    if (provider === 'openai-compatible' || provider === 'ark-openai-compatible') {
+      assertGenerationPhotos(input, options.photos ?? []);
+      return this.generateWithOpenAICompatible(
+        input,
+        provider,
+        options.photos ?? [],
+        options.signal,
+        options.onProgress,
+      );
     }
     throw new DiaryGenerationProviderError('provider_failed', `unsupported AI provider: ${provider}`, false);
   }
 
-  async rewriteBlock(input: RewriteInputSnapshot): Promise<RewriteResultRecord> {
+  async rewriteBlock(
+    input: RewriteInputSnapshot,
+    options: { photos?: GenerationPhotoInput[] } = {},
+  ): Promise<RewriteResultRecord> {
+    const inputPolicyCode = classifyDiaryGenerationInput([
+      input.content,
+      ...(input.contextBlocks ?? []).map(block => block.content),
+    ].join('\n'));
+    if (inputPolicyCode) {
+      throw new DiaryGenerationProviderError(
+        'provider_failed',
+        getDiaryGenerationPolicyMessage(inputPolicyCode, 'input'),
+        false,
+      );
+    }
     const provider = this.resolveProvider();
     if (provider === 'deterministic') {
       return this.buildDeterministicRewriteResult(input);
     }
-    if (provider === 'openai-compatible') {
-      return this.rewriteWithOpenAICompatible(input);
+    if (provider === 'openai-compatible' || provider === 'ark-openai-compatible') {
+      const targetPhotoIds = input.photoIds ?? [];
+      const photos = options.photos ?? [];
+      if (
+        photos.length !== targetPhotoIds.length
+        || photos.some((photo, index) => photo.photoId !== targetPhotoIds[index])
+      ) {
+        throw new DiaryGenerationProviderError(
+          'provider_failed',
+          'rewrite photo assets do not match the target block references',
+          false,
+        );
+      }
+      return this.rewriteWithOpenAICompatible(input, provider, photos);
     }
     throw new DiaryGenerationProviderError('provider_failed', `unsupported AI provider: ${provider}`, false);
   }
 
   private resolveProvider() {
-    const configuredProvider = process.env.AI_PROVIDER?.trim();
+    const configuredProvider = resolveConfiguredProvider();
     if (
       process.env.NODE_ENV === 'production'
-      && (!configuredProvider || configuredProvider === 'deterministic')
+      && configuredProvider === 'deterministic'
     ) {
       throw new DiaryGenerationProviderError(
         'provider_failed',
@@ -471,64 +647,83 @@ export class DiaryGenerationService {
     return configuredProvider || 'deterministic';
   }
 
-  private async generateWithOpenAICompatible(input: GenerationInputSnapshot, signal?: AbortSignal) {
-    const baseUrl = process.env.AI_PROVIDER_BASE_URL?.trim();
-    const model = process.env.AI_PROVIDER_MODEL?.trim();
-    const apiKey = process.env.AI_PROVIDER_API_KEY?.trim();
+  private async generateWithOpenAICompatible(
+    input: GenerationInputSnapshot,
+    provider: string,
+    photos: GenerationPhotoInput[],
+    signal?: AbortSignal,
+    onProgress?: GenerationProgressReporter,
+  ) {
+    const { baseUrl, model, apiKey } = resolveProviderConfiguration(provider);
     if (!baseUrl || !model || !apiKey) {
       throw new DiaryGenerationProviderError('provider_failed', 'AI provider credentials are incomplete', false);
     }
 
-    const timeoutMs = parsePositiveInt(process.env.AI_PROVIDER_TIMEOUT_MS, 15000);
-    const temperature = parseTemperature(process.env.AI_PROVIDER_GENERATION_TEMPERATURE, 0.7);
+    const timeoutMs = Math.min(parsePositiveInt(
+      provider === 'ark-openai-compatible' ? process.env.PET_CHAT_TIMEOUT_MS : process.env.AI_PROVIDER_TIMEOUT_MS,
+      240000,
+    ), 240000);
+    const temperature = providerTemperature(provider, 'generation');
+    const requestBody = JSON.stringify(buildOpenAICompatibleChatBody({
+      model,
+      temperature,
+      messages: [
+        {
+          role: 'system',
+          content: buildFullDiarySystemPrompt(input.characterId),
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text' as const,
+              text: buildFullDiaryUserPrompt({
+                draftId: input.draftId,
+                draftVersion: input.draftVersion,
+                type: input.type,
+                selectedPhotoIds: input.selectedPhotoIds,
+              }),
+            },
+            ...photos.flatMap((photo, index) => [
+              {
+                type: 'text' as const,
+                text: buildFullDiaryPhotoLabel(photo, index, photos.length),
+              },
+              {
+                type: 'image_url' as const,
+                image_url: { url: buildImageDataUrl(photo), detail: 'high' as const },
+              },
+            ]),
+          ],
+        },
+      ],
+    }));
     const controller = new AbortController();
     const onAbort = () => controller.abort();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
     if (signal?.aborted) {
-      clearTimeout(timeout);
       throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
     }
     signal?.addEventListener('abort', onAbort, { once: true });
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      const responsePromise = fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(buildOpenAICompatibleChatBody({
-          model,
-          temperature,
-          messages: [
-            {
-              role: 'system',
-              content: [
-                '你是一个中文旅行日记整理助手。',
-                '请只输出 JSON，不要输出解释文字。',
-                '必须返回 title、summary、location、date、companionName、coverPhotoId、posterPhotoIds、blocks、people 字段。',
-                'blocks 至少包含 1 个 text 块。coverPhotoId、posterPhotoIds、blocks 和 people 中的所有照片引用都必须来自输入的 selectedPhotoIds。',
-              ].join('\n'),
-            },
-            {
-              role: 'user',
-              content: [
-                `draftId: ${input.draftId}`,
-                `draftVersion: ${input.draftVersion}`,
-                `type: ${input.type}`,
-                `characterId: ${input.characterId}`,
-                `selectedPhotoIds: ${input.selectedPhotoIds.join(', ')}`,
-                '可用照片事实：',
-                buildPhotoFactsPrompt(input.selectedPhotoIds),
-                '请生成适合移动端日记编辑的结构化结果，语言自然，不要逐字模仿示例。',
-              ].join('\n'),
-            },
-          ],
-        })),
+        body: requestBody,
         signal: controller.signal,
       });
+      try {
+        await onProgress?.('provider-submitted');
+      } catch (error) {
+        controller.abort();
+        await responsePromise.catch(() => undefined);
+        throw error;
+      }
+      const response = await responsePromise;
       if (signal?.aborted) {
         throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
       }
@@ -545,8 +740,11 @@ export class DiaryGenerationService {
       if (signal?.aborted) {
         throw new DiaryGenerationProviderError('cancelled', 'generation was cancelled', false);
       }
+      await onProgress?.('provider-response-received');
       const parsed = parseJsonObject(extractTextFromChatCompletion(json));
-      return normalizeResult(parsed, input);
+      const result = normalizeResult(parsed, input, photos);
+      await onProgress?.('result-validated');
+      return result;
     } catch (error) {
       if (error instanceof DiaryGenerationProviderError) throw error;
       if (signal?.aborted) {
@@ -568,19 +766,61 @@ export class DiaryGenerationService {
     }
   }
 
-  private async rewriteWithOpenAICompatible(input: RewriteInputSnapshot) {
-    const baseUrl = process.env.AI_PROVIDER_BASE_URL?.trim();
-    const model = process.env.AI_PROVIDER_MODEL?.trim();
-    const apiKey = process.env.AI_PROVIDER_API_KEY?.trim();
+  private async rewriteWithOpenAICompatible(
+    input: RewriteInputSnapshot,
+    provider: string,
+    photos: GenerationPhotoInput[],
+  ) {
+    const { baseUrl, model, apiKey } = resolveProviderConfiguration(provider);
     if (!baseUrl || !model || !apiKey) {
       throw new DiaryGenerationProviderError('provider_failed', 'AI provider credentials are incomplete', false);
     }
 
-    const timeoutMs = parsePositiveInt(process.env.AI_PROVIDER_TIMEOUT_MS, 15000);
-    const temperature = parseTemperature(process.env.AI_PROVIDER_REWRITE_TEMPERATURE, 0.7);
+    const timeoutMs = Math.min(parsePositiveInt(
+      provider === 'ark-openai-compatible' ? process.env.PET_CHAT_TIMEOUT_MS : process.env.AI_PROVIDER_TIMEOUT_MS,
+      240000,
+    ), 240000);
+    const temperature = providerTemperature(provider, 'rewrite');
+    const scopedPhotoIds = input.photoIds ?? [];
+    const requestBody = JSON.stringify(buildOpenAICompatibleChatBody({
+      model,
+      temperature,
+      messages: [
+        {
+          role: 'system',
+          content: buildRewriteSystemPrompt(input.characterId, input.blockType),
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text' as const,
+              text: buildRewriteUserPrompt({
+                ...input,
+                photoIds: scopedPhotoIds,
+                contextBlocks: input.contextBlocks ?? [],
+                photoFacts: photos.map(photo => ({
+                  photoId: photo.photoId,
+                  date: photo.date,
+                })),
+              }),
+            },
+            ...photos.flatMap(photo => [
+              {
+                type: 'text' as const,
+                text: `目标段落照片 photoId=${photo.photoId}`,
+              },
+              {
+                type: 'image_url' as const,
+                image_url: { url: buildImageDataUrl(photo), detail: 'high' as const },
+              },
+            ]),
+          ],
+        },
+      ],
+    }));
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const scopedPhotoIds = input.photoIds?.length ? input.photoIds : input.selectedPhotoIds.slice(0, 2);
 
     try {
       const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -589,36 +829,7 @@ export class DiaryGenerationService {
           'content-type': 'application/json',
           authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(buildOpenAICompatibleChatBody({
-          model,
-          temperature,
-          messages: [
-            {
-              role: 'system',
-              content: [
-                '你是一个中文旅行日记改写助手。',
-                '请只输出 JSON，不要输出解释文字。',
-                '必须返回 content 字段；如需返回 photoIds，必须只使用输入中允许的 photoIds。',
-                '只改写当前目标段落，不得扩写其他段落或描述未提供的照片。',
-              ].join('\n'),
-            },
-            {
-              role: 'user',
-              content: [
-                `draftId: ${input.draftId}`,
-                `blockId: ${input.blockId}`,
-                `draftVersion: ${input.draftVersion}`,
-                `characterId: ${input.characterId}`,
-                `blockType: ${input.blockType}`,
-                `allowedPhotoIds: ${(scopedPhotoIds.length ? scopedPhotoIds : input.selectedPhotoIds).join(', ')}`,
-                '可用照片事实：',
-                buildPhotoFactsPrompt(scopedPhotoIds.length ? scopedPhotoIds : input.selectedPhotoIds),
-                `原文：${input.content}`,
-                '请把这一个目标段落改写成更自然、仍可继续编辑的中文文本，保留原意，不要输出标题或多段结构。',
-              ].join('\n'),
-            },
-          ],
-        })),
+        body: requestBody,
         signal: controller.signal,
       });
 
@@ -632,10 +843,7 @@ export class DiaryGenerationService {
 
       const json = await response.json() as unknown;
       const parsed = parseJsonObject(extractTextFromChatCompletion(json));
-      return normalizeRewriteResult(parsed, {
-        ...input,
-        photoIds: scopedPhotoIds.length ? scopedPhotoIds : undefined,
-      });
+      return normalizeRewriteResult(parsed, input);
     } catch (error) {
       if (error instanceof DiaryGenerationProviderError) throw error;
       if (isAbortError(error)) {
@@ -665,52 +873,34 @@ export class DiaryGenerationService {
       .slice(0, 2)
       .join(' / ') || primaryFact.location;
     const date = PHOTO_FACTS[coverPhotoId]?.date ?? primaryFact.date;
-    const chunks = [selectedPhotoIds.slice(0, 4), selectedPhotoIds.slice(4, 8), selectedPhotoIds.slice(8)];
     const opening = input.characterId === 'character-green'
       ? `把 ${location} 的风景慢慢写下来，${companionName === '同行人' ? '和同行人' : '和自己'}一起走过的画面，终于被认真地留住了。`
       : input.characterId === 'character-brown'
         ? `${location} 的光线很轻，照片里的节奏也很慢。把这一天拆成几段，再重新拼成一页完整的回忆。`
         : `从 ${primaryFact.title} 开始，这次旅程的情绪慢慢展开。照片里的风、街道和停留过的地方，都值得写进今天的日记里。`;
-    const blocks: GenerationBlockRecord[] = [
-      {
-        id: `${input.draftId}-remote-p1`,
+    const textBlocks: GenerationBlockRecord[] = selectedPhotoIds.map((photoId, index) => {
+      const fact = PHOTO_FACTS[photoId] ?? { title: '旅途片段', location: '路上', date };
+      const content = index === 0
+        ? `${opening} ${fact.title}为这趟旅程打开了一个具体的入口。`
+        : index === selectedPhotoIds.length - 1
+          ? `沿着前面留下的线索，来到${fact.location}。${fact.title}把这一天的记忆轻轻收住。`
+          : `顺着刚才的行程继续往前，${fact.title}让${fact.location}的风景多了一层新的细节。`;
+      return {
+        id: `${input.draftId}-remote-p${index + 1}`,
         type: 'text',
-        title: '把旅程重新展开',
-        content: opening,
-        photoIds: chunks[0],
-      },
-      {
-        id: `${input.draftId}-remote-p2`,
-        type: 'text',
-        title: '照片里的细节',
-        content: `从 ${chunks[1][0] ? (PHOTO_FACTS[chunks[1][0]]?.title ?? '第二段风景') : '一路上的片段'} 到 ${chunks[1][1] ? (PHOTO_FACTS[chunks[1][1]]?.title ?? '另一个瞬间') : '同行的脚步'}，每张照片都在补完这一天的层次。`,
-        photoIds: chunks[1],
-      },
-      {
-        id: `${input.draftId}-remote-p3`,
-        type: 'text',
-        title: '留给以后再看的心情',
-        content: '等回头再翻开这一页时，还是能重新想起当时的温度、路线和停下来的理由。',
-        photoIds: chunks[2],
-      },
-      {
-        id: `${input.draftId}-remote-quote`,
-        type: 'quote',
-        content: '回忆不是把照片排好，而是把当时的心情重新接回来。',
-        relatedBlockId: `${input.draftId}-remote-p3`,
-      },
-    ];
-    chunks.forEach((photos, index) => {
-      if (photos[0]) {
-        blocks.push({
-          id: `${input.draftId}-remote-photo-${index + 1}`,
-          type: 'photo',
-          photoId: photos[0],
-          caption: PHOTO_FACTS[photos[0]]?.title ?? '这一刻值得被留住',
-          relatedBlockId: `${input.draftId}-remote-p${index + 1}`,
-        });
-      }
+        title: fact.title,
+        content,
+        photoIds: [photoId],
+      };
     });
+    const photoBlocks: GenerationBlockRecord[] = selectedPhotoIds.map((photoId, index) => ({
+      id: `${input.draftId}-remote-photo-${index + 1}`,
+      type: 'photo',
+      photoId,
+      caption: PHOTO_FACTS[photoId]?.title ?? '这一刻值得被留住',
+      relatedBlockId: `${input.draftId}-remote-p${index + 1}`,
+    }));
+    const blocks = textBlocks.flatMap((textBlock, index) => [textBlock, photoBlocks[index]]);
 
     return {
       title: `${primaryFact.title}，把旅程写成一页`,
@@ -726,7 +916,7 @@ export class DiaryGenerationService {
   }
 
   private buildDeterministicRewriteResult(input: RewriteInputSnapshot): RewriteResultRecord {
-    const scopedPhotoIds = input.photoIds?.length ? input.photoIds : input.selectedPhotoIds.slice(0, 2);
+    const scopedPhotoIds = input.photoIds ?? [];
     const scopedFacts = scopedPhotoIds
       .map(photoId => PHOTO_FACTS[photoId])
       .filter((fact): fact is { title: string; location: string; date: string } => Boolean(fact));
@@ -753,7 +943,7 @@ export class DiaryGenerationService {
       draftVersion: input.draftVersion,
       blockType: input.blockType,
       content: rewritten,
-      photoIds: scopedPhotoIds.length ? scopedPhotoIds : undefined,
+      photoIds: input.photoIds,
     };
   }
 

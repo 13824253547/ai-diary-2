@@ -78,6 +78,13 @@ function resetAppStore() {
   useAppStore.setState(next as AppStore, true);
 }
 
+async function advanceVisiblePhase() {
+  await act(async () => {
+    jest.advanceTimersByTime(3_000);
+    await Promise.resolve();
+  });
+}
+
 describe('Generating screen', () => {
   const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   const createDeferred = <T,>() => {
@@ -98,7 +105,326 @@ describe('Generating screen', () => {
     alertSpy.mockRestore();
   });
 
-  test('failed generation offers retry and the retried round can finish successfully', async () => {
+  test('smoothly shows the backend target, active work step, and selected photo count', async () => {
+    const originalRefreshDraftGeneration = useAppStore.getState().refreshDraftGeneration;
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1', 'photo-2']);
+    useAppStore.setState(state => ({
+      drafts: {
+        ...state.drafts,
+        [draftId]: {
+          ...state.drafts[draftId],
+          people: [],
+          diary: { ...state.drafts[draftId].diary, people: [], status: 'generating' },
+          generation: {
+            round: 1,
+            progress: 15,
+            status: 'running',
+            remoteJobId: 'job-progress-phases',
+            remoteStage: 'analyzing-photos',
+            progressMilestones: [
+              { milestoneId: 'queued', stage: 'queued', progressPercent: 0, reachedAt: 1, attemptCount: 0 },
+              { milestoneId: 'photo-processing-started', stage: 'analyzing-photos', progressPercent: 0, reachedAt: 2, attemptCount: 1 },
+              { milestoneId: 'photos-ready', stage: 'analyzing-photos', progressPercent: 15, reachedAt: 3, attemptCount: 1 },
+            ],
+          },
+        },
+      },
+      refreshDraftGeneration: jest.fn(async () => undefined),
+    }));
+
+    const screen = await render(<GeneratingScreen />);
+    try {
+      expect(screen.queryByText('18%')).toBeNull();
+      await waitFor(() => {
+        const now = screen.getByRole('progressbar').props.accessibilityValue.now as number;
+        expect(now).toBeGreaterThan(0);
+        expect(now).toBeLessThan(15);
+      });
+      await waitFor(() => expect(screen.getByText('15%')).toBeTruthy(), { timeout: 2_500 });
+      expect(screen.getByLabelText('正在检查照片素材进行中')).toBeTruthy();
+      expect(screen.getByText('4 张照片 · 让回忆有温度')).toBeTruthy();
+      expect(screen.queryByText(/地点/)).toBeNull();
+    } finally {
+      screen.unmount();
+      useAppStore.setState({ refreshDraftGeneration: originalRefreshDraftGeneration });
+    }
+  });
+
+  test('slowly advances while waiting but stays below the next backend milestone', async () => {
+    jest.useFakeTimers();
+    const originalStartGeneration = useAppStore.getState().startGeneration;
+    const originalRefreshDraftGeneration = useAppStore.getState().refreshDraftGeneration;
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1']);
+    const milestones = [
+      { milestoneId: 'queued', stage: 'queued', progressPercent: 0, reachedAt: 1, attemptCount: 0 },
+      { milestoneId: 'photo-processing-started', stage: 'analyzing-photos', progressPercent: 0, reachedAt: 2, attemptCount: 1 },
+      { milestoneId: 'photos-ready', stage: 'analyzing-photos', progressPercent: 15, reachedAt: 3, attemptCount: 1 },
+      { milestoneId: 'provider-submitted', stage: 'drafting', progressPercent: 25, reachedAt: 4, attemptCount: 1 },
+    ] as const;
+    const pendingRefresh = createDeferred<void>();
+    useAppStore.setState(state => ({
+      drafts: {
+        ...state.drafts,
+        [draftId]: {
+          ...state.drafts[draftId],
+          diary: { ...state.drafts[draftId].diary, status: 'generating' },
+          generation: {
+            round: 1,
+            progress: 25,
+            status: 'running',
+            remoteJobId: 'job-progress-waiting',
+            remoteStage: 'drafting',
+            progressMilestones: [...milestones],
+          },
+        },
+      },
+      startGeneration: jest.fn(() => 1),
+      refreshDraftGeneration: jest.fn(() => pendingRefresh.promise),
+    }));
+
+    let screen: Awaited<ReturnType<typeof render>> | undefined;
+    try {
+      await act(async () => {
+        screen = await render(<GeneratingScreen />);
+      });
+
+      await act(async () => {
+        jest.advanceTimersByTime(60_000);
+        await Promise.resolve();
+      });
+      const movingProgress = screen?.getByRole('progressbar').props.accessibilityValue.now as number;
+      expect(movingProgress).toBeGreaterThanOrEqual(55);
+      expect(movingProgress).toBeLessThan(80);
+
+      await act(async () => {
+        jest.advanceTimersByTime(360_000);
+        await Promise.resolve();
+      });
+      const cappedProgress = screen?.getByRole('progressbar').props.accessibilityValue.now as number;
+      expect(cappedProgress).toBe(79);
+    } finally {
+      screen?.unmount();
+      useAppStore.setState({
+        startGeneration: originalStartGeneration,
+        refreshDraftGeneration: originalRefreshDraftGeneration,
+      });
+      jest.useRealTimers();
+    }
+  });
+
+  test('holds each real work phase for three seconds before navigating on success', async () => {
+    jest.useFakeTimers();
+    const originalRefreshDraftGeneration = useAppStore.getState().refreshDraftGeneration;
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1']);
+    const milestones = [
+      { milestoneId: 'queued', stage: 'queued', progressPercent: 0, reachedAt: 1, attemptCount: 0 },
+      { milestoneId: 'photo-processing-started', stage: 'analyzing-photos', progressPercent: 0, reachedAt: 2, attemptCount: 1 },
+      { milestoneId: 'photos-ready', stage: 'analyzing-photos', progressPercent: 15, reachedAt: 3, attemptCount: 1 },
+      { milestoneId: 'provider-submitted', stage: 'drafting', progressPercent: 25, reachedAt: 4, attemptCount: 1 },
+      { milestoneId: 'provider-response-received', stage: 'structuring', progressPercent: 80, reachedAt: 5, attemptCount: 1 },
+      { milestoneId: 'result-validated', stage: 'structuring', progressPercent: 95, reachedAt: 6, attemptCount: 1 },
+    ] as const;
+    useAppStore.setState(state => ({
+      drafts: {
+        ...state.drafts,
+        [draftId]: {
+          ...state.drafts[draftId],
+          people: [],
+          diary: { ...state.drafts[draftId].diary, people: [], status: 'generating' },
+          generation: {
+            round: 1,
+            progress: 95,
+            status: 'running',
+            remoteJobId: 'job-phase-minimum',
+            remoteStage: 'structuring',
+            progressMilestones: [...milestones],
+          },
+        },
+      },
+      refreshDraftGeneration: jest.fn(async () => {
+        useAppStore.setState(state => ({
+          drafts: {
+            ...state.drafts,
+            [draftId]: {
+              ...state.drafts[draftId],
+              generation: {
+                ...state.drafts[draftId].generation,
+                progress: 100,
+                status: 'complete',
+                remoteStage: 'completed',
+                progressMilestones: [
+                  ...milestones,
+                  { milestoneId: 'completed', stage: 'completed', progressPercent: 100, reachedAt: 7, attemptCount: 1 },
+                ],
+              },
+            },
+          },
+        }));
+      }),
+    }));
+
+    const screen = await render(<GeneratingScreen />);
+    try {
+      await act(async () => Promise.resolve());
+      expect(screen.getByLabelText('正在检查照片素材进行中')).toBeTruthy();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+
+      await act(async () => { jest.advanceTimersByTime(2_999); });
+      expect(screen.getByLabelText('正在检查照片素材进行中')).toBeTruthy();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+
+      await act(async () => { jest.advanceTimersByTime(1); });
+      expect(screen.getByLabelText('正在等待模型创作进行中')).toBeTruthy();
+      await act(async () => { jest.advanceTimersByTime(2_999); });
+      expect(screen.getByLabelText('正在等待模型创作进行中')).toBeTruthy();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+
+      await act(async () => { jest.advanceTimersByTime(1); });
+      expect(screen.getByLabelText('正在整理并校验结果进行中')).toBeTruthy();
+      await act(async () => { jest.advanceTimersByTime(2_999); });
+      expect(screen.getByLabelText('正在整理并校验结果进行中')).toBeTruthy();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await act(async () => { jest.advanceTimersByTime(1); });
+      expect(mockRouter.replace).toHaveBeenCalledTimes(1);
+    } finally {
+      screen.unmount();
+      jest.useRealTimers();
+      useAppStore.setState({ refreshDraftGeneration: originalRefreshDraftGeneration });
+    }
+  });
+
+  test('re-entering an already completed task still presents all three phases before navigation', async () => {
+    jest.useFakeTimers();
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1']);
+    useAppStore.setState(state => ({
+      drafts: {
+        ...state.drafts,
+        [draftId]: {
+          ...state.drafts[draftId],
+          people: [],
+          diary: { ...state.drafts[draftId].diary, people: [], status: 'ready' },
+          generation: {
+            round: 1,
+            progress: 100,
+            status: 'complete',
+            remoteJobId: 'job-already-complete',
+            remoteStage: 'completed',
+            progressMilestones: [
+              { milestoneId: 'queued', stage: 'queued', progressPercent: 0, reachedAt: 1, attemptCount: 0 },
+              { milestoneId: 'photo-processing-started', stage: 'analyzing-photos', progressPercent: 0, reachedAt: 2, attemptCount: 1 },
+              { milestoneId: 'photos-ready', stage: 'analyzing-photos', progressPercent: 15, reachedAt: 3, attemptCount: 1 },
+              { milestoneId: 'provider-submitted', stage: 'drafting', progressPercent: 25, reachedAt: 4, attemptCount: 1 },
+              { milestoneId: 'provider-response-received', stage: 'structuring', progressPercent: 80, reachedAt: 5, attemptCount: 1 },
+              { milestoneId: 'result-validated', stage: 'structuring', progressPercent: 95, reachedAt: 6, attemptCount: 1 },
+              { milestoneId: 'completed', stage: 'completed', progressPercent: 100, reachedAt: 7, attemptCount: 1 },
+            ],
+          },
+        },
+      },
+    }));
+    const refreshDraftGeneration = jest.fn();
+    useAppStore.setState({ refreshDraftGeneration });
+
+    const screen = await render(<GeneratingScreen />);
+    try {
+      expect(screen.getByLabelText('正在检查照片素材进行中')).toBeTruthy();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      expect(refreshDraftGeneration).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
+      expect(screen.getByLabelText('正在等待模型创作进行中')).toBeTruthy();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
+      expect(screen.getByLabelText('正在整理并校验结果进行中')).toBeTruthy();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
+      expect(mockRouter.replace).toHaveBeenCalledTimes(1);
+    } finally {
+      screen.unmount();
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
+  });
+
+  test('retargets from the current animated value and resets only for a new generation round', async () => {
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1']);
+    useAppStore.setState(state => ({
+      drafts: {
+        ...state.drafts,
+        [draftId]: {
+          ...state.drafts[draftId],
+          diary: { ...state.drafts[draftId].diary, status: 'generating' },
+          generation: {
+            round: 1,
+            progress: 30,
+            status: 'running',
+            remoteJobId: 'job-progress-interrupt',
+            remoteStage: 'analyzing-photos',
+          },
+        },
+      },
+      refreshDraftGeneration: jest.fn(async () => undefined),
+    }));
+
+    const screen = await render(<GeneratingScreen />);
+    try {
+      await waitFor(() => {
+        const now = screen.getByRole('progressbar').props.accessibilityValue.now as number;
+        expect(now).toBeGreaterThan(0);
+        expect(now).toBeLessThan(30);
+      });
+      await act(async () => {
+        useAppStore.setState(state => ({
+          drafts: {
+            ...state.drafts,
+            [draftId]: {
+              ...state.drafts[draftId],
+              generation: {
+                ...state.drafts[draftId].generation,
+                progress: 60,
+                remoteStage: 'drafting',
+              },
+            },
+          },
+        }));
+      });
+      expect(screen.queryByText('60%')).toBeNull();
+      await waitFor(() => expect(screen.getByText('60%')).toBeTruthy(), { timeout: 2_500 });
+
+      await act(async () => {
+        useAppStore.setState(state => ({
+          drafts: {
+            ...state.drafts,
+            [draftId]: {
+              ...state.drafts[draftId],
+              generation: {
+                ...state.drafts[draftId].generation,
+                round: 2,
+                progress: 30,
+                remoteJobId: 'job-progress-retry',
+                remoteStage: 'analyzing-photos',
+              },
+            },
+          },
+        }));
+      });
+      expect(screen.queryByText('60%')).toBeNull();
+      await waitFor(() => expect(screen.getByText('30%')).toBeTruthy(), { timeout: 2_500 });
+    } finally {
+      screen.unmount();
+    }
+  });
+
+  test('failed generation can return directly to the home screen', async () => {
     const originalStartGeneration = useAppStore.getState().startGeneration;
     const originalFinishGeneration = useAppStore.getState().finishGeneration;
     const draftId = useAppStore.getState().beginCreation();
@@ -162,22 +488,16 @@ describe('Generating screen', () => {
     const [title, message, buttons] = alertSpy.mock.calls[0] ?? [];
     expect(title).toBe('生成未完成');
     expect(message).toBe('生成超时，请稍后重试。');
-    expect(buttons?.map(button => button.text ?? '')).toEqual(['返回上一页', '重新生成']);
+    expect(buttons?.map(button => button.text ?? '')).toEqual(['返回首页', '重新生成']);
 
     await act(async () => {
-      buttons?.[1]?.onPress?.();
-      await Promise.resolve();
+      buttons?.[0]?.onPress?.();
     });
 
-    await waitFor(() => {
-      expect(startGeneration).toHaveBeenCalledTimes(2);
-      expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
-      expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
-    });
+    expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/home');
+    expect(mockRouter.back).not.toHaveBeenCalled();
+    expect(startGeneration).toHaveBeenCalledTimes(1);
+    expect(refreshDraftGeneration).toHaveBeenCalledTimes(1);
   });
 
   test('generic provider failure shows the precise fallback copy and only retries after confirmation', async () => {
@@ -255,11 +575,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('generation job creation failure shows the precise startup failure copy and only retries after confirmation', async () => {
@@ -338,11 +655,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('generation job creation permission loss shows the precise startup device warning and only retries after confirmation', async () => {
@@ -421,11 +735,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('generation job creation timeout shows the precise startup timeout copy and only retries after confirmation', async () => {
@@ -504,11 +815,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('generation job creation network failure shows the precise startup network copy and only retries after confirmation', async () => {
@@ -587,11 +895,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('invalid generated structure shows the precise retry message and never navigates before retry succeeds', async () => {
@@ -669,11 +974,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('missing remote job shows the precise recovery message on the generating screen', async () => {
@@ -828,11 +1130,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('permission denied shows the device-specific warning and waits for explicit retry', async () => {
@@ -910,11 +1209,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('cancelled generation shows the precise cancel copy and only retries after confirmation', async () => {
@@ -992,11 +1288,8 @@ describe('Generating screen', () => {
       expect(startGeneration).toHaveBeenCalledTimes(2);
       expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
       expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId },
-      });
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('stage-only running generation shows fallback progress on the screen', async () => {
@@ -1014,7 +1307,7 @@ describe('Generating screen', () => {
           },
           generation: {
             round: 1,
-            progress: 0,
+            progress: 80,
             status: 'running',
             remoteStage: 'structuring',
             remoteJobId: 'job-stage-only-ui',
@@ -1032,9 +1325,9 @@ describe('Generating screen', () => {
     const screen = await render(<GeneratingScreen />);
 
     await waitFor(() => {
-      expect(screen.getByText('82%')).toBeTruthy();
-      expect(screen.getByText('正在将美好串成文字…')).toBeTruthy();
-    });
+      expect(screen.getByText('80%')).toBeTruthy();
+      expect(screen.getByText('正在整理并校验结果')).toBeTruthy();
+    }, { timeout: 2_500 });
   });
 
   test('missing generation preconditions show a clear failure instead of polling', async () => {
@@ -1057,7 +1350,7 @@ describe('Generating screen', () => {
 
     const [title, message, buttons] = alertSpy.mock.calls[0] ?? [];
     expect(title).toBe('生成未完成');
-    expect(message).toBe('当前草稿还不能生成，请返回上一页检查照片和排版师。');
+    expect(message).toBe('当前草稿还不能生成，请返回首页检查照片和排版师。');
     expect(startGeneration).toHaveBeenCalledWith(draftId);
     expect(refreshDraftGeneration).not.toHaveBeenCalled();
 
@@ -1065,8 +1358,87 @@ describe('Generating screen', () => {
       buttons?.[0]?.onPress?.();
     });
 
-    expect(mockRouter.back).toHaveBeenCalled();
-    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/home');
+    expect(mockRouter.back).not.toHaveBeenCalled();
+  });
+
+  test('waits for each status request before polling again after three seconds', async () => {
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1']);
+
+    const firstRefresh = createDeferred<void>();
+    const secondRefresh = createDeferred<void>();
+    const startGeneration = jest.fn((id: string) => {
+      useAppStore.setState(state => ({
+        drafts: {
+          ...state.drafts,
+          [id]: {
+            ...state.drafts[id],
+            diary: {
+              ...state.drafts[id].diary,
+              status: 'generating',
+            },
+            generation: {
+              round: 1,
+              progress: 0,
+              status: 'running',
+              remoteJobId: 'job-three-second-poll',
+              remoteStage: 'analyzing-photos',
+              errorMessage: undefined,
+            },
+          },
+        },
+      }));
+      return 1;
+    });
+    const refreshDraftGeneration = jest.fn()
+      .mockReturnValueOnce(firstRefresh.promise)
+      .mockReturnValueOnce(secondRefresh.promise);
+    const pauseGeneration = jest.fn();
+
+    useAppStore.setState({
+      startGeneration,
+      refreshDraftGeneration,
+      pauseGeneration,
+    });
+
+    jest.useFakeTimers();
+    let unmount: (() => void) | undefined;
+    try {
+      const screen = await render(<GeneratingScreen />);
+      unmount = screen.unmount;
+      expect(refreshDraftGeneration).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        jest.advanceTimersByTime(15_000);
+      });
+      expect(refreshDraftGeneration).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        firstRefresh.resolve();
+        await firstRefresh.promise;
+      });
+
+      await act(async () => {
+        jest.advanceTimersByTime(2_999);
+      });
+      expect(refreshDraftGeneration).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        jest.advanceTimersByTime(1);
+      });
+      expect(refreshDraftGeneration).toHaveBeenCalledTimes(2);
+
+      secondRefresh.resolve();
+      await secondRefresh.promise;
+    } finally {
+      await act(async () => {
+        unmount?.();
+      });
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   });
 
   test('leaving the generating screen pauses the active round and ignores a late success', async () => {
@@ -1088,7 +1460,7 @@ describe('Generating screen', () => {
             },
             generation: {
               round,
-              progress: 18,
+              progress: 0,
               status: 'running',
               remoteJobId: 'job-leave-late-success',
               remoteStage: 'analyzing-photos',
@@ -1153,7 +1525,7 @@ describe('Generating screen', () => {
     expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
-  test('switching from round A to round B ignores A late success and only navigates with B', async () => {
+  test('switching from round A to completed round B ignores A late success without navigating early', async () => {
     const draftA = useAppStore.getState().beginCreation();
     const draftB = useAppStore.getState().beginCreation();
     useAppStore.getState().setDraftPhotos(draftA, ['photo-11', 'photo-12', 'photo-1']);
@@ -1174,7 +1546,7 @@ describe('Generating screen', () => {
             },
             generation: {
               round,
-              progress: 18,
+              progress: 0,
               status: 'running',
               remoteJobId: `job-${id}`,
               remoteStage: 'analyzing-photos',
@@ -1240,11 +1612,9 @@ describe('Generating screen', () => {
     await waitFor(() => {
       expect(pauseGeneration).toHaveBeenCalledWith(draftA, 1);
       expect(refreshDraftGeneration).toHaveBeenCalledWith(draftB, 1);
-      expect(mockRouter.replace).toHaveBeenCalledWith({
-        pathname: '/diary/[id]/edit',
-        params: { id: 'new', draftId: draftB },
-      });
+      expect(useAppStore.getState().drafts[draftB].generation.status).toBe('complete');
     });
+    expect(mockRouter.replace).not.toHaveBeenCalled();
 
     useAppStore.setState(state => ({
       drafts: {
@@ -1276,7 +1646,7 @@ describe('Generating screen', () => {
       await Promise.resolve();
     });
 
-    expect(mockRouter.replace).toHaveBeenCalledTimes(1);
+    expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(mockRouter.replace).not.toHaveBeenCalledWith({
       pathname: '/diary/[id]/edit',
       params: { id: 'new', draftId: draftA },
@@ -1350,16 +1720,31 @@ describe('Generating screen', () => {
       refreshDraftGeneration,
     });
 
-    await render(<GeneratingScreen />);
-
-    await waitFor(() => {
+    jest.useFakeTimers();
+    const screen = await render(<GeneratingScreen />);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
       expect(mockRouter.replace).toHaveBeenCalledWith({
         pathname: '/diary/[id]/edit',
         params: { id: 'new', draftId },
       });
       expect(useAppStore.getState().drafts[draftId].savedDiaryId).toBeUndefined();
       expect(useAppStore.getState().diaries).toHaveLength(initialDiaryCount);
-    });
+    } finally {
+      screen.unmount();
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   });
 
   test('generation with detected people routes to naming and does not save a diary yet', async () => {
@@ -1445,15 +1830,30 @@ describe('Generating screen', () => {
       refreshDraftGeneration,
     });
 
-    await render(<GeneratingScreen />);
-
-    await waitFor(() => {
+    jest.useFakeTimers();
+    const screen = await render(<GeneratingScreen />);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(useAppStore.getState().drafts[draftId].generation.status).toBe('complete');
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
+      expect(mockRouter.replace).not.toHaveBeenCalled();
+      await advanceVisiblePhase();
       expect(mockRouter.replace).toHaveBeenCalledWith({
         pathname: '/companion/naming',
         params: { draftId },
       });
       expect(useAppStore.getState().drafts[draftId].savedDiaryId).toBeUndefined();
       expect(useAppStore.getState().diaries).toHaveLength(initialDiaryCount);
-    });
+    } finally {
+      screen.unmount();
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   });
 });

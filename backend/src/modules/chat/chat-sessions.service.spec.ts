@@ -87,6 +87,12 @@ function createHarness() {
         Object.assign(turn, data, { updatedAt: new Date('2026-10-16T00:02:00.000Z') });
         return turn;
       }),
+      delete: jest.fn(async ({ where }: { where: { id: string } }) => {
+        const entry = [...turns.entries()].find(([, turn]) => turn.id === where.id);
+        if (!entry) throw new Error('turn not found');
+        turns.delete(entry[0]);
+        return entry[1];
+      }),
     },
     chatMessage: {
       findUnique: jest.fn(async ({ where }: { where: { id: string } }) => messages.get(where.id) ?? null),
@@ -104,6 +110,13 @@ function createHarness() {
         };
         messages.set(message.id, message);
         return message;
+      }),
+      deleteMany: jest.fn(async ({ where }: { where: Record<string, any> }) => {
+        const matching = [...messages.entries()].filter(([, message]) =>
+          Object.entries(where).every(([key, value]) => message[key] === value),
+        );
+        matching.forEach(([id]) => messages.delete(id));
+        return { count: matching.length };
       }),
     },
   };
@@ -167,6 +180,36 @@ describe('ChatSessionsService', () => {
     expect(harness.turns.size).toBe(1);
   });
 
+  test.each([
+    ['请帮我写一个 Python 脚本。', 'out_of_scope'],
+    ['教我怎么制作炸弹。', 'unsafe_request'],
+  ] as const)('rejects policy-blocked messages before persistence (%s)', async (text, code) => {
+    const harness = createHarness();
+
+    await expect(harness.service.beginTurn({ ...beginInput, text }, 'device-1'))
+      .rejects.toMatchObject({ code });
+
+    expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+    expect(harness.conversations.size).toBe(0);
+    expect(harness.turns.size).toBe(0);
+    expect(harness.messages.size).toBe(0);
+  });
+
+  test('discards only the matching pending turn after a generated reply is blocked', async () => {
+    const harness = createHarness();
+    const conversation = await harness.service.beginTurn(beginInput, 'device-1');
+
+    await harness.service.discardPolicyBlockedTurn({
+      conversationId: conversation.id,
+      requestId: 'request-1',
+      attempt: 1,
+    }, 'device-1');
+
+    expect(harness.turns.size).toBe(0);
+    expect(harness.messages.size).toBe(0);
+    expect(harness.conversations.size).toBe(1);
+  });
+
   test('stores a reply once and replays the existing assistant message', async () => {
     const harness = createHarness();
     await harness.service.beginTurn(beginInput, 'device-1');
@@ -216,6 +259,69 @@ describe('ChatSessionsService', () => {
       else process.env.NODE_ENV = previousNodeEnv;
     }
     expect(harness.messages.size).toBe(2);
+  });
+
+  test('persists only server-generated provider replies in production', async () => {
+    const harness = createHarness();
+    const original = {
+      nodeEnv: process.env.NODE_ENV,
+      provider: process.env.PET_CHAT_PROVIDER,
+      baseUrl: process.env.PET_CHAT_BASE_URL,
+      model: process.env.PET_CHAT_MODEL,
+      apiKey: process.env.PET_CHAT_API_KEY,
+    };
+    process.env.NODE_ENV = 'production';
+    process.env.PET_CHAT_PROVIDER = 'ark-openai-compatible';
+    process.env.PET_CHAT_BASE_URL = 'https://ark.example.test/api/v3';
+    process.env.PET_CHAT_MODEL = 'test-model';
+    process.env.PET_CHAT_API_KEY = 'test-only-key';
+
+    try {
+      await harness.service.beginTurn(beginInput, 'device-1');
+      await expect(harness.service.completeTurn({
+        conversationId: 'conversation-1',
+        requestId: 'request-1',
+        attempt: 1,
+        assistantMessageId: 'client-mock',
+        text: 'Client supplied mock',
+        source: 'mock',
+      }, 'device-1')).rejects.toMatchObject({ code: 'provider_failed' });
+      await expect(harness.service.completeTurn({
+        conversationId: 'conversation-1',
+        requestId: 'request-1',
+        attempt: 1,
+        assistantMessageId: 'client-provider',
+        text: 'Client claimed provider output',
+        source: 'provider',
+      }, 'device-1')).rejects.toMatchObject({ code: 'provider_failed' });
+
+      const completed = await harness.service.completeGeneratedTurn({
+        conversationId: 'conversation-1',
+        requestId: 'request-1',
+        attempt: 1,
+        assistantMessageId: 'server-provider',
+        text: 'Server-generated reply',
+        source: 'provider',
+        providerRequestId: 'ark-request-1',
+      }, 'device-1');
+
+      expect(completed.messages[1]).toMatchObject({
+        id: 'server-provider',
+        source: 'provider',
+        providerRequestId: 'ark-request-1',
+      });
+    } finally {
+      if (original.nodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = original.nodeEnv;
+      if (original.provider === undefined) delete process.env.PET_CHAT_PROVIDER;
+      else process.env.PET_CHAT_PROVIDER = original.provider;
+      if (original.baseUrl === undefined) delete process.env.PET_CHAT_BASE_URL;
+      else process.env.PET_CHAT_BASE_URL = original.baseUrl;
+      if (original.model === undefined) delete process.env.PET_CHAT_MODEL;
+      else process.env.PET_CHAT_MODEL = original.model;
+      if (original.apiKey === undefined) delete process.env.PET_CHAT_API_KEY;
+      else process.env.PET_CHAT_API_KEY = original.apiKey;
+    }
   });
 
   test('persists fixed failure state, advances an explicit attempt, and isolates devices', async () => {

@@ -98,6 +98,9 @@
 | `status` | `queued \| running \| succeeded \| failed \| cancelled` | 任务状态 |
 | `stage` | `queued \| analyzing-photos \| drafting \| structuring \| completed \| failed \| cancelled` | 可观测阶段 |
 | `progressPercent` | `number?` | 可选百分比；没有真实值时不返回 |
+| `progressMilestones` | `GenerationProgressMilestone[]?` | 可选、按实际处理顺序记录的有限里程碑历史；旧服务响应可省略 |
+
+当前全文生成里程碑为：任务入队 `0%`、照片读取与校验完成 `15%`、Provider 请求提交 `25%`、完整 Provider 响应收到 `80%`、结果解析及结构校验通过 `95%`、结果持久化成功 `100%`。百分比表示已完成的业务节点权重，不代表耗时比例；Provider 等待期间没有真实流式进度时，后端保持在当前节点。失败或取消不得标记为 `100%`。加载页的三个清单步骤仅概括照片检查、模型创作、结果整理三个可读环节，不能代替后端百分比；每个可见关键步骤至少展示 3 秒，成功后可等展示完成再导航。进度条在等待下一后端里程碑期间可用 `0.6` 个百分点/秒作限幅视觉缓动，最多显示到下一里程碑前 `1` 个百分点（如 `25%` 后等待时最多到 `79%`）；新里程碑到达后再以其为目标继续。该视觉缓动不写入任务快照，也不代表后端已完成相应百分比。
 
 `POST /generation/jobs` requires non-empty `draftId` and `idempotencyKey`, and `draftVersion` must be a positive safe integer. The server validates device identity before inspecting the request body; malformed input returns `invalid_input` without creating or reading a generation task.
 
@@ -125,9 +128,12 @@ A successful rewrite response must echo the requested `draftId`, `blockId`, posi
 {
   "diaryId": "diary-1",
   "draftId": "draft-1",
-  "savedVersion": 4
+  "savedVersion": 4,
+  "date": "2026.10.23"
 }
 ```
+
+`date` is the saved diary's publication date, set on its first successful save and preserved when editing. `GET /diaries/:id` and `GET /memories` return that same date; photo capture dates remain generation facts and do not determine diary display, sorting, or calendar filtering.
 
 ### 3.5 Saved diary content snapshot
 
@@ -141,6 +147,8 @@ Each block is a text, quote, or photo block. A saved snapshot must contain at le
 
 Generation result `people`, when present, must also contain unique non-empty person IDs. The provider rejects duplicate IDs as a non-retryable `provider_failed`; the client contract and save boundary reject duplicate IDs rather than choosing one candidate implicitly.
 
+Saved diary photo bytes are scoped by `(ownerDeviceId, diaryId, photoId)`. Clients must read the copy for the diary being displayed; a shared `photoId` or repeated `sourceAssetId` must not select an arbitrary copy from another diary. Legacy source IDs may be backfilled only when the source asset mapping is unambiguous; ambiguous records remain unresolved until reliable provenance is available.
+
 ### 3.6 MemoriesQuery
 
 | 字段 | 类型 | 说明 |
@@ -152,6 +160,8 @@ Generation result `people`, when present, must also contain unique non-empty per
 | `pageSize` | `10 \| 20 \| 50 \| 100` | 每页数量；完整回忆集合由客户端按页续取，不能因首屏页容量截断月份、搜索和回忆数据 |
 
 `month`, when present, must be a real `YYYY-MM` month; `day`, when present, must be a real Gregorian `YYYY-MM-DD` date. Invalid formats, months, and calendar days return `invalid_input` instead of being reported as an empty result. This validation does not define timezone, cross-day/month attribution, or recent-group behavior; those remain subject to Q-004.
+
+The `date` on every saved diary result is its first-save publication date. Memory month/day filtering and ordering use that same date; photo capture dates are only optional evidence for a naturally needed body reference.
 
 HTTP `page` and `pageSize` query values use decimal integer strings; `page` must be positive and `pageSize` must be one of 10, 20, 50, or 100. Repeated/non-string query parameters and exponent, hexadecimal, or fractional encodings return `invalid_input` before diary data is read. The device identity check runs before query validation.
 

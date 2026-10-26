@@ -1,8 +1,7 @@
-import type { GenerationResultContract } from '../contracts/core-diary-contract';
+import { isGenerationResultForSelectedPhotoIds, type GenerationResultContract } from '../contracts/core-diary-contract';
 import type { ContentBlock, DiaryDraft, DiaryItem, DiaryPerson, DiaryPhoto, HistoryGroup } from '../types/diary';
 
 export const MIN_SELECTED_PHOTOS = 3;
-export const SAMPLE_BASELINE = { diaries: 47, photos: 128, days: 86, companions: 3 };
 export function cloneDiary(diary: DiaryItem): DiaryItem {
   return { ...diary, photoIds: [...diary.photoIds], blocks: diary.blocks.map(block => ({ ...block, ...('photoIds' in block && block.photoIds ? { photoIds: [...block.photoIds] } : {}) })), shareModes: [...diary.shareModes], exportModes: [...(diary.exportModes ?? [])], people: diary.people?.map(person => ({ ...person, photoIds: [...person.photoIds], aliases: person.aliases && [...person.aliases] })), posterPhotoIds: diary.posterPhotoIds && [...diary.posterPhotoIds], publicBlockIds: diary.publicBlockIds && [...diary.publicBlockIds] };
 }
@@ -32,8 +31,16 @@ export function getHistoryGroups(diaries: DiaryItem[]): HistoryGroup[] {
   return [...byMonth.values()];
 }
 export function getDiaryStatistics(diaries: DiaryItem[]) {
-  const added = diaries.filter(diary => diary.createdInSession);
-  return { diaries: SAMPLE_BASELINE.diaries + added.length, photos: SAMPLE_BASELINE.photos + added.reduce((sum, diary) => sum + diary.photoIds.length, 0), days: SAMPLE_BASELINE.days + new Set(added.map(diary => diary.date)).size, companions: SAMPLE_BASELINE.companions + new Set(added.flatMap(diary => (diary.people ?? []).filter(person => person.id !== 'person-self').map(person => person.name))).size };
+  return {
+    diaries: diaries.length,
+    photos: new Set(diaries.flatMap(diary => diary.photoIds)).size,
+    days: new Set(diaries.map(diary => diary.date)).size,
+    companions: new Set(diaries.flatMap(diary =>
+      (diary.people ?? [])
+        .filter(person => person.id !== 'person-self' && person.name.trim())
+        .map(person => person.name.trim()),
+    )).size,
+  };
 }
 export function publicParagraphs(diary: DiaryItem) { return diary.blocks.filter(block => block.type === 'text' || block.type === 'quote'); }
 function redact(value: string, names: string[]) {
@@ -103,6 +110,7 @@ export const projectDiaryForShare = projectDiaryForSharing;
 export const buildHistoryGroups = getHistoryGroups;
 
 export function buildGeneratedDiaryFromResult(draft: DiaryDraft, result: GenerationResultContract): DiaryItem | undefined {
+  if (!isGenerationResultForSelectedPhotoIds(result, draft.selectedPhotoIds)) return undefined;
   const allowed = new Set(draft.selectedPhotoIds);
   const coverPhotoId = allowed.has(result.coverPhotoId) ? result.coverPhotoId : undefined;
   if (!coverPhotoId) return undefined;
@@ -113,7 +121,6 @@ export function buildGeneratedDiaryFromResult(draft: DiaryDraft, result: Generat
   for (const block of result.blocks) {
     if (block.type === 'photo') {
       if (!allowed.has(block.photoId)) return undefined;
-      blocks.push({ ...block });
       continue;
     }
 
@@ -121,10 +128,28 @@ export function buildGeneratedDiaryFromResult(draft: DiaryDraft, result: Generat
     if (photoIds?.some(id => !allowed.has(id))) return undefined;
     if (block.type === 'text' && block.content.trim()) hasStructuredText = true;
     if (block.type === 'quote' && block.content.trim()) hasStructuredText = true;
-    blocks.push(photoIds ? { ...block, photoIds } : { ...block });
   }
 
   if (!hasStructuredText) return undefined;
+
+  const paragraphPhotoIds = new Map<string, string[]>();
+  for (const block of result.blocks) {
+    if (block.type === 'photo') continue;
+    if (!block.content.trim()) {
+      paragraphPhotoIds.set(block.id, []);
+      continue;
+    }
+    paragraphPhotoIds.set(block.id, [...(block.photoIds ?? [])]);
+  }
+  for (const block of result.blocks) {
+    if (block.type === 'photo') {
+      const assigned = block.relatedBlockId ? paragraphPhotoIds.get(block.relatedBlockId) : undefined;
+      if (assigned && assigned.length === 0) continue;
+      blocks.push({ ...block, ...(assigned ? { photoId: assigned[0] } : {}) });
+      continue;
+    }
+    blocks.push({ ...block, photoIds: paragraphPhotoIds.get(block.id) ?? [] });
+  }
 
   const people = (result.people ?? [])
     .map(person => ({
@@ -144,7 +169,7 @@ export function buildGeneratedDiaryFromResult(draft: DiaryDraft, result: Generat
     title: result.title,
     summary: result.summary,
     location: result.location,
-    date: result.date,
+    date: draft.sourceDiaryId ? draft.diary.date : result.date,
     companionName: result.companionName.trim() || (people.some(person => person.id !== 'person-self') ? '同行人' : '自己'),
     people,
     photoIds: [...draft.selectedPhotoIds],
@@ -164,15 +189,14 @@ export function buildGeneratedDiary(draft: DiaryDraft): DiaryItem {
     : character === 'character-brown'
       ? `台南，九月。红墙，树影，一段没有赶路的午后。${withPerson ? `和${person}一起，` : ''}用镜头收藏老城的纹理，也记下此刻平静的心情。`
       : `九月的台南，阳光还是暖暖的。${withPerson ? `和${person}` : '独自'}沿着赤崁楼的红墙慢慢走，树影落在脚边，连风都有了老城的味道。`;
-  const chunks = [draft.selectedPhotoIds.slice(0, 4), draft.selectedPhotoIds.slice(4, 8), draft.selectedPhotoIds.slice(8)];
   const blocks: ContentBlock[] = [
-    { id: `${draft.id}-p1`, type: 'text', title: '在古城里，把时间放慢', content: opening, photoIds: chunks[0] },
-    { id: `${draft.id}-p2`, type: 'text', title: '巷弄里的小确幸', content: `钻进神农街的小巷，偶遇一家安静的咖啡馆。一碗热热的担仔面，一杯冰拿铁，就是今天最满足的时刻。${withPerson ? `${person}说，` : ''}这样不赶路的旅行真好。`, photoIds: chunks[1] },
-    { id: `${draft.id}-p3`, type: 'text', title: '日落之前，再走一小段', content: '傍晚去了安平，海风轻轻吹过来。坐在堤岸边看太阳一点点落下，没说什么，却觉得这一天已经很完整。', photoIds: chunks[2] },
-    { id: `${draft.id}-quote`, type: 'quote', content: '旅行不是走了多远，而是把日子过慢了一点。', relatedBlockId: `${draft.id}-p3` },
+    { id: `${draft.id}-p1`, type: 'text', title: '在古城里，把时间放慢', content: opening, photoIds: draft.selectedPhotoIds[0] ? [draft.selectedPhotoIds[0]] : [] },
+    { id: `${draft.id}-p2`, type: 'text', title: '巷弄里的小确幸', content: `钻进神农街的小巷，偶遇一家安静的咖啡馆。一碗热热的担仔面，一杯冰拿铁，就是今天最满足的时刻。${withPerson ? `${person}说，` : ''}这样不赶路的旅行真好。`, photoIds: draft.selectedPhotoIds[1] ? [draft.selectedPhotoIds[1]] : [] },
+    { id: `${draft.id}-p3`, type: 'text', title: '日落之前，再走一小段', content: '傍晚去了安平，海风轻轻吹过来。坐在堤岸边看太阳一点点落下，没说什么，却觉得这一天已经很完整。', photoIds: draft.selectedPhotoIds[2] ? [draft.selectedPhotoIds[2]] : [] },
+    { id: `${draft.id}-quote`, type: 'quote', content: '旅行不是走了多远，而是把日子过慢了一点。', photoIds: draft.selectedPhotoIds[3] ? [draft.selectedPhotoIds[3]] : [], relatedBlockId: `${draft.id}-p3` },
   ];
-  chunks.forEach((photos, index) => {
-    if (photos[0]) blocks.push({ id: `${draft.id}-photo${index + 1}`, type: 'photo', photoId: photos[0], caption: ['红墙、绿树和不着急的午后。', '把巷子里的日常，装进相机。', '把这一刻的温柔，好好收藏。'][index], relatedBlockId: `${draft.id}-p${index + 1}` });
+  draft.selectedPhotoIds.slice(0, 3).forEach((photoId, index) => {
+    if (photoId) blocks.push({ id: `${draft.id}-photo${index + 1}`, type: 'photo', photoId, caption: ['红墙、绿树和不着急的午后。', '把巷子里的日常，装进相机。', '把这一刻的温柔，好好收藏。'][index], relatedBlockId: `${draft.id}-p${index + 1}` });
   });
   return normalizeDiaryPhotos({ ...diary, status: 'ready', companionName: withPerson ? person : '自己', people: draft.people.map(item => ({ ...item, name: item.name.trim() || (item.id === 'person-self' ? '我' : '同行人') })), photoIds: [...draft.selectedPhotoIds], coverPhotoId: draft.selectedPhotoIds[0] ?? '', posterPhotoIds: draft.selectedPhotoIds.slice(0, 2), blocks, summary: opening.slice(0, 72), publicBlockIds: undefined });
 }

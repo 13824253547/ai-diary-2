@@ -4,7 +4,9 @@
 
 ## 当前阶段
 
-当前进度台账已沿用 DEV-1/2/3 历史并推进至 TEST-14；DEV-1 已完成全部 42 项 task/CASE/源码盘点，后续开发、集中测试和缺陷修复轮次均按台账保留。TEST-14 后端 unit 与隔离 MySQL e2e、类型检查、编译及 migration drift 检查通过；BAS-004-A01 当前 guard 已验证。DEV-12 为 discovery/chat/anchor 自有服务新增 MySQL 集成子集，但完整 UI、provider、权限/留存产品规则与真实设备/平台 CASE 仍未整体闭环。新规则不重置历史轮次；继续以当前 worktree 与进度台账记录为准推进下一轮。
+当前最新完成测试轮为 TEST-14，当前开发轮为 DEV-13；DEV-1 已完成全部 42 项 task/CASE/源码盘点，历史轮次均保留。TEST-14 后端 unit 与隔离 MySQL e2e、类型检查、编译及 migration drift 检查通过；BAS-004-A01 当前 guard 已验证。DEV-12 为 discovery/chat/anchor 自有服务新增 MySQL 集成子集。DEV-13 将 PET-001 Ark-compatible server provider、持久会话 repository 和现有聊天页发送/失败重试反馈接通；真实凭据尚未配置，应用重启恢复与 Q-001/Q-002/Q-003 决策仍未闭环。新规则不重置历史轮次；继续以当前 worktree 与进度台账记录为准推进。
+
+2026-10-20 状态更正：PET-001 的 Ark 凭据现已配置在本地被 Git 忽略的 `backend/.env`；`ai_diary` 已应用 6/6 migrations，status up-to-date 且 schema diff 无漂移。provider smoke 与 disposable schema 上的 HTTP→provider→Prisma 合成 turn 均成功。尚未执行 Expo App 实机流程、模型质量/安全验收或 CASE 完整验收。
 
 阶段顺序：后续以 `DEV-N → TEST-N → DEV-(N+1) → TEST-(N+1)` 迭代，直到原始范围全部真实验收通过。阶段状态及仍待验证范围记录在 [开发台账](reports/development-progress.md) 和 [当前执行快照](reports/current-execution-snapshot.md)。
 

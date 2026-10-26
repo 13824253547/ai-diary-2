@@ -13,7 +13,7 @@ export function ShareSheet({ options, onSelect }: ShareSheetProps) {
   return (
     <Card style={styles.card}>
       <Text style={styles.title}>分享这篇日记</Text>
-      <Text style={styles.subtitle}>选择一种演示态分享方式，完成本轮流程。</Text>
+      <Text style={styles.subtitle}>只有在实际交付确认后，才会记录分享结果。</Text>
       <View style={styles.list}>
         {options.map((option) => (
           <View key={option.id} style={styles.item}>
@@ -68,4 +68,3 @@ const styles = StyleSheet.create({
     width: 110,
   },
 });
-

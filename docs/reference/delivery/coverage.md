@@ -30,7 +30,7 @@
 | [CRE-004-AC03](../business-spec/modules/diary-creation.md) | [T-CRE-004-A03](tasks/CRE-004.md) | [CASE-CRE-004-003](test-cases/CRE-004.md)；[CASE-CRE-004-006](test-cases/CRE-004.md) |
 | [CRE-004-AC04](../business-spec/modules/diary-creation.md) | [T-CRE-004-A04](tasks/CRE-004.md) | [CASE-CRE-004-004](test-cases/CRE-004.md) |
 | [CRE-005-AC01](../business-spec/modules/diary-creation.md) | [T-CRE-005-A01](tasks/CRE-005.md) | [CASE-CRE-005-001](test-cases/CRE-005.md)；[CASE-CRE-005-010](test-cases/CRE-005.md) |
-| [CRE-005-AC02](../business-spec/modules/diary-creation.md) | [T-CRE-005-A02](tasks/CRE-005.md) | [CASE-CRE-005-002](test-cases/CRE-005.md)；[CASE-CRE-005-010](test-cases/CRE-005.md) |
+| [CRE-005-AC02](../business-spec/modules/diary-creation.md) | [T-CRE-005-A02](tasks/CRE-005.md) | [CASE-CRE-005-002](test-cases/CRE-005.md)；[CASE-CRE-005-010](test-cases/CRE-005.md)；[CASE-CRE-005-011](test-cases/CRE-005.md)；[CASE-CRE-005-012](test-cases/CRE-005.md) |
 | [CRE-005-AC03](../business-spec/modules/diary-creation.md) | [T-CRE-005-A03](tasks/CRE-005.md) | [CASE-CRE-005-003](test-cases/CRE-005.md) |
 | [CRE-005-AC04](../business-spec/modules/diary-creation.md) | [T-CRE-005-A04](tasks/CRE-005.md) | [CASE-CRE-005-004](test-cases/CRE-005.md) |
 | [CRE-005-AC05](../business-spec/modules/diary-creation.md) | [T-CRE-005-A05](tasks/CRE-005.md) | [CASE-CRE-005-005](test-cases/CRE-005.md)；[CASE-CRE-005-009](test-cases/CRE-005.md) |
@@ -51,12 +51,12 @@
 | [DIA-001-AC05](../business-spec/modules/diary-management.md) | [T-DIA-001-A05](tasks/DIA-001.md) | [CASE-DIA-001-005](test-cases/DIA-001.md) |
 | [DIA-002-AC01](../business-spec/modules/diary-management.md) | [T-DIA-002-A01](tasks/DIA-002.md) | [CASE-DIA-002-001](test-cases/DIA-002.md)；[CASE-DIA-002-005](test-cases/DIA-002.md)；[CASE-DIA-002-009](test-cases/DIA-002.md) |
 | [DIA-002-AC02](../business-spec/modules/diary-management.md) | [T-DIA-002-A02](tasks/DIA-002.md) | [CASE-DIA-002-002](test-cases/DIA-002.md)；[CASE-DIA-002-005](test-cases/DIA-002.md)；[CASE-DIA-002-009](test-cases/DIA-002.md) |
-| [DIA-002-AC03](../business-spec/modules/diary-management.md) | [T-DIA-002-A03](tasks/DIA-002.md) | [CASE-DIA-002-003](test-cases/DIA-002.md)；[CASE-DIA-002-007](test-cases/DIA-002.md)；[CASE-DIA-002-008](test-cases/DIA-002.md)；[CASE-DIA-002-009](test-cases/DIA-002.md) |
+| [DIA-002-AC03](../business-spec/modules/diary-management.md) | [T-DIA-002-A03](tasks/DIA-002.md) | [CASE-DIA-002-003](test-cases/DIA-002.md)；[CASE-DIA-002-007](test-cases/DIA-002.md)；[CASE-DIA-002-008](test-cases/DIA-002.md)；[CASE-DIA-002-009](test-cases/DIA-002.md)；[CASE-DIA-002-010](test-cases/DIA-002.md)；[CASE-DIA-002-011](test-cases/DIA-002.md) |
 | [DIA-002-AC04](../business-spec/modules/diary-management.md) | [T-DIA-002-A04](tasks/DIA-002.md) | [CASE-DIA-002-004](test-cases/DIA-002.md) |
 | [DIA-002-AC05](../business-spec/modules/diary-management.md) | [T-DIA-002-A05](tasks/DIA-002.md) | [CASE-DIA-002-005](test-cases/DIA-002.md)；[CASE-DIA-002-008](test-cases/DIA-002.md) |
 | [DIA-003-AC01](../business-spec/modules/diary-management.md) | [T-DIA-003-A01](tasks/DIA-003.md) | [CASE-DIA-003-001](test-cases/DIA-003.md)；[CASE-DIA-003-008](test-cases/DIA-003.md)；[CASE-DIA-003-009](test-cases/DIA-003.md) |
-| [DIA-003-AC02](../business-spec/modules/diary-management.md) | [T-DIA-003-A02](tasks/DIA-003.md) | [CASE-DIA-003-002](test-cases/DIA-003.md)；[CASE-DIA-003-009](test-cases/DIA-003.md) |
-| [DIA-003-AC03](../business-spec/modules/diary-management.md) | [T-DIA-003-A03](tasks/DIA-003.md) | [CASE-DIA-003-003](test-cases/DIA-003.md)；[CASE-DIA-003-004](test-cases/DIA-003.md)；[CASE-DIA-003-009](test-cases/DIA-003.md) |
+| [DIA-003-AC02](../business-spec/modules/diary-management.md) | [T-DIA-003-A02](tasks/DIA-003.md) | [CASE-DIA-003-002](test-cases/DIA-003.md)；[CASE-DIA-003-009](test-cases/DIA-003.md)；[CASE-DIA-003-010](test-cases/DIA-003.md) |
+| [DIA-003-AC03](../business-spec/modules/diary-management.md) | [T-DIA-003-A03](tasks/DIA-003.md) | [CASE-DIA-003-003](test-cases/DIA-003.md)；[CASE-DIA-003-004](test-cases/DIA-003.md)；[CASE-DIA-003-009](test-cases/DIA-003.md)；[CASE-DIA-003-010](test-cases/DIA-003.md) |
 | [DIA-003-AC04](../business-spec/modules/diary-management.md) | [T-DIA-003-A04](tasks/DIA-003.md) | [CASE-DIA-003-005](test-cases/DIA-003.md) |
 | [DIA-003-AC05](../business-spec/modules/diary-management.md) | [T-DIA-003-A05](tasks/DIA-003.md) | [CASE-DIA-003-006](test-cases/DIA-003.md) |
 | [DIA-004-AC01](../business-spec/modules/diary-management.md) | [T-DIA-004-A01](tasks/DIA-004.md) | [CASE-DIA-004-001](test-cases/DIA-004.md) |
@@ -221,10 +221,12 @@
 | [T-CRE-002-A05](tasks/CRE-002.md) | [CASE-CRE-002-006](test-cases/CRE-002.md)；[CASE-CRE-002-007](test-cases/CRE-002.md)；[CASE-CRE-002-008](test-cases/CRE-002.md) |
 | [T-CRE-003-A04](tasks/CRE-003.md) | [CASE-CRE-003-004](test-cases/CRE-003.md)；[CASE-CRE-003-005](test-cases/CRE-003.md) |
 | [T-CRE-004-A05](tasks/CRE-004.md) | [CASE-CRE-004-005](test-cases/CRE-004.md) |
-| [T-CRE-005-A06](tasks/CRE-005.md) | [CASE-CRE-005-001](test-cases/CRE-005.md)；[CASE-CRE-005-006](test-cases/CRE-005.md)；[CASE-CRE-005-007](test-cases/CRE-005.md)；[CASE-CRE-005-008](test-cases/CRE-005.md)；[CASE-CRE-005-009](test-cases/CRE-005.md)；[CASE-CRE-005-010](test-cases/CRE-005.md) |
+| [T-CRE-005-A02](tasks/CRE-005.md) | [CASE-CRE-005-002](test-cases/CRE-005.md)；[CASE-CRE-005-010](test-cases/CRE-005.md)；[CASE-CRE-005-011](test-cases/CRE-005.md)；[CASE-CRE-005-012](test-cases/CRE-005.md) |
+| [T-CRE-005-A06](tasks/CRE-005.md) | [CASE-CRE-005-001](test-cases/CRE-005.md)；[CASE-CRE-005-006](test-cases/CRE-005.md)；[CASE-CRE-005-007](test-cases/CRE-005.md)；[CASE-CRE-005-008](test-cases/CRE-005.md)；[CASE-CRE-005-009](test-cases/CRE-005.md)；[CASE-CRE-005-010](test-cases/CRE-005.md)；[CASE-CRE-005-011](test-cases/CRE-005.md)；[CASE-CRE-005-012](test-cases/CRE-005.md) |
 | [T-CRE-006-A06](tasks/CRE-006.md) | [CASE-CRE-006-006](test-cases/CRE-006.md)；[CASE-CRE-006-007](test-cases/CRE-006.md) |
 | [T-DIA-001-A06](tasks/DIA-001.md) | [CASE-DIA-001-006](test-cases/DIA-001.md)；[CASE-DIA-001-007](test-cases/DIA-001.md) |
-| [T-DIA-002-A06](tasks/DIA-002.md) | [CASE-DIA-002-006](test-cases/DIA-002.md)；[CASE-DIA-002-007](test-cases/DIA-002.md)；[CASE-DIA-002-009](test-cases/DIA-002.md) |
+| [T-DIA-002-A03](tasks/DIA-002.md) | [CASE-DIA-002-003](test-cases/DIA-002.md)；[CASE-DIA-002-007](test-cases/DIA-002.md)；[CASE-DIA-002-008](test-cases/DIA-002.md)；[CASE-DIA-002-009](test-cases/DIA-002.md)；[CASE-DIA-002-010](test-cases/DIA-002.md)；[CASE-DIA-002-011](test-cases/DIA-002.md) |
+| [T-DIA-002-A06](tasks/DIA-002.md) | [CASE-DIA-002-006](test-cases/DIA-002.md)；[CASE-DIA-002-007](test-cases/DIA-002.md)；[CASE-DIA-002-009](test-cases/DIA-002.md)；[CASE-DIA-002-010](test-cases/DIA-002.md)；[CASE-DIA-002-011](test-cases/DIA-002.md) |
 | [T-DIA-003-A06](tasks/DIA-003.md) | [CASE-DIA-003-007](test-cases/DIA-003.md)；[CASE-DIA-003-008](test-cases/DIA-003.md)；[CASE-DIA-003-009](test-cases/DIA-003.md) |
 | [T-DIA-004-A04](tasks/DIA-004.md) | [CASE-DIA-004-004](test-cases/DIA-004.md)；[CASE-DIA-004-005](test-cases/DIA-004.md) |
 | [T-DIA-005-A07](tasks/DIA-005.md) | [CASE-DIA-005-008](test-cases/DIA-005.md)；[CASE-DIA-005-009](test-cases/DIA-005.md)；[CASE-DIA-005-010](test-cases/DIA-005.md) |
