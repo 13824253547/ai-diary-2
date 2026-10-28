@@ -47,6 +47,20 @@ describe('PhotosController', () => {
     );
   });
 
+  test('reads a public discovery photo only through its published story reference', async () => {
+    const assets = {
+      readDiscoveryPhotoCopy: jest.fn().mockResolvedValue({
+        buffer: Buffer.from([0xff, 0xd8, 0xff]),
+        mimeType: 'image/jpeg',
+      }),
+    };
+    const scopedController = new PhotosController(assets as never);
+
+    await scopedController.readDiscoveryPhotoByQuery('story-1', 'asset/L0/001');
+
+    expect(assets.readDiscoveryPhotoCopy).toHaveBeenCalledWith('story-1', 'asset/L0/001');
+  });
+
   test('validates device identity before the photo query parameter', async () => {
     await expect(controller.readDiaryPhotoByQuery(undefined, 'diary-1', undefined))
       .rejects.toMatchObject({

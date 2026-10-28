@@ -172,6 +172,33 @@ describe('Privacy screen regressions', () => {
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
+  test('explains why anonymous discovery publication is blocked without changing privacy', async () => {
+    const setDiaryVisibility = jest.fn().mockResolvedValue({
+      ok: false as const,
+      reason: 'publication_blocked' as const,
+      message: '匿名照片遮挡目前不可用，含照片的匿名日记暂不能发布到发现。',
+    });
+    useAppStore.setState({ setDiaryVisibility });
+
+    const screen = await render(<PrivacyScreen />);
+    await waitFor(() => expect(screen.getByText('完成')).toBeTruthy());
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('匿名公开 · 独立马甲'));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('完成'));
+    });
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        '暂不能发布到发现',
+        '匿名照片遮挡目前不可用，含照片的匿名日记暂不能发布到发现。',
+      );
+    });
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    expect(useAppStore.getState().diaries.find(item => item.id === 'diary-1')?.privacy).toBe('private');
+  });
+
   test('reopens with the last saved visibility and selected blocks after a failed save attempt', async () => {
     const diary = useAppStore.getState().diaries.find(item => item.id === 'diary-1');
     if (!diary) {
@@ -217,13 +244,13 @@ describe('Privacy screen regressions', () => {
     expect(screen.getByLabelText(`公开内容：${secondBlock.content}`).props.accessibilityState.checked).toBe(false);
 
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('公开 · 可评论'));
+      fireEvent.press(screen.getByLabelText('匿名公开 · 独立马甲'));
       fireEvent.press(screen.getByLabelText(`公开内容：${firstBlock.content}`));
       fireEvent.press(screen.getByLabelText(`公开内容：${secondBlock.content}`));
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText('公开 · 可评论').props.accessibilityState.selected).toBe(true);
+      expect(screen.getByLabelText('匿名公开 · 独立马甲').props.accessibilityState.selected).toBe(true);
       expect(screen.getByLabelText(`公开内容：${firstBlock.content}`).props.accessibilityState.checked).toBe(false);
       expect(screen.getByLabelText(`公开内容：${secondBlock.content}`).props.accessibilityState.checked).toBe(true);
     });
@@ -233,7 +260,7 @@ describe('Privacy screen regressions', () => {
     });
 
     await waitFor(() => {
-      expect(setDiaryVisibility).toHaveBeenCalledWith('diary-1', 'public-comments', [secondBlock.id]);
+      expect(setDiaryVisibility).toHaveBeenCalledWith('diary-1', 'anonymous', [secondBlock.id]);
       expect(alertSpy).toHaveBeenCalledWith('保存失败', '公开范围保存失败，请稍后重试。');
     });
 
@@ -259,7 +286,7 @@ describe('Privacy screen regressions', () => {
     });
 
     expect(screen.getByLabelText('公开 · 仅点赞').props.accessibilityState.selected).toBe(true);
-    expect(screen.getByLabelText('公开 · 可评论').props.accessibilityState.selected).toBe(false);
+    expect(screen.queryByLabelText('公开 · 可评论')).toBeNull();
     expect(screen.getByLabelText(`公开内容：${firstBlock.content}`).props.accessibilityState.checked).toBe(true);
     expect(screen.getByLabelText(`公开内容：${secondBlock.content}`).props.accessibilityState.checked).toBe(false);
   });
@@ -267,7 +294,7 @@ describe('Privacy screen regressions', () => {
   test('pushes the share result after a successful save by default', async () => {
     const setDiaryVisibility = jest.fn().mockResolvedValue({
       ok: true as const,
-      privacy: 'public-comments' as const,
+      privacy: 'public-likes' as const,
       publicBlockIds: ['block-1'],
     });
     useAppStore.setState({ setDiaryVisibility });
@@ -291,11 +318,51 @@ describe('Privacy screen regressions', () => {
     expect(mockRouter.back).not.toHaveBeenCalled();
   });
 
+  test('submits explicit block ids when all public paragraphs are selected', async () => {
+    const diary = useAppStore.getState().diaries.find(item => item.id === 'diary-1');
+    if (!diary) {
+      throw new Error('expected diary-1 to exist');
+    }
+    const selectedIds = publicParagraphs(diary).map(block => block.id);
+    useAppStore.setState({
+      diaries: useAppStore.getState().diaries.map(item =>
+        item.id === 'diary-1'
+          ? { ...item, privacy: 'public-comments', publicBlockIds: undefined }
+          : item,
+      ),
+    });
+
+    const setDiaryVisibility = jest.fn().mockResolvedValue({
+      ok: true as const,
+      privacy: 'public-likes' as const,
+      publicBlockIds: selectedIds,
+    });
+    useAppStore.setState({ setDiaryVisibility });
+
+    const screen = await render(<PrivacyScreen />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('公开 · 仅点赞').props.accessibilityState.selected).toBe(true);
+    });
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('完成'));
+    });
+
+    await waitFor(() => {
+      expect(setDiaryVisibility).toHaveBeenCalledWith('diary-1', 'public-likes', selectedIds);
+      expect(mockRouter.push).toHaveBeenCalledWith({
+        pathname: '/share/result',
+        params: { diaryId: 'diary-1' },
+      });
+    });
+    expect(alertSpy).not.toHaveBeenCalledWith('至少公开一段内容', expect.any(String));
+  });
+
   test('returns to detail after a successful save when returnTo=detail', async () => {
     mockParams.returnTo = 'detail';
     const setDiaryVisibility = jest.fn().mockResolvedValue({
       ok: true as const,
-      privacy: 'public-comments' as const,
+      privacy: 'public-likes' as const,
       publicBlockIds: ['block-1'],
     });
     useAppStore.setState({ setDiaryVisibility });
@@ -420,7 +487,11 @@ describe('Privacy screen regressions', () => {
       fireEvent.press(screen.getByText('完成'));
     });
     await waitFor(() => {
-      expect(setDiaryVisibility.mock.calls[1]).toEqual(['diary-2', diary2.privacy, diary2.publicBlockIds]);
+      expect(setDiaryVisibility.mock.calls[1]).toEqual([
+        'diary-2',
+        diary2.privacy,
+        publicParagraphs(diary2).map(block => block.id),
+      ]);
       expect(mockRouter.back).toHaveBeenCalledTimes(1);
     });
 
@@ -543,7 +614,11 @@ describe('Privacy screen regressions', () => {
       fireEvent.press(screen.getByText('完成'));
     });
     await waitFor(() => {
-      expect(setDiaryVisibility.mock.calls[1]).toEqual(['diary-2', diary2.privacy, diary2.publicBlockIds]);
+      expect(setDiaryVisibility.mock.calls[1]).toEqual([
+        'diary-2',
+        diary2.privacy,
+        publicParagraphs(diary2).map(block => block.id),
+      ]);
       expect(mockRouter.push).toHaveBeenCalledWith({
         pathname: '/share/result',
         params: { diaryId: 'diary-2' },

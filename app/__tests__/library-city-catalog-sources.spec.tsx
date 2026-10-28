@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { render } from '@testing-library/react-native';
 import CityStampCatalogScreen from '../library/cities';
 
 const mockRouter = {
@@ -80,22 +80,14 @@ jest.mock('@expo/vector-icons', () => {
   return { Ionicons: ({ name }: { name: string }) => <Text>{name}</Text> };
 });
 
-describe('city catalog source attribution', () => {
+describe('city catalog attribution', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('shows OpenStreetMap attribution and lists source licenses and citations', async () => {
+  test('keeps required OpenStreetMap attribution without an expanded source panel', async () => {
     const screen = await render(<CityStampCatalogScreen />);
 
     expect(screen.getByText('© OpenStreetMap contributors · ODbL-1.0')).toBeTruthy();
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('查看城市目录数据来源与许可'));
-    });
-
-    expect(screen.getAllByText('数据来源与许可')).toHaveLength(2);
-    expect(screen.getByText('OpenStreetMap city names')).toBeTruthy();
-    expect(screen.getByText('许可：ODbL-1.0')).toBeTruthy();
-    expect(screen.getByText('GeoNames alternate names')).toBeTruthy();
-    expect(screen.getByText('许可：CC BY 4.0')).toBeTruthy();
-    expect(screen.getByLabelText('打开GeoNames alternate names来源链接')).toBeTruthy();
+    expect(screen.queryByText('数据来源与许可')).toBeNull();
+    expect(screen.queryByLabelText('查看城市目录数据来源与许可')).toBeNull();
   });
 });

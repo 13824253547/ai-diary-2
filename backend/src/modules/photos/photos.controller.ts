@@ -128,6 +128,23 @@ export class PhotosController {
     }
   }
 
+  @Get('discovery/:storyId/photo-content')
+  async readDiscoveryPhotoByQuery(
+    @Param('storyId') storyId: unknown,
+    @Query('photoId') photoId: unknown,
+  ) {
+    if (typeof storyId !== 'string' || !storyId.trim()
+      || typeof photoId !== 'string' || !photoId.trim() || photoId.length > 191) {
+      throwPhotoAssetError(new PhotoAssetError('invalid_input', '公开故事照片查询参数无效。'));
+    }
+    try {
+      const file = await this.assets.readDiscoveryPhotoCopy(storyId, photoId);
+      return new StreamableFile(file.buffer, { type: file.mimeType });
+    } catch (error) {
+      throwPhotoAssetError(error);
+    }
+  }
+
   @Get('diaries/assets')
   async listDiaryPhotosForDiaries(
     @Query('diaryIds') diaryIds: string | undefined,

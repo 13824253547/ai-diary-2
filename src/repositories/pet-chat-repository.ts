@@ -39,6 +39,7 @@ export interface PetChatRepository {
     requestId: string;
     userMessageId: string;
     text: string;
+    deviceLocalDate?: string;
   }, options?: ApiRequestOptions): Promise<PetChatConversation>;
   generateReply(input: {
     conversationId: string;

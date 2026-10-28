@@ -3,7 +3,9 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { configureApiBodyParser } from '../../common/api-body-parser';
 import { MemoryStoreService } from '../../common/memory-store.service';
+import { DiaryAnchorGenerationService } from '../anchors/diary-anchor-generation.service';
 import { PhotoAssetService } from '../photos/photo-asset.service';
+import { GrowthInsightsService } from '../growth/growth-insights.service';
 import { DiariesController } from './diaries.controller';
 
 describe('DiariesController', () => {
@@ -21,6 +23,8 @@ describe('DiariesController', () => {
     createDiaryPhotoSaveHook: jest.fn(() => ({ beforeCommit, rollback })),
     ensureDiaryPhotoCopies: jest.fn(),
   };
+  const diaryAnchors = { enqueue: jest.fn() };
+  const growthInsights = { enqueueAfterDiarySaved: jest.fn() };
   const store = {
     saveDiaryWithCommand: jest.fn(async (_body, _owner, hook) => {
       await hook.beforeCommit({} as never, 'diary-1');
@@ -39,6 +43,8 @@ describe('DiariesController', () => {
       providers: [
         { provide: MemoryStoreService, useValue: store },
         { provide: PhotoAssetService, useValue: photoAssets },
+        { provide: DiaryAnchorGenerationService, useValue: diaryAnchors },
+        { provide: GrowthInsightsService, useValue: growthInsights },
       ],
     }).compile();
     app = moduleRef.createNestApplication({ bodyParser: false });
@@ -76,6 +82,7 @@ describe('DiariesController', () => {
       .field('summary', '正文摘要')
       .field('location', '')
       .field('date', '2026.10.23')
+      .field('publishedLocalDate', '2026-10-23')
       .field('privacy', 'private')
       .field('photoIds', JSON.stringify(savedPhotoIds))
       .field('version', '1')
@@ -103,6 +110,7 @@ describe('DiariesController', () => {
     expect(store.saveDiaryWithCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         version: 1,
+        publishedLocalDate: '2026-10-23',
         photoIds: savedPhotoIds,
         contentSnapshot: expect.objectContaining({ coverPhotoId: 'device-photo-1' }),
       }),
@@ -111,5 +119,6 @@ describe('DiariesController', () => {
     );
     expect(beforeCommit).toHaveBeenCalled();
     expect(photoAssets.ensureDiaryPhotoCopies).toHaveBeenCalledWith('device-1', 'diary-1', savedPhotoIds);
+    expect(growthInsights.enqueueAfterDiarySaved).toHaveBeenCalledWith('device-1', 'diary-1', 1);
   });
 });

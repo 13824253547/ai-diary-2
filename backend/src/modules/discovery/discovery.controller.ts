@@ -20,6 +20,7 @@ export class DiscoveryController {
     @Query('page') pageParam: unknown,
     @Query('pageSize') pageSizeParam: unknown,
     @Query('category') categoryParam: unknown,
+    @Query('city') cityParam: unknown,
     @Headers('x-device-id') deviceId?: string,
   ) {
     const ownerDeviceId = resolveDeviceId(deviceId);
@@ -55,10 +56,17 @@ export class DiscoveryController {
         error: { code: 'invalid_input', message: 'unsupported discovery page size', retryable: false },
       });
     }
-    if (categoryParam !== 'latest') {
+    if (categoryParam !== 'latest' && categoryParam !== 'same-city') {
       throw new BadRequestException({
         ok: false,
         error: { code: 'invalid_input', message: 'discovery category is not available', retryable: false },
+      });
+    }
+    if (categoryParam === 'same-city'
+      && (typeof cityParam !== 'string' || !cityParam.trim() || cityParam.length > 191)) {
+      throw new BadRequestException({
+        ok: false,
+        error: { code: 'invalid_input', message: 'a valid city is required for same-city stories', retryable: false },
       });
     }
 
@@ -69,7 +77,8 @@ export class DiscoveryController {
           keyword,
           page,
           pageSize,
-          category: categoryParam as 'latest',
+          category: categoryParam,
+          ...(typeof cityParam === 'string' ? { city: cityParam } : {}),
         }, ownerDeviceId),
       };
     } catch (error) {

@@ -13,6 +13,10 @@ import {
   type GenerationProgressMilestoneId,
   readGenerationProgressMilestones,
 } from './generation-progress';
+import {
+  buildDiscoveryPublicationSnapshot,
+  DiscoveryPublicationError,
+} from './discovery-publication';
 
 export type DraftRecord = {
   id: string;
@@ -31,6 +35,7 @@ export type DiaryRecord = {
   summary: string;
   location: string;
   date: string;
+  publishedLocalDate?: string;
   privacy: string;
   photoIds: string[];
   publicBlockIds?: string[];
@@ -63,7 +68,7 @@ type DiarySaveAssetHook = {
   rollback: () => Promise<void>;
 };
 
-type SaveErrorCode = 'not_found' | 'version_conflict' | 'invalid_input';
+type SaveErrorCode = 'not_found' | 'version_conflict' | 'invalid_input' | 'publication_blocked';
 type GenerationJobErrorCode = 'not_found' | 'version_conflict' | 'invalid_input' | 'asset_unreadable';
 type DraftInputErrorCode = 'invalid_input';
 type RewriteDraftErrorCode = 'not_found' | 'invalid_input' | 'version_conflict' | 'asset_unreadable';
@@ -167,6 +172,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isValidLocalDateKey(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function assertDiaryContentSnapshot(
@@ -503,6 +514,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       || typeof input.location !== 'string'
       || typeof input.date !== 'string'
       || !input.date.trim()
+      || (input.publishedLocalDate !== undefined && !isValidLocalDateKey(input.publishedLocalDate))
       || !SUPPORTED_DIARY_PRIVACY_SETTINGS.includes(input.privacy as typeof SUPPORTED_DIARY_PRIVACY_SETTINGS[number])
       || !Number.isSafeInteger(input.version)
       || input.version <= 0) {
@@ -639,6 +651,7 @@ export class MemoryStoreService implements OnModuleDestroy {
               summary: input.summary,
               location: input.location,
               date: publishedAt,
+              publishedLocalDate: input.publishedLocalDate ?? null,
               privacy: input.privacy,
               photoIds: input.photoIds as Prisma.InputJsonValue,
               publicBlockIds: input.publicBlockIds === undefined ? Prisma.JsonNull : input.publicBlockIds as Prisma.InputJsonValue,
@@ -649,6 +662,7 @@ export class MemoryStoreService implements OnModuleDestroy {
         }
 
         await assetHook?.beforeCommit(prisma, savedDiary.id);
+        await this.syncDiscoveryPublication(prisma, savedDiary);
 
         await prisma.saveCommand.create({
           data: {
@@ -729,6 +743,116 @@ export class MemoryStoreService implements OnModuleDestroy {
     return this.mapDiaryRecord(diary);
   }
 
+  private async syncDiscoveryPublication(
+    transaction: Prisma.TransactionClient,
+    diary: {
+      id: string;
+      ownerDeviceId: string;
+      title: string;
+      location: string;
+      date: Date;
+      privacy: string;
+      photoIds: Prisma.JsonValue;
+      publicBlockIds: Prisma.JsonValue;
+      contentSnapshot: Prisma.JsonValue | null;
+      version: number;
+    },
+  ) {
+    const existing = await transaction.discoveryStory.findUnique({
+      where: { sourceDiaryId: diary.id },
+    });
+    if (existing && existing.ownerDeviceId !== diary.ownerDeviceId) {
+      throw new PermissionDeniedError('discovery story does not belong to current device');
+    }
+
+    if (diary.privacy === 'private') {
+      if (existing) {
+        await transaction.discoveryStory.update({
+          where: { id: existing.id },
+          data: {
+            publicationStatus: 'withdrawn',
+            withdrawnAt: new Date(),
+            title: '',
+            authorDisplayName: '',
+            coverUri: '',
+            coverPhotoId: null,
+            publicPhotoIds: [] as Prisma.InputJsonValue,
+            publicContent: Prisma.JsonNull,
+            location: '',
+            cityKey: '',
+            body: '',
+          },
+        });
+      }
+      return;
+    }
+
+    let snapshot;
+    try {
+      snapshot = buildDiscoveryPublicationSnapshot(diary);
+    } catch (error) {
+      if (error instanceof DiscoveryPublicationError) {
+        throw new SaveDiaryError(error.code, error.message);
+      }
+      throw error;
+    }
+
+    const publishedAt = existing?.publicationStatus === 'published' && !existing.withdrawnAt
+      ? existing.publishedAt
+      : new Date();
+    const baseData = {
+      ownerDeviceId: diary.ownerDeviceId,
+      sourceDiaryVersion: diary.version,
+      publicationStatus: 'published',
+      title: snapshot.title,
+      authorDisplayName: snapshot.authorDisplayName,
+      date: snapshot.date,
+      location: snapshot.location,
+      cityKey: snapshot.cityKey,
+      body: snapshot.body,
+      likesEnabled: snapshot.likesEnabled,
+      publishedAt,
+      withdrawnAt: null,
+      coverPhotoId: snapshot.coverPhotoId,
+      publicPhotoIds: snapshot.publicPhotoIds as Prisma.InputJsonValue,
+      publicContent: {
+        characterId: snapshot.characterId,
+        blocks: snapshot.publicContent,
+      } as Prisma.InputJsonValue,
+    };
+
+    if (existing) {
+      await transaction.discoveryStory.update({
+        where: { id: existing.id },
+        data: {
+          ...baseData,
+          coverUri: snapshot.coverPhotoId
+            ? this.discoveryPhotoUri(existing.id, snapshot.coverPhotoId)
+            : '',
+        },
+      });
+      return;
+    }
+
+    const created = await transaction.discoveryStory.create({
+      data: {
+        ...baseData,
+        sourceDiaryId: diary.id,
+        coverUri: '',
+      },
+    });
+    if (snapshot.coverPhotoId) {
+      await transaction.discoveryStory.update({
+        where: { id: created.id },
+        data: { coverUri: this.discoveryPhotoUri(created.id, snapshot.coverPhotoId) },
+      });
+    }
+  }
+
+  private discoveryPhotoUri(storyId: string, photoId: string) {
+    return `/photos/discovery/${encodeURIComponent(storyId)}/photo-content?photoId=${encodeURIComponent(photoId)}`;
+  }
+
   async updateDiaryVisibility(input: {
     diaryId: string;
     privacy: string;
@@ -741,52 +865,53 @@ export class MemoryStoreService implements OnModuleDestroy {
         && (!Array.isArray(input.publicBlockIds) || !input.publicBlockIds.every(isNonEmptyString)))) {
       throw new SaveDiaryError('invalid_input', 'sharing request is invalid');
     }
-    const diary = await this.prisma.diary.findUnique({
-      where: { id: input.diaryId },
-    });
-    if (!diary) {
-      throw new SaveDiaryError('not_found', 'diary not found');
-    }
-    if (diary.ownerDeviceId !== ownerDeviceId) {
-      throw new PermissionDeniedError('diary does not belong to current device');
-    }
     if (!SUPPORTED_DIARY_PRIVACY_SETTINGS.includes(input.privacy as typeof SUPPORTED_DIARY_PRIVACY_SETTINGS[number])) {
       throw new SaveDiaryError('invalid_input', 'unsupported diary privacy setting');
     }
 
-    let publicBlockIds: string[] | undefined;
-    if (input.privacy !== 'private') {
-      if (!Array.isArray(input.publicBlockIds)) {
-        throw new SaveDiaryError('invalid_input', 'public block ids are required for non-private visibility');
+    return this.prisma.$transaction(async transaction => {
+      const [lockedDiary] = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT \`id\` FROM \`Diary\` WHERE \`id\` = ${input.diaryId} FOR UPDATE
+      `);
+      if (!lockedDiary) throw new SaveDiaryError('not_found', 'diary not found');
+      const diary = await transaction.diary.findUnique({ where: { id: input.diaryId } });
+      if (!diary) throw new SaveDiaryError('not_found', 'diary not found');
+      if (diary.ownerDeviceId !== ownerDeviceId) {
+        throw new PermissionDeniedError('diary does not belong to current device');
       }
-      publicBlockIds = [...new Set(input.publicBlockIds
-        .filter((item): item is string => typeof item === 'string')
-        .map(item => item.trim())
-        .filter(Boolean))];
-      if (publicBlockIds.length === 0) {
-        throw new SaveDiaryError('invalid_input', 'public block ids are required for non-private visibility');
+
+      let publicBlockIds: string[] | undefined;
+      if (input.privacy !== 'private') {
+        if (!Array.isArray(input.publicBlockIds)) {
+          throw new SaveDiaryError('invalid_input', 'public block ids are required for non-private visibility');
+        }
+        publicBlockIds = [...new Set(input.publicBlockIds.map(item => item.trim()).filter(Boolean))];
+        if (!publicBlockIds.length) {
+          throw new SaveDiaryError('invalid_input', 'public block ids are required for non-private visibility');
+        }
+        const blocks = (diary.contentSnapshot as { blocks?: unknown[] } | null)?.blocks;
+        if (!Array.isArray(blocks)) {
+          throw new SaveDiaryError('invalid_input', 'diary content blocks are unavailable');
+        }
+        const publicParagraphIds = new Set(blocks
+          .filter((block): block is Record<string, unknown> =>
+            isRecord(block) && (block.type === 'text' || block.type === 'quote') && isNonEmptyString(block.id),
+          )
+          .map(block => block.id as string));
+        if (publicBlockIds.some(blockId => !publicParagraphIds.has(blockId))) {
+          throw new SaveDiaryError('invalid_input', 'public block ids must reference diary text or quote blocks');
+        }
       }
-      const blocks = (diary.contentSnapshot as { blocks?: unknown[] } | null)?.blocks;
-      if (!Array.isArray(blocks)) {
-        throw new SaveDiaryError('invalid_input', 'diary content blocks are unavailable');
-      }
-      const publicParagraphIds = new Set(blocks
-        .filter((block): block is Record<string, unknown> =>
-          isRecord(block) && (block.type === 'text' || block.type === 'quote') && isNonEmptyString(block.id),
-        )
-        .map(block => block.id as string));
-      if (publicBlockIds.some(blockId => !publicParagraphIds.has(blockId))) {
-        throw new SaveDiaryError('invalid_input', 'public block ids must reference diary text or quote blocks');
-      }
-    }
-    const updated = await this.prisma.diary.update({
-      where: { id: input.diaryId },
-      data: {
-        privacy: input.privacy,
-        publicBlockIds: publicBlockIds === undefined ? Prisma.JsonNull : publicBlockIds as Prisma.InputJsonValue,
-      },
+      const updated = await transaction.diary.update({
+        where: { id: input.diaryId },
+        data: {
+          privacy: input.privacy,
+          publicBlockIds: publicBlockIds === undefined ? Prisma.JsonNull : publicBlockIds as Prisma.InputJsonValue,
+        },
+      });
+      await this.syncDiscoveryPublication(transaction, updated);
+      return this.mapDiaryRecord(updated);
     });
-    return this.mapDiaryRecord(updated);
   }
 
   async rewriteDraftBlock(
@@ -1030,9 +1155,18 @@ export class MemoryStoreService implements OnModuleDestroy {
     await this.prisma.generationJob.deleteMany();
     await this.prisma.discoveryLike.deleteMany();
     await this.prisma.discoveryStory.deleteMany();
+    await this.prisma.chatAnchorCorrectionCommand.deleteMany();
+    await this.prisma.chatAnchorCorrection.deleteMany();
+    await this.prisma.chatDailyAnchorSource.deleteMany();
+    await this.prisma.chatDailyAnchor.deleteMany();
     await this.prisma.chatMessage.deleteMany();
     await this.prisma.chatTurn.deleteMany();
     await this.prisma.chatConversation.deleteMany();
+    await this.prisma.growthReportJob.deleteMany();
+    await this.prisma.growthInsightReport.deleteMany();
+    await this.prisma.growthRecognitionRun.deleteMany();
+    await this.prisma.growthMilestone.deleteMany();
+    await this.prisma.growthFlower.deleteMany();
     await this.prisma.diaryAnchor.deleteMany();
     await this.prisma.diaryAnchorExtraction.deleteMany();
     await this.prisma.anchorCorrectionCommand.deleteMany();

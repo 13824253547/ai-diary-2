@@ -38,6 +38,7 @@ describe('HttpDiscoveryRepository', () => {
         likesEnabled: true,
         likeCount: 3,
         liked: true,
+        blocks: [],
       }],
       page: 1,
       pageSize: 10,
@@ -58,6 +59,27 @@ describe('HttpDiscoveryRepository', () => {
     expect(String(url)).toBe('http://127.0.0.1:3001/api/discovery/stories?category=latest&page=1&pageSize=10&keyword=%E6%97%A7%E5%9F%8E');
     expect(init.headers).toMatchObject({ 'x-device-id': 'device-1' });
     expect(DISCOVERY_CONTRACT_VERSION).toBe('discovery-read-v1');
+  });
+
+  test('requires and encodes a city for the same-city category', async () => {
+    const page: DiscoveryStoriesPage = { items: [], page: 1, pageSize: 20, total: 0 };
+    global.fetch = jest.fn().mockResolvedValue(okResponse(page)) as unknown as typeof fetch;
+    const repository = createRepository();
+
+    await expect(repository.listStories({
+      category: 'same-city',
+      page: 1,
+      pageSize: 20,
+    })).rejects.toMatchObject({ code: 'invalid_input' });
+
+    await repository.listStories({
+      category: 'same-city',
+      city: '台南市',
+      page: 1,
+      pageSize: 20,
+    });
+    expect(String((global.fetch as jest.Mock).mock.calls[0][0]))
+      .toBe('http://127.0.0.1:3001/api/discovery/stories?category=same-city&page=1&pageSize=20&city=%E5%8F%B0%E5%8D%97%E5%B8%82');
   });
 
   test.each([undefined, 'recommended', 'local'])('rejects unresolved category %s before network access', async category => {
@@ -85,6 +107,7 @@ describe('HttpDiscoveryRepository', () => {
         likesEnabled: true,
         likeCount: 3,
         liked: false,
+        blocks: [],
       }))
       .mockResolvedValueOnce(okResponse({ storyId: 'story/1', liked: true, likeCount: 4 })) as unknown as typeof fetch;
     const repository = createRepository();
@@ -112,6 +135,7 @@ describe('HttpDiscoveryRepository', () => {
       likesEnabled: true,
       likeCount: 0,
       liked: false,
+      blocks: [],
     })) as unknown as typeof fetch;
     const repository = createRepository();
 

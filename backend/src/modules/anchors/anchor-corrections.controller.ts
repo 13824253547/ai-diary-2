@@ -19,6 +19,12 @@ import {
 } from './anchor-corrections.service';
 
 type SaveCorrectionBody = Partial<Record<keyof SaveAnchorCorrectionInput, unknown>>;
+type SaveChatCorrectionBody = {
+  anchorBatchId?: unknown;
+  correction?: unknown;
+  expectedVersion?: unknown;
+  idempotencyKey?: unknown;
+};
 
 function parseDecimalIntegerParam(value: unknown): number | null {
   if (typeof value !== 'string' || !/^[0-9]+$/.test(value)) return null;
@@ -84,6 +90,59 @@ export class AnchorCorrectionsController {
           diaryVersion: body.diaryVersion,
           anchorId,
           sourceBlockId: body.sourceBlockId,
+          correction: body.correction,
+          expectedVersion: body.expectedVersion,
+          idempotencyKey: body.idempotencyKey,
+        }, ownerDeviceId),
+      };
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  @Get(':anchorId/chat-correction')
+  async getChatCorrection(
+    @Param('anchorId') anchorId: unknown,
+    @Query('anchorBatchId') anchorBatchId: unknown,
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    if (typeof anchorId !== 'string' || !anchorId.trim()
+      || typeof anchorBatchId !== 'string' || !anchorBatchId.trim()) {
+      throw this.invalidInput('请提供有效的聊天锚点来源。');
+    }
+    try {
+      return {
+        ok: true,
+        version: 'chat-anchor-correction-v1',
+        data: await this.service.getChatCorrection({ anchorId, anchorBatchId }, ownerDeviceId),
+      };
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  @Put(':anchorId/chat-correction')
+  async saveChatCorrection(
+    @Param('anchorId') anchorId: unknown,
+    @Body() body: SaveChatCorrectionBody,
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    if (typeof anchorId !== 'string' || !anchorId.trim()
+      || typeof body?.anchorBatchId !== 'string'
+      || typeof body.correction !== 'string'
+      || typeof body.expectedVersion !== 'number'
+      || typeof body.idempotencyKey !== 'string') {
+      throw this.invalidInput('聊天锚点纠正请求信息不完整。');
+    }
+    try {
+      return {
+        ok: true,
+        version: 'chat-anchor-correction-v1',
+        data: await this.service.saveChatCorrection({
+          anchorId,
+          anchorBatchId: body.anchorBatchId,
           correction: body.correction,
           expectedVersion: body.expectedVersion,
           idempotencyKey: body.idempotencyKey,

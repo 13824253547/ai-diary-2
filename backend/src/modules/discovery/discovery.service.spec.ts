@@ -6,6 +6,10 @@ const publishedStory = {
   title: '旧城散步',
   authorDisplayName: '旅行者',
   coverUri: 'https://assets.example/story-1.png',
+  coverPhotoId: null,
+  sourceDiaryId: null,
+  sourceDiaryVersion: null,
+  publicContent: null,
   date: new Date('2026-09-12T00:00:00.000Z'),
   location: '台南',
   body: '沿着旧街慢慢走。',
@@ -114,6 +118,83 @@ describe('DiscoveryService', () => {
       category: undefined as unknown as 'latest',
     }, 'device-1')).rejects.toMatchObject({ code: 'invalid_input' });
     expect(prisma.discoveryStory.findMany).not.toHaveBeenCalled();
+  });
+
+  test('filters same-city stories by normalized city while preserving newest-first order', async () => {
+    const { service, prisma } = createService();
+
+    const result = await service.listStories({
+      page: 1,
+      pageSize: 20,
+      category: 'same-city',
+      city: '台南市',
+    }, 'device-1');
+
+    expect(result.total).toBe(1);
+    expect(prisma.discoveryStory.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        publicationStatus: 'published',
+        cityKey: '台南',
+      }),
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
+    }));
+    await expect(service.listStories({
+      page: 1,
+      pageSize: 20,
+      category: 'same-city',
+      city: '未知地点',
+    }, 'device-1')).rejects.toMatchObject({ code: 'invalid_input' });
+  });
+
+  test('builds public photo URLs only from the stored published content snapshot', async () => {
+    const { service, prisma } = createService();
+    jest.mocked(prisma.discoveryStory.findMany).mockResolvedValue([{
+      ...publishedStory,
+      sourceDiaryId: 'diary-1',
+      sourceDiaryVersion: 2,
+      coverPhotoId: 'photo/L0/001',
+      publicContent: {
+        characterId: 'character-green',
+        blocks: [{
+          id: 'block-1',
+          type: 'text',
+          content: '沿海散步。',
+          photos: [{ photoId: 'photo/L0/001', caption: '海边' }],
+        }],
+      },
+    }] as never);
+
+    const result = await service.listStories({
+      page: 1,
+      pageSize: 20,
+      category: 'latest',
+    }, 'device-1');
+
+    expect(result.items[0]).toMatchObject({
+      characterId: 'character-green',
+      coverUri: '/photos/discovery/story-1/photo-content?photoId=photo%2FL0%2F001',
+      blocks: [{
+        id: 'block-1',
+        photos: [{
+          photoId: 'photo/L0/001',
+          caption: '海边',
+          uri: '/photos/discovery/story-1/photo-content?photoId=photo%2FL0%2F001',
+        }],
+      }],
+    });
+  });
+
+  test('keeps legacy block-array snapshots readable with the default paper theme', async () => {
+    const { service, prisma } = createService();
+    jest.mocked(prisma.discoveryStory.findFirst).mockResolvedValue({
+      ...publishedStory,
+      publicContent: [{ id: 'block-1', type: 'text', content: '旧故事', photos: [] }],
+    } as never);
+
+    await expect(service.getStory('story-1', 'device-1')).resolves.toMatchObject({
+      characterId: 'character-blue',
+      blocks: [{ id: 'block-1', content: '旧故事' }],
+    });
   });
 
   test('rejects malformed query objects and non-string keywords before querying', async () => {

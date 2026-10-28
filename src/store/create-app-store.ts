@@ -13,11 +13,14 @@ import {
   isInsightReportRequest,
   isInsightReportResultForRequest,
 } from '../contracts/insight-report-contract';
+import type { GrowthInsightState } from '../contracts/growth-insight-contract';
 import { createBackendCoreDiaryRepository } from './adapters/backend-core-diary-adapter';
 import { createBackendDiscoveryRepository } from './adapters/backend-discovery-adapter';
 import { createBackendAnchorCorrectionRepository } from './adapters/backend-anchor-correction-adapter';
 import { createBackendAnchorReadModelRepository } from './adapters/backend-anchor-read-model-adapter';
 import { createBackendPetChatRepository } from './adapters/backend-pet-chat-adapter';
+import { createBackendGrowthInsightRepository } from './adapters/backend-growth-insight-adapter';
+import { ensureDeviceIdentity } from '../services/device-identity';
 import type { AppStoreAdapters, PersistedDraftsSnapshot } from './adapters/types';
 import type { PetChatConversation } from '../contracts/pet-chat-contract';
 import { PetChatRepositoryError } from '../repositories/pet-chat-repository';
@@ -61,6 +64,14 @@ function getRewriteContextBlocks(draft: DiaryDraft, excludedBlockId: string) {
     .map(block => ({ id: block.id, type: block.type, content: block.content }));
 }
 
+function getDeviceLocalDateKey(timestamp: number) {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export type AppStoreDeps = {
   now?: () => number;
   createId?: (prefix: string) => string;
@@ -81,7 +92,7 @@ export type AppStoreDeps = {
 
 type DiaryVisibilitySaveResult =
   | { ok: true; privacy: DiaryPrivacy; publicBlockIds?: string[] }
-  | { ok: false; reason: 'not_found' | 'invalid_input' | 'save_failed'; message: string };
+  | { ok: false; reason: 'not_found' | 'invalid_input' | 'publication_blocked' | 'save_failed'; message: string };
 
 type MonthlyExportState = {
   requestId: number;
@@ -155,10 +166,14 @@ export type AppStore = {
   chatMessages: ChatMessage[];
   chatConversationId?: string;
   chatTurnRequests: ChatTurnRequest[];
+  chatHistoryStatus: 'idle' | 'loading' | 'ready' | 'error';
   likedDiscoveryIds: string[];
   materialPhotoIds: string[];
   aiImageGenerationRequests: AIImageGenerationRequestState[];
   insightReportGeneration: InsightReportGenerationState;
+  growthInsights?: GrowthInsightState;
+  growthInsightsStatus: 'idle' | 'loading' | 'ready' | 'error';
+  growthInsightsError?: string;
   correctedAnchors: Record<string, string>;
   flowerUnlocked: boolean;
   hydratedPhotoPermission: boolean;
@@ -205,6 +220,8 @@ export type AppStore = {
   setDiaryVisibility: (diaryId: string, privacy: DiaryPrivacy, publicBlockIds?: string[]) => Promise<DiaryVisibilitySaveResult>;
   confirmShareDelivery: (input: { diaryId: string; mode: ShareMode; operationId: string; version: number }) => boolean;
   sendChat: (text: string) => void;
+  loadChatConversation: (conversationId: string) => Promise<boolean>;
+  restoreLatestChatConversation: () => Promise<boolean>;
   retryChat: (requestId: string) => void;
   toggleDiscoveryLike: (id: string) => void;
   addMaterialPhoto: (id: string) => void;
@@ -217,6 +234,11 @@ export type AppStore = {
   cancelInsightReport: (requestId: string) => void;
   correctAnchor: (id: string, text: string) => void;
   setFlowerUnlocked: (value: boolean) => void;
+  loadGrowthInsights: () => Promise<GrowthInsightState | undefined>;
+  initializeGrowthFlowers: () => Promise<GrowthInsightState | undefined>;
+  retryGrowthFlowers: () => Promise<GrowthInsightState | undefined>;
+  ensureCurrentGrowthReport: () => Promise<GrowthInsightState | undefined>;
+  retryGrowthReport: () => Promise<GrowthInsightState | undefined>;
   setCurrentStep: (step: CreationStep) => void;
   setPhotoPermissionStatus: (status: PhotoPermissionStatus, options?: { advanceToAlbum?: boolean }) => void;
   grantPhotoPermission: () => void;
@@ -304,6 +326,9 @@ export function createDefaultAppStoreDeps(overrides: AppStoreDeps = {}): Require
   const backendPetChatRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID
     ? createBackendPetChatRepository()
     : undefined;
+  const backendGrowthInsightRepository = appConfig.backendEnabled && !process.env.JEST_WORKER_ID
+    ? createBackendGrowthInsightRepository()
+    : undefined;
   const draftSnapshotStore = !process.env.JEST_WORKER_ID ? createLocalDraftSnapshotStore() : undefined;
 
   return {
@@ -333,6 +358,7 @@ export function createDefaultAppStoreDeps(overrides: AppStoreDeps = {}): Require
       anchorCorrectionRepository: backendAnchorCorrectionRepository,
       anchorReadRepository: backendAnchorReadRepository,
       petChatRepository: backendPetChatRepository,
+      growthInsightRepository: backendGrowthInsightRepository,
       draftSnapshotStore,
     },
   };
@@ -484,6 +510,10 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
 
   return create<AppStore>((set, get) => {
     let memoriesRequestVersion = 0;
+    let chatHistoryRequestVersion = 0;
+    let chatHistoryDeviceId: string | undefined;
+    let pendingChatRestore: Promise<boolean> | undefined;
+    let growthRequestVersion = 0;
     let nextMonthlyExportRequestId = 1;
     let activeMonthlyExportController: AbortController | undefined;
     const pendingImageGenerations = new Map<string, {
@@ -505,6 +535,30 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     let nextRewriteRequestId = 1;
     let draftSnapshotHydrationFailed = false;
     let draftSnapshotWriteQueue: Promise<void> = Promise.resolve();
+    const runGrowthRequest = async (
+      request: () => Promise<GrowthInsightState>,
+    ): Promise<GrowthInsightState | undefined> => {
+      const requestVersion = ++growthRequestVersion;
+      set({ growthInsightsStatus: 'loading', growthInsightsError: undefined });
+      try {
+        const state = await request();
+        if (requestVersion === growthRequestVersion) {
+          set({
+            growthInsights: state,
+            growthInsightsStatus: 'ready',
+            growthInsightsError: undefined,
+          });
+        }
+        return state;
+      } catch (error) {
+        if (requestVersion === growthRequestVersion) {
+          const message = error instanceof Error ? error.message : '成长内容暂时无法读取，请稍后重试。';
+          set({ growthInsightsStatus: 'error', growthInsightsError: message });
+          get().logIssue(`成长内容读取失败：${message}`);
+        }
+        return undefined;
+      }
+    };
     const buildInsightReportSourceSnapshot = () => {
       const sourceDiaries = get().diaries
         .map(diary => ({
@@ -1290,8 +1344,8 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       });
     };
 
-    const applyPetChatConversation = (conversation: PetChatConversation) => {
-      if (get().chatConversationId !== conversation.id) return false;
+    const applyPetChatConversation = (conversation: PetChatConversation, allowSwitch = false) => {
+      if (!allowSwitch && get().chatConversationId !== conversation.id) return false;
       const current = get();
       const serverRequestIds = new Set(conversation.turns.map(turn => turn.requestId));
       const currentConversationRequests = current.chatTurnRequests.filter(
@@ -1353,11 +1407,13 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           ...requestOrder.map(requestId => {
             const turn = turnsByRequest.get(requestId);
             if (turn) {
+              const currentRequest = currentConversationRequests.find(item => item.id === turn.requestId);
               return {
                 id: turn.requestId,
                 conversationId: conversation.id,
                 userMessageId: turn.userMessageId,
                 attempt: turn.attempt,
+                deviceLocalDate: turn.deviceLocalDate ?? currentRequest?.deviceLocalDate,
                 status: turn.status,
                 source: turn.source,
                 providerRequestId: turn.providerRequestId,
@@ -1369,6 +1425,13 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         ],
       });
       return true;
+    };
+
+    const bindChatHistoryDevice = (deviceId: string) => {
+      if (chatHistoryDeviceId && chatHistoryDeviceId !== deviceId) {
+        set({ chatMessages: [], chatConversationId: undefined, chatTurnRequests: [] });
+      }
+      chatHistoryDeviceId = deviceId;
     };
 
     const requestPersistedChatReply = async (requestId: string, retry: boolean) => {
@@ -1396,6 +1459,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             requestId,
             userMessageId: chatRequest.userMessageId,
             text: userMessage.text,
+            deviceLocalDate: chatRequest.deviceLocalDate,
           });
         } else {
           let serverTurn = conversation.turns.find(item => item.requestId === requestId);
@@ -1405,6 +1469,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               requestId,
               userMessageId: chatRequest.userMessageId,
               text: userMessage.text,
+              deviceLocalDate: chatRequest.deviceLocalDate,
             });
             serverTurn = conversation.turns.find(item => item.requestId === requestId);
           }
@@ -1505,10 +1570,14 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       chatMessages: [],
       chatConversationId: undefined,
       chatTurnRequests: [],
+      chatHistoryStatus: resolved.adapters.petChatRepository ? 'idle' : 'ready',
       likedDiscoveryIds: [],
       materialPhotoIds: [],
       aiImageGenerationRequests: [],
       insightReportGeneration: { status: 'idle' },
+      growthInsights: undefined,
+      growthInsightsStatus: 'idle',
+      growthInsightsError: undefined,
       correctedAnchors: {},
       flowerUnlocked: false,
       hydratedPhotoPermission: false,
@@ -2050,6 +2119,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             summary: normalizedDiary.summary,
             location: normalizedDiary.location,
             date: normalizedDiary.date,
+            publishedLocalDate: getDeviceLocalDateKey(resolved.now()),
             privacy: normalizedDiary.privacy,
             photoIds: normalizedDiary.photoIds,
             version: savedVersion,
@@ -2197,13 +2267,21 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
                 ? '没有找到这篇日记。'
                 : result.error.code === 'invalid_input'
                   ? '至少公开一段内容'
+                  : result.error.code === 'publication_blocked'
+                    ? result.error.message
                   : result.error.code === 'permission_denied'
                     ? '当前设备无法修改这篇日记。'
                     : '公开范围保存失败，请稍后重试。';
               get().logIssue(`公开范围保存失败：${result.error.message}`);
               return {
                 ok: false,
-                reason: result.error.code === 'not_found' ? 'not_found' : result.error.code === 'invalid_input' ? 'invalid_input' : 'save_failed',
+                reason: result.error.code === 'not_found'
+                  ? 'not_found'
+                  : result.error.code === 'invalid_input'
+                    ? 'invalid_input'
+                    : result.error.code === 'publication_blocked'
+                      ? 'publication_blocked'
+                      : 'save_failed',
                 message,
               };
             }
@@ -2247,10 +2325,13 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const message = text.trim();
         if (!message) return;
         const state = get();
-        if (state.chatTurnRequests.some(request => request.status === 'pending')) return;
+        if (state.chatHistoryStatus !== 'ready'
+          || state.chatTurnRequests.some(request => request.status === 'pending')) return;
+        ++chatHistoryRequestVersion;
         const conversationId = state.chatConversationId ?? resolved.createId('chat-session');
         const requestId = resolved.createId('chat-request');
         const userMessageId = resolved.createId('chat');
+        const deviceLocalDate = getDeviceLocalDateKey(resolved.now());
         set(current => ({
           chatConversationId: conversationId,
           chatMessages: [...current.chatMessages, {
@@ -2272,14 +2353,105 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             conversationId,
             userMessageId,
             attempt: 1,
+            deviceLocalDate,
             status: 'pending',
           }],
         }));
         requestChatReply(requestId);
       },
+      loadChatConversation: async conversationId => {
+        if (!conversationId.trim() || get().chatTurnRequests.some(request => request.status === 'pending')) {
+          return false;
+        }
+        const repository = resolved.adapters.petChatRepository;
+        if (!repository) return false;
+        const requestVersion = ++chatHistoryRequestVersion;
+        set({ chatHistoryStatus: 'loading' });
+        try {
+          const deviceId = await ensureDeviceIdentity();
+          if (requestVersion !== chatHistoryRequestVersion) return false;
+          bindChatHistoryDevice(deviceId);
+          const conversation = await repository.getConversation(conversationId);
+          if (requestVersion !== chatHistoryRequestVersion) return false;
+          const currentDeviceId = await ensureDeviceIdentity();
+          if (currentDeviceId !== deviceId) {
+            bindChatHistoryDevice(currentDeviceId);
+            set({ chatHistoryStatus: 'error' });
+            return false;
+          }
+          if (get().chatTurnRequests.some(request => request.status === 'pending')) {
+            set({ chatHistoryStatus: 'ready' });
+            return false;
+          }
+          const loaded = applyPetChatConversation(conversation, true);
+          set({ chatHistoryStatus: 'ready' });
+          return loaded;
+        } catch {
+          if (requestVersion === chatHistoryRequestVersion) {
+            set({ chatHistoryStatus: 'error' });
+            get().logIssue('聊天记录加载失败，请稍后重试。');
+          }
+          return false;
+        }
+      },
+      restoreLatestChatConversation: () => {
+        const repository = resolved.adapters.petChatRepository;
+        if (!repository) {
+          set({ chatHistoryStatus: 'ready' });
+          return Promise.resolve(false);
+        }
+        if (pendingChatRestore) return pendingChatRestore;
+        const requestVersion = ++chatHistoryRequestVersion;
+        set({ chatHistoryStatus: 'loading' });
+        const request = (async () => {
+          try {
+            const deviceId = await ensureDeviceIdentity();
+            if (requestVersion !== chatHistoryRequestVersion) return false;
+            bindChatHistoryDevice(deviceId);
+            if (get().chatConversationId || get().chatTurnRequests.some(turn => turn.status === 'pending')) {
+              set({ chatHistoryStatus: 'ready' });
+              return true;
+            }
+            const page = await repository.listConversations({ page: 1, pageSize: 10 });
+            if (requestVersion !== chatHistoryRequestVersion || get().chatConversationId) return false;
+            const listedDeviceId = await ensureDeviceIdentity();
+            if (listedDeviceId !== deviceId) {
+              bindChatHistoryDevice(listedDeviceId);
+              set({ chatHistoryStatus: 'error' });
+              return false;
+            }
+            const latestId = page.items.find(item => item.messageCount > 0)?.id;
+            const conversation = latestId ? await repository.getConversation(latestId) : undefined;
+            if (requestVersion !== chatHistoryRequestVersion
+              || get().chatConversationId
+              || get().chatTurnRequests.some(turn => turn.status === 'pending')) return false;
+            const currentDeviceId = await ensureDeviceIdentity();
+            if (currentDeviceId !== deviceId) {
+              bindChatHistoryDevice(currentDeviceId);
+              set({ chatHistoryStatus: 'error' });
+              return false;
+            }
+            if (conversation) applyPetChatConversation(conversation, true);
+            set({ chatHistoryStatus: 'ready' });
+            return Boolean(conversation);
+          } catch {
+            if (requestVersion === chatHistoryRequestVersion) {
+              set({ chatHistoryStatus: 'error' });
+              get().logIssue('聊天记录加载失败，请稍后重试。');
+            }
+            return false;
+          }
+        })();
+        pendingChatRestore = request;
+        void request.finally(() => {
+          if (pendingChatRestore === request) pendingChatRestore = undefined;
+        });
+        return request;
+      },
       retryChat: requestId => {
         const state = get();
-        if (state.chatTurnRequests.some(item => item.status === 'pending')) return;
+        if (state.chatHistoryStatus !== 'ready'
+          || state.chatTurnRequests.some(item => item.status === 'pending')) return;
         const current = state.chatTurnRequests.find(item => item.id === requestId);
         if (!current || current.status !== 'failed' || current.conversationId !== get().chatConversationId) return;
         set(state => ({
@@ -2312,7 +2484,14 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             !photo
             || typeof photo.id !== 'string'
             || !photo.id.trim()
-            || photo.source !== 'device'
+            || !((photo.source === 'device' && !photo.generationRequestId)
+              || (photo.source === 'generated'
+                && photo.generationSource === 'provider'
+                && typeof photo.generationRequestId === 'string'
+                && photo.generationRequestId.trim()
+                && typeof photo.generationPrompt === 'string'
+                && photo.generationPrompt.trim()
+                && photo.sourceAssetId === photo.generationRequestId))
             || !(photo.localUri ?? photo.uri)?.trim())
           || new Set(photos.map(photo => photo.id)).size !== photos.length) {
           return false;
@@ -2555,7 +2734,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           } catch (error) {
             const reason = error instanceof AIImageGenerationError && error.code === 'cancelled'
               ? 'cancelled'
-              : 'provider_failed';
+              : error instanceof AIImageGenerationError && error.code === 'limit_exceeded'
+                ? 'invalid_input'
+                : 'provider_failed';
             const currentRequest = get().aiImageGenerationRequests.find(item => item.id === requestId);
             if (currentRequest?.status === 'pending') {
               set(state => ({
@@ -2568,7 +2749,11 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               ok: false,
               requestId,
               reason,
-              message: reason === 'cancelled' ? '本次配图生成已取消。' : '配图暂时无法生成，请稍后重试。',
+              message: reason === 'cancelled'
+                ? '本次配图生成已取消。'
+                : reason === 'invalid_input'
+                  ? '素材库已满，请先删除部分照片。'
+                  : '配图暂时无法生成，请稍后重试。',
             };
           } finally {
             imageGenerationControllers.delete(requestId);
@@ -2750,6 +2935,31 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       },
       correctAnchor: (id, text) => { if (text.trim()) set(state => ({ correctedAnchors: { ...state.correctedAnchors, [id]: text.trim() } })); },
       setFlowerUnlocked: flowerUnlocked => set({ flowerUnlocked }),
+      loadGrowthInsights: () => runGrowthRequest(() => {
+        const repository = resolved.adapters.growthInsightRepository;
+        if (!repository) throw new Error('成长服务暂未配置，请稍后重试。');
+        return repository.getState();
+      }),
+      initializeGrowthFlowers: () => runGrowthRequest(() => {
+        const repository = resolved.adapters.growthInsightRepository;
+        if (!repository) throw new Error('成长服务暂未配置，请稍后重试。');
+        return repository.initializeFlowers();
+      }),
+      retryGrowthFlowers: () => runGrowthRequest(() => {
+        const repository = resolved.adapters.growthInsightRepository;
+        if (!repository) throw new Error('成长服务暂未配置，请稍后重试。');
+        return repository.retryFlowers();
+      }),
+      ensureCurrentGrowthReport: () => runGrowthRequest(() => {
+        const repository = resolved.adapters.growthInsightRepository;
+        if (!repository) throw new Error('洞察报告服务暂未配置，请稍后重试。');
+        return repository.ensureCurrentReport();
+      }),
+      retryGrowthReport: () => runGrowthRequest(() => {
+        const repository = resolved.adapters.growthInsightRepository;
+        if (!repository) throw new Error('洞察报告服务暂未配置，请稍后重试。');
+        return repository.retryCurrentReport();
+      }),
       setCurrentStep: currentStep => set({ currentStep }),
       setPhotoPermissionStatus: (status, options) => applyPhotoPermissionStatus(status, { advanceToAlbum: options?.advanceToAlbum }),
       grantPhotoPermission: () => applyPhotoPermissionStatus('full', { advanceToAlbum: true, hydrated: true }),
@@ -2913,6 +3123,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           }));
           return;
         }
+        set({ memoriesStatus: 'loading', memoriesError: undefined });
         try {
           const query = { page: 1, pageSize: 100 };
           const result = repository.listAllMemories
@@ -2920,6 +3131,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             : await repository.listMemories(query);
           if (!result.ok) {
             get().logIssue(`回忆同步失败：${result.error.message}`);
+            set({ memoriesStatus: 'error', memoriesError: '日记暂时无法加载，请稍后重试。' });
             return;
           }
           const remoteDiaries = result.data.items.map(item => buildMemoryDiaryItem({
@@ -2953,12 +3165,20 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
               } : {}),
               hydratedMemories: true,
               memoriesSourceItems: remoteDiaries,
-              memoriesItems: state.memoriesStatus === 'idle' ? remoteDiaries : state.memoriesItems,
-              memoriesTotal: state.memoriesStatus === 'idle' ? remoteDiaries.length : state.memoriesTotal,
+              memoriesItems: state.memoriesStatus === 'idle' || state.memoriesStatus === 'loading'
+                ? remoteDiaries
+                : state.memoriesItems,
+              memoriesTotal: state.memoriesStatus === 'idle' || state.memoriesStatus === 'loading'
+                ? remoteDiaries.length
+                : state.memoriesTotal,
+              memoriesStatus: state.memoriesStatus === 'idle' || state.memoriesStatus === 'loading'
+                ? 'ready'
+                : state.memoriesStatus,
             };
           });
         } catch (error) {
           get().logIssue(`回忆同步失败：${error instanceof Error ? error.message : 'unknown error'}`);
+          set({ memoriesStatus: 'error', memoriesError: '日记暂时无法加载，请稍后重试。' });
         }
       },
       readDiaryById: async diaryId => {

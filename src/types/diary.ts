@@ -82,6 +82,7 @@ export type ChatTurnRequest = {
   conversationId: string;
   userMessageId: string;
   attempt: number;
+  deviceLocalDate?: string;
   status: 'pending' | 'completed' | 'failed' | 'blocked' | 'stale';
   source?: 'mock' | 'provider';
   providerRequestId?: string;

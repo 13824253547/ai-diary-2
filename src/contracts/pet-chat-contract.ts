@@ -17,6 +17,7 @@ export type PetChatTurn = {
   sequence: number;
   userMessageId: string;
   assistantMessageId?: string;
+  deviceLocalDate?: string;
   attempt: number;
   status: 'pending' | 'completed' | 'failed';
   failureCode?: 'timeout' | 'cancelled' | 'provider_failed';
@@ -77,6 +78,8 @@ export function isPetChatTurn(value: unknown): value is PetChatTurn {
     && isSafePositiveInteger(value.sequence)
     && isNonEmptyString(value.userMessageId)
     && (value.assistantMessageId === undefined || isNonEmptyString(value.assistantMessageId))
+    && (value.deviceLocalDate === undefined
+      || (typeof value.deviceLocalDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.deviceLocalDate)))
     && isSafePositiveInteger(value.attempt)
     && (value.status === 'pending' || value.status === 'completed' || value.status === 'failed')
     && (value.failureCode === undefined

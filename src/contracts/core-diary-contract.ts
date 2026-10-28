@@ -19,6 +19,7 @@ export type ContractErrorCode =
   | 'invalid_input'
   | 'version_conflict'
   | 'asset_unreadable'
+  | 'publication_blocked'
   | 'provider_failed';
 
 export type RemoteError = {
@@ -103,6 +104,7 @@ export type SaveDiaryRequestContract = {
   summary: string;
   location: string;
   date: string;
+  publishedLocalDate?: string;
   privacy: DiaryPrivacy;
   photoIds: string[];
   publicBlockIds?: string[];

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useEffect } from 'react';
 import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { GrowthScreen } from '../../src/components/profile/growth-screen';
@@ -8,7 +9,13 @@ import { art } from '../../src/theme/assets';
 
 export default function InsightsEntry() {
   const router = useRouter();
+  const growth = useAppStore(state => state.growthInsights);
+  const growthStatus = useAppStore(state => state.growthInsightsStatus);
+  const growthError = useAppStore(state => state.growthInsightsError);
+  const loadGrowthInsights = useAppStore(state => state.loadGrowthInsights);
+  useEffect(() => { void loadGrowthInsights(); }, [loadGrowthInsights]);
   const stats = getDiaryStatistics(useAppStore(s => s.diaries));
+  const flowers = growth?.flowers.filter(flower => flower.status === 'bloomed').length ?? 0;
   const { width } = useWindowDimensions();
   const contentWidth = Math.min(width, 480) - 22;
   return <GrowthScreen header={<View style={s.hero}>
@@ -23,7 +30,14 @@ export default function InsightsEntry() {
     </View>} contentStyle={s.screen}>
     <GrowthArtwork kind="tree" width={contentWidth} onLabelPress={({ id }) => router.push({ pathname: '/profile/anchors', params: { tag: id } })} onFlowerPress={() => router.push('/profile/flowers')} />
     <Pressable accessibilityRole="button" accessibilityLabel="查看记忆花朵" onPress={() => router.push('/profile/flowers')} style={({ pressed }) => [s.grow, pressed && { opacity: 0.75 }]}>
-      <Ionicons name="leaf" size={17} color="#88B64E" /><Text style={s.growText}>成长记录将根据真实回忆更新</Text>
+      <Ionicons name="leaf" size={17} color="#88B64E" />
+      <Text style={s.growText}>
+        {growth
+          ? `${flowers}/3 朵记忆花 · ${growth.report.unlocked ? '专属报告已解锁' : '继续记录，等待花朵绽放'}`
+          : growthStatus === 'error'
+            ? growthError ?? '成长记录暂时无法读取'
+            : '正在读取真实成长记录…'}
+      </Text>
     </Pressable>
   </GrowthScreen>;
 }

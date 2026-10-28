@@ -96,6 +96,13 @@ export class PhotoAssetService {
     return records.map(record => this.toAssetContract(record));
   }
 
+  async assertMaterialCapacity(ownerDeviceId: string) {
+    const count = await this.prisma.materialPhoto.count({ where: { ownerDeviceId } });
+    if (count >= MAX_MATERIAL_LIBRARY_PHOTOS) {
+      throw new PhotoAssetError('limit_exceeded', `素材库最多保存 ${MAX_MATERIAL_LIBRARY_PHOTOS} 张照片，请先删除部分素材。`);
+    }
+  }
+
   async uploadMaterials(
     ownerDeviceId: string,
     uploads: PhotoAssetUpload[],
@@ -492,6 +499,54 @@ export class PhotoAssetService {
       where: { ownerDeviceId, diaryId, photoId },
     });
     if (!row) throw new PhotoAssetError('not_found', '日记照片不存在。');
+    return this.readFile(row.filePath, row.mimeType);
+  }
+
+  async readDiscoveryPhotoCopy(storyId: string, photoId: string) {
+    const story = await this.prisma.discoveryStory.findFirst({
+      where: {
+        id: storyId,
+        publicationStatus: 'published',
+        publishedAt: { not: null },
+        withdrawnAt: null,
+      },
+      select: {
+        ownerDeviceId: true,
+        sourceDiaryId: true,
+        sourceDiaryVersion: true,
+        publicPhotoIds: true,
+      },
+    });
+    const publicPhotoIds = Array.isArray(story?.publicPhotoIds)
+      ? story.publicPhotoIds.filter((id): id is string => typeof id === 'string')
+      : [];
+    if (!story?.sourceDiaryId
+      || !story.sourceDiaryVersion
+      || !publicPhotoIds.includes(photoId)) {
+      throw new PhotoAssetError('not_found', '公开故事照片不存在。');
+    }
+
+    const diary = await this.prisma.diary.findFirst({
+      where: {
+        id: story.sourceDiaryId,
+        ownerDeviceId: story.ownerDeviceId,
+        version: story.sourceDiaryVersion,
+        privacy: { not: 'private' },
+      },
+      select: { privacy: true },
+    });
+    if (!diary || diary.privacy === 'anonymous') {
+      throw new PhotoAssetError('not_found', '公开故事照片不存在。');
+    }
+
+    const row = await this.prisma.diaryPhotoCopy.findFirst({
+      where: {
+        ownerDeviceId: story.ownerDeviceId,
+        diaryId: story.sourceDiaryId,
+        photoId,
+      },
+    });
+    if (!row) throw new PhotoAssetError('not_found', '公开故事照片不存在。');
     return this.readFile(row.filePath, row.mimeType);
   }
 

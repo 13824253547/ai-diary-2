@@ -15,16 +15,19 @@ import { colors } from '../../src/theme/tokens';
 const options: { id: DiaryPrivacy; title: string; detail: string; icon: keyof typeof Ionicons.glyphMap; color: string }[] = [
   { id: 'private', title: '私密 · 仅自己可见', detail: '只有你自己能看到', icon: 'lock-closed', color: '#FF871E' },
   { id: 'anonymous', title: '匿名公开 · 独立马甲', detail: '以匿名身份公开，保护隐私', icon: 'glasses', color: '#B4B1AD' },
-  { id: 'public-likes', title: '公开 · 仅点赞', detail: '所有人可见，但不可评论', icon: 'heart', color: '#ED8584' },
-  { id: 'public-comments', title: '公开 · 可评论', detail: '所有人可见，可评论互动', icon: 'chatbubble', color: '#79ACDD' },
+  { id: 'public-likes', title: '公开 · 仅点赞', detail: '所有人可见，可收到点赞', icon: 'heart', color: '#ED8584' },
 ];
+
+function selectablePrivacy(privacy?: DiaryPrivacy): DiaryPrivacy {
+  return privacy === 'public-comments' ? 'public-likes' : privacy ?? 'private';
+}
 
 export default function PrivacyScreen() {
   const router = useRouter();
   const { diaryId, returnTo } = useLocalSearchParams<{ diaryId?: string; returnTo?: string }>();
   const diary = useAppStore(state => state.diaries.find(item => item.id === diaryId));
   const setDiaryVisibility = useAppStore(state => state.setDiaryVisibility);
-  const [privacy, setPrivacy] = useState<DiaryPrivacy>(diary?.privacy ?? 'private');
+  const [privacy, setPrivacy] = useState<DiaryPrivacy>(() => selectablePrivacy(diary?.privacy));
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>(diary?.publicBlockIds ?? (diary ? publicParagraphs(diary).map(block => block.id) : []));
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -37,7 +40,7 @@ export default function PrivacyScreen() {
     saveRequestIdRef.current += 1;
     setSaving(false);
     if (diary) {
-      setPrivacy(diary.privacy);
+      setPrivacy(selectablePrivacy(diary.privacy));
       setSelectedBlocks(diary.publicBlockIds ?? publicParagraphs(diary).map(block => block.id));
     }
   }, [diaryId]);
@@ -56,7 +59,7 @@ export default function PrivacyScreen() {
     saveRequestIdRef.current = requestId;
     const targetDiaryId = diary.id;
     const targetReturnTo = returnTo;
-    const ids = selectedBlocks.length === blocks.length ? undefined : selectedBlocks;
+    const ids = privacy === 'private' ? undefined : selectedBlocks;
     setSaving(true);
     const result = await setDiaryVisibility(targetDiaryId, privacy, ids);
     if (!isMountedRef.current || saveRequestIdRef.current !== requestId || activeDiaryIdRef.current !== targetDiaryId) {
@@ -64,6 +67,10 @@ export default function PrivacyScreen() {
     }
     setSaving(false);
     if (!result.ok) {
+      if (result.reason === 'publication_blocked') {
+        Alert.alert('暂不能发布到发现', result.message);
+        return;
+      }
       if (result.reason === 'invalid_input') {
         Alert.alert('至少公开一段内容', '勾选一段正文或引用，再生成分享预览。');
         return;

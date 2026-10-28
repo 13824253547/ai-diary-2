@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, TextInput, View, type ImageSourcePropType, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View, type ImageSourcePropType, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -9,12 +9,13 @@ import { TopBar } from '../../src/components/layout/top-bar';
 import { Button } from '../../src/components/common/button';
 import { EmptyResult, IconAction, SearchField, SectionTitle, supportStyles as u } from '../../src/components/common/support-ui';
 import { Photo } from '../../src/components/diary/photo';
-import { CityStamp, cityStampOptions, type CityStampConfig } from '../../src/components/library/city-stamp';
-import { getVisitedCityStampIds, isCityStampUnlocked } from '../../src/components/library/city-stamp-catalog';
+import { CityStamp, type CityStampConfig } from '../../src/components/library/city-stamp';
+import { getCityStampConfig, getVisitedCityStampIds } from '../../src/components/library/city-stamp-catalog';
 import { useAppStore } from '../../src/store/use-app-store';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
 import type { DiaryPhoto } from '../../src/types/diary';
+import type { PostcardComposition } from '../../src/types/postcard';
 import {
   ALL_PHOTOS_ALBUM_ID,
   DEVICE_PHOTO_PAGE_SIZE,
@@ -46,7 +47,12 @@ const stickerItems = [
   { title: '抱抱小橘', image: art.stickerCry, artKey: 'stickerCry' },
   { title: '喜欢你', image: art.stickerLove, artKey: 'stickerLove' },
 ] as const;
+type PostcardStickerId = (typeof stickerItems)[number]['artKey'];
 const inspirationCards = ['今天阳光正好，发生了什么小确幸？', '如果用一个颜色形容今天，你会选什么？', '最近有没有什么让你心动的瞬间？'];
+
+function isPostcardStickerId(value?: string): value is PostcardStickerId {
+  return stickerItems.some(item => item.artKey === value);
+}
 
 function getPhotoImageSource(photo: DiaryPhoto): ImageSourcePropType | undefined {
   if (photo.localUri || photo.uri) {
@@ -92,8 +98,13 @@ export default function LibraryScreen() {
   const [deleting, setDeleting] = useState(false);
   const [deleteMode, setDeleteMode] = useState(false);
   const [uploadError, setUploadError] = useState<string>();
+  const [materialLoadError, setMaterialLoadError] = useState(false);
   const materialSyncRevision = useRef(0);
   const unlockedCityStampIds = useMemo(() => getVisitedCityStampIds(diaries), [diaries]);
+  const ownedCityStamps = useMemo(() => [...unlockedCityStampIds]
+    .map(id => getCityStampConfig(id))
+    .filter((stamp): stamp is CityStampConfig => stamp !== undefined)
+    .slice(0, 3), [unlockedCityStampIds]);
   const uploadAlbumRequestVersion = useRef(0);
   const loadingMoreDevicePhotosRef = useRef(false);
   const activeDeviceAlbum = deviceAlbums.find(album => album.id === activeDeviceAlbumId);
@@ -134,6 +145,8 @@ export default function LibraryScreen() {
         setAiGenerationError('没有收到已保存的真实配图，请重试。');
         return;
       }
+      materialSyncRevision.current += 1;
+      setMaterialLoadError(false);
       setSheet(null);
       setPreview({ title: photo.title, image: getPhotoImageSource(photo), photoId: photo.id, generated: true });
     } catch {
@@ -168,28 +181,48 @@ export default function LibraryScreen() {
   };
   const usePreviewForPostcard = () => {
     if (!preview || (preview.stamp && !preview.stampUnlocked)) return;
-    const params = preview.photoId
-      ? { photoId: preview.photoId }
-      : { decoration: preview.stamp?.id ?? preview.artKey! };
+    const composition: PostcardComposition = {};
+    if (preview.photoId) {
+      const current = useAppStore.getState();
+      if (!current.materialPhotoIds.includes(preview.photoId)
+        || !current.photos.some(photo => photo.id === preview.photoId
+          && (photo.source === 'device' || photo.source === 'generated'))) {
+        Alert.alert('无法添加这张照片', '这张照片当前不在素材库，请重新打开预览后重试。');
+        return;
+      }
+      composition.photoId = preview.photoId;
+    } else if (preview.stamp) {
+      if (!unlockedCityStampIds.has(preview.stamp.id)) return;
+      composition.cityStampId = preview.stamp.id;
+    } else if (preview.artKey && isPostcardStickerId(preview.artKey)) {
+      composition.stickerId = preview.artKey;
+    } else {
+      return;
+    }
     close();
-    router.push({ pathname: '/postcard', params });
+    router.push({ pathname: '/postcard/apply', params: composition });
   };
-  const showGeneratedPreviewActions = () => {
+  const startDiaryFromGeneratedPhoto = () => {
     if (!preview?.generated || !preview.photoId) return;
-    Alert.alert('更多操作', undefined, [
-      { text: '用于日记', onPress: () => setSheet('diary') },
-      { text: '用于明信片', onPress: usePreviewForPostcard },
-      { text: '取消', style: 'cancel' },
-    ]);
+    const store = useAppStore.getState();
+    if (!store.materialPhotoIds.includes(preview.photoId)
+      || !store.photos.some(photo => photo.id === preview.photoId)) {
+      Alert.alert('暂时无法生成日记', '这张配图当前不在素材库，请重新打开预览后重试。');
+      return;
+    }
+    const draftId = store.beginCreation();
+    store.setDraftPhotos(draftId, [preview.photoId]);
+    store.setCurrentStep('album');
+    close();
+    router.push({ pathname: '/album/select', params: { draftId, source: 'materials' } });
   };
   useEffect(() => {
     if (process.env.JEST_WORKER_ID) return;
     let active = true;
     const revision = materialSyncRevision.current;
     void listMaterialPhotosFromBackend().then(result => {
-      if (active && revision === materialSyncRevision.current && result.ok) {
-        useAppStore.getState().syncMaterialPhotos(result.photos);
-      }
+      if (!active || revision !== materialSyncRevision.current) return;
+      setMaterialLoadError(!result.ok || !useAppStore.getState().syncMaterialPhotos(result.photos));
     });
     return () => { active = false; };
   }, []);
@@ -323,6 +356,7 @@ export default function LibraryScreen() {
       Alert.alert('上传失败', '素材库没有收到完整的照片结果，请重试。');
       return;
     }
+    setMaterialLoadError(false);
     setUploading(false);
     setSelectedUploadIds([]);
     close();
@@ -409,12 +443,36 @@ export default function LibraryScreen() {
     </View>
     <View style={s.grid}>{visiblePhotos.map(p => <Pressable accessibilityRole="button" accessibilityLabel={deleteMode ? `选择删除${p.title}` : `预览${p.title}`} key={p.id} onPress={() => { if (deleteMode) toggleDeletePhoto(p.id); else setPreview({ title: p.title, image: getPhotoImageSource(p), photoId: p.id, generated: p.source === 'generated' }); }} style={s.photo}><Image testID={`material-photo-${p.id}`} source={getPhotoImageSource(p)} style={s.image} />{deleteMode ? <View style={[s.selectionMark, selectedDeleteIds.includes(p.id) && s.selectedMark]}><Ionicons name={selectedDeleteIds.includes(p.id) ? 'checkmark' : 'ellipse-outline'} size={15} color={selectedDeleteIds.includes(p.id) ? '#fff' : colors.textSecondary} /></View> : !diaries.some(d => d.photoIds.includes(p.id) || d.blocks.some(block => block.type === 'photo' ? block.photoId === p.id : block.photoIds?.includes(p.id))) ? <Text style={s.badge}>未生成日记</Text> : null}</Pressable>)}</View>
     {deleteMode ? <Button disabled={!selectedDeleteIds.length || deleting} label={deleting ? '正在删除…' : `删除所选（${selectedDeleteIds.length}）`} onPress={() => Alert.alert('删除素材', `确定删除选中的 ${selectedDeleteIds.length} 张照片吗？已保存日记中的照片副本会保留。`, [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { void confirmDelete(); } }])} /> : null}
-    {photos.length === 0 ? <EmptyResult title={search ? '没有找到匹配日记的照片' : '还没有照片素材'} /> : null}
+    {photos.length === 0 ? <EmptyResult
+      title={materialLoadError && !materialPhotos.length ? '素材暂时无法加载' : search ? '没有找到匹配日记的照片' : '还没有照片素材'}
+    >{materialLoadError && !materialPhotos.length ? <Text style={u.muted}>请稍后重新打开页面重试。</Text> : undefined}</EmptyResult> : null}
     <View style={s.divider} />
     <SectionTitle title="贴纸表情" />
     <View style={s.stickers}>{stickerItems.map(item => <Pressable accessibilityLabel={`预览${item.title}`} key={item.title} onPress={() => setPreview(item)}><Image source={item.image} style={s.stickerImage} resizeMode="contain" /></Pressable>)}</View>
     <SectionTitle title="城市印章" action="按地区浏览" onPress={() => router.push('/library/cities')} />
-    <View style={s.stampRow}>{cityStampOptions.map(item => <Pressable key={item.id} style={s.stampButton} accessibilityLabel={`预览${item.cityName}印章`} onPress={() => setPreview({ title: item.cityName, stamp: item, stampUnlocked: isCityStampUnlocked(item.id, unlockedCityStampIds) })}><CityStamp {...item} width="100%" height="100%" /></Pressable>)}</View>
+    {ownedCityStamps.length ? (
+      <View style={s.stampRow} testID="owned-city-stamps">
+        {ownedCityStamps.map(item => (
+          <Pressable
+            key={item.id}
+            style={s.stampButton}
+            accessibilityRole="button"
+            accessibilityLabel={`预览${item.cityName}印章`}
+            onPress={() => setPreview({ title: item.cityName, stamp: item, stampUnlocked: true })}
+          >
+            <CityStamp {...item} width="100%" height="100%" />
+          </Pressable>
+        ))}
+      </View>
+    ) : (
+      <View style={s.stampEmpty} testID="city-stamp-empty">
+        <Ionicons name="location-outline" size={24} color={colors.textMuted} />
+        <View style={s.stampEmptyCopy}>
+          <Text style={s.stampEmptyTitle}>暂无城市印章</Text>
+          <Text style={s.stampEmptyDetail}>保存一篇地点可识别的日记后，这里会展示对应印章</Text>
+        </View>
+      </View>
+    )}
     <SectionTitle title="灵感卡" />
     <View style={s.inspirations}>{inspirationCards.map(q => <Pressable key={q} style={s.inspirationCard} onPress={() => { setPrompt(q); setAnswer(''); setSheet('inspiration'); }}><Text style={s.inspirationText}>{q}</Text></Pressable>)}</View>
     <SectionTitle title="AI补图" />
@@ -423,7 +481,6 @@ export default function LibraryScreen() {
       visible={Boolean(preview || sheet)}
       onClose={close}
       title={sheet === 'upload' ? '添加照片' : sheet === 'upload-albums' ? '选择相册' : sheet === 'diary' ? '添加到哪篇日记？' : sheet === 'ai' ? '让想象成为一张照片' : sheet === 'inspiration' ? '留住这个小瞬间' : preview?.title}
-      headerAction={preview?.generated && !sheet ? <Pressable accessibilityRole="button" accessibilityLabel="更多配图操作" hitSlop={12} onPress={showGeneratedPreviewActions}><Ionicons name="ellipsis-horizontal" size={23} color={colors.textPrimary} /></Pressable> : undefined}
       scroll
       maxHeight="85%"
       sheetStyle={s.sheet}
@@ -459,16 +516,17 @@ export default function LibraryScreen() {
               multiline
               style={s.textInput}
             />
-            {generating ? <View accessibilityRole="progressbar" accessibilityLabel="正在生成配图" style={s.aiLoading}>
-              <ActivityIndicator size="small" color={colors.brandStrong} />
-              <Text style={u.muted}>正在为你描绘画面，请稍候…</Text>
-            </View> : null}
             {aiGenerationError ? <Text accessibilityRole="alert" style={s.aiError}>{aiGenerationError}</Text> : null}
-            <Button disabled={!prompt.trim() || generating} label={generating ? '正在生成…' : aiGenerationError ? '重新生成' : '生成配图'} onPress={() => { void submitAIImage(); }} />
+            <Button
+              disabled={!prompt.trim() || generating || material.length >= MAX_MATERIAL_LIBRARY_PHOTOS}
+              loading={generating}
+              label={generating ? '正在为你描绘画面，请稍候…' : material.length >= MAX_MATERIAL_LIBRARY_PHOTOS ? '素材库已满，请先删除部分照片' : aiGenerationError ? '重新生成' : '生成配图'}
+              onPress={() => { void submitAIImage(); }}
+            />
             {generating ? <Button variant="secondary" label="取消生成" onPress={cancelAIImage} /> : null}
           </> : null}
           {sheet === 'inspiration' ? <><Text style={u.body}>{prompt}</Text><TextInput accessibilityLabel="记录灵感" value={answer} onChangeText={setAnswer} multiline placeholder="慢慢写，把心情留在这里…" style={s.textInput} /><Button disabled={!answer.trim()} label="和小橘聊聊" onPress={() => { useAppStore.getState().sendChat(answer.trim()); close(); router.push('/(tabs)/pet'); }} /></> : null}
-          {preview && !sheet ? <>{preview.stamp ? <><CityStamp {...preview.stamp} width="100%" height={270} testID="city-stamp-preview" /><Text style={u.muted}>{preview.stampUnlocked ? '已解锁，可用于明信片。' : '记录地点与城市名称精确匹配的已保存日记后解锁应用。'}</Text></> : <Image testID="material-photo-preview" source={preview.image} style={s.preview} resizeMode="contain" />}{preview.photoId ? preview.generated ? <><Button label={savingGeneratedImage ? '正在保存…' : '保存到相册'} disabled={savingGeneratedImage} onPress={() => { void savePreviewToLibrary(); }} />{saveGeneratedImageMessage ? <Text accessibilityLiveRegion="polite" style={saveGeneratedImageMessage.startsWith('已保存') ? s.savedMessage : s.aiError}>{saveGeneratedImageMessage}</Text> : null}</> : <><Button label="用于日记" onPress={() => setSheet('diary')} /><Button label="用于明信片" variant="secondary" onPress={usePreviewForPostcard} /></> : <Button label="用于明信片" onPress={usePreviewForPostcard} />}</> : null}
+          {preview && !sheet ? <>{preview.stamp ? <><CityStamp {...preview.stamp} width="100%" height={270} testID="city-stamp-preview" /><Text style={u.muted}>{preview.stampUnlocked ? '已解锁，可用于明信片。' : '记录地点与城市名称精确匹配的已保存日记后解锁应用。'}</Text></> : <Image testID="material-photo-preview" source={preview.image} style={s.preview} resizeMode="contain" />}{preview.photoId ? preview.generated ? <><Button label={savingGeneratedImage ? '正在保存…' : '保存到相册'} disabled={savingGeneratedImage} onPress={() => { void savePreviewToLibrary(); }} />{saveGeneratedImageMessage ? <Text accessibilityLiveRegion="polite" style={saveGeneratedImageMessage.startsWith('已保存') ? s.savedMessage : s.aiError}>{saveGeneratedImageMessage}</Text> : null}<Button label="用于明信片" variant="secondary" onPress={usePreviewForPostcard} /><Button label="生成日记" variant="secondary" onPress={startDiaryFromGeneratedPhoto} /></> : <><Button label="用于日记" onPress={() => setSheet('diary')} /><Button label="用于明信片" variant="secondary" onPress={usePreviewForPostcard} /></> : <Button label="用于明信片" onPress={usePreviewForPostcard} />}</> : null}
     </BottomSheet>
   </Screen>;
 }
@@ -480,7 +538,7 @@ const s = StyleSheet.create({
   sectionAction: { color: colors.textSecondary, fontSize: 12, paddingVertical: 6 },
   albumSelector: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 7, paddingVertical: 4 }, albumSelectorText: { fontSize: 16, fontWeight: '600', color: colors.textPrimary }, albumOptions: { gap: 2 }, albumOption: { paddingVertical: 12, borderBottomWidth: 1, borderColor: colors.border }, albumOptionText: { fontSize: 15, color: colors.textPrimary },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 }, photo: { width: '31.8%', aspectRatio: 1.05, borderRadius: 8, overflow: 'hidden', backgroundColor: colors.surface }, photoImage: { width: '100%', height: '100%' }, image: { width: '100%', height: '100%', resizeMode: 'cover' }, badge: { position: 'absolute', right: 4, bottom: 4, borderRadius: 9, backgroundColor: '#fff9ec', fontSize: 9, paddingVertical: 3, paddingHorizontal: 6, color: colors.textSecondary },
-  divider: { height: 1, backgroundColor: colors.border, marginTop: -4 }, stickers: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -8 }, stickerImage: { width: 47, height: 49 }, stampRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -10 }, stampButton: { flex: 1, height: 83, alignItems: 'center', justifyContent: 'center' }, inspirations: { flexDirection: 'row', gap: 8, marginTop: -7 }, inspirationCard: { flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: '#fff0dc', borderRadius: 8, padding: 10, minHeight: 70, justifyContent: 'center' }, inspirationText: { color: colors.textPrimary, fontSize: 11, lineHeight: 18 },
+  divider: { height: 1, backgroundColor: colors.border, marginTop: -4 }, stickers: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -8 }, stickerImage: { width: 47, height: 49 }, stampRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -10 }, stampButton: { flex: 1, height: 83, alignItems: 'center', justifyContent: 'center' }, stampEmpty: { minHeight: 83, marginTop: -10, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 12, backgroundColor: colors.surfaceAlt }, stampEmptyCopy: { flex: 1, gap: 2 }, stampEmptyTitle: { fontSize: 13, fontWeight: '600', color: colors.textSecondary }, stampEmptyDetail: { fontSize: 11, lineHeight: 16, color: colors.textMuted }, inspirations: { flexDirection: 'row', gap: 8, marginTop: -7 }, inspirationCard: { flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: '#fff0dc', borderRadius: 8, padding: 10, minHeight: 70, justifyContent: 'center' }, inspirationText: { color: colors.textPrimary, fontSize: 11, lineHeight: 18 },
   inspiration: { borderRadius: 13, height: 86, overflow: 'hidden', flexDirection: 'row', marginTop: -9 }, inspirationCopy: { flex: 1, padding: 10, gap: 5 }, inspirationTitle: { color: '#fff', fontSize: 13, fontWeight: '600', lineHeight: 20 }, inspirationImage: { width: '43%', height: '100%', resizeMode: 'cover', borderRadius: 12 }, try: { borderRadius: 13, alignSelf: 'flex-start', backgroundColor: '#fff', paddingHorizontal: 13, paddingVertical: 4 }, tryText: { color: colors.brandStrong, fontSize: 11, fontWeight: '600' },
-  sheet: { paddingHorizontal: 20, paddingBottom: 38, borderTopLeftRadius: 24, borderTopRightRadius: 24 }, preview: { width: '100%', height: 300, borderRadius: 12 }, aiLoading: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }, aiError: { color: colors.danger, fontSize: 13, lineHeight: 19 }, savedMessage: { color: colors.textSecondary, fontSize: 13, textAlign: 'center' }, added: { position: 'absolute', right: 5, top: 5, width: 21, height: 21, borderRadius: 11, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' }, selectionMark: { position: 'absolute', right: 5, top: 5, width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }, selectedMark: { backgroundColor: colors.brand }, diaryOption: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: colors.border, paddingVertical: 15 }, textInput: { minHeight: 100, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, color: colors.textPrimary, fontSize: 14, textAlignVertical: 'top', backgroundColor: colors.surface },
+  sheet: { paddingHorizontal: 20, paddingBottom: 38, borderTopLeftRadius: 24, borderTopRightRadius: 24 }, preview: { width: '100%', height: 300, borderRadius: 12 }, aiError: { color: colors.danger, fontSize: 13, lineHeight: 19 }, savedMessage: { color: colors.textSecondary, fontSize: 13, textAlign: 'center' }, added: { position: 'absolute', right: 5, top: 5, width: 21, height: 21, borderRadius: 11, backgroundColor: colors.brand, alignItems: 'center', justifyContent: 'center' }, selectionMark: { position: 'absolute', right: 5, top: 5, width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' }, selectedMark: { backgroundColor: colors.brand }, diaryOption: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderColor: colors.border, paddingVertical: 15 }, textInput: { minHeight: 100, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, color: colors.textPrimary, fontSize: 14, textAlignVertical: 'top', backgroundColor: colors.surface },
 });

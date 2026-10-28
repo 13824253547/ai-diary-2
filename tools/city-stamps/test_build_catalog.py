@@ -15,6 +15,20 @@ SPEC = importlib.util.spec_from_file_location("city_stamp_builder", BUILDER_PATH
 BUILDER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BUILDER)
 
+MCA_FETCHER_SPEC = importlib.util.spec_from_file_location(
+    "city_stamp_mca_fetcher",
+    Path(__file__).with_name("fetch-mainland-city-units.py"),
+)
+MCA_FETCHER = importlib.util.module_from_spec(MCA_FETCHER_SPEC)
+MCA_FETCHER_SPEC.loader.exec_module(MCA_FETCHER)
+
+MCA_FETCHER_SPEC = importlib.util.spec_from_file_location(
+    "city_stamp_mca_fetcher",
+    Path(__file__).with_name("fetch-mainland-city-units.py"),
+)
+MCA_FETCHER = importlib.util.module_from_spec(MCA_FETCHER_SPEC)
+MCA_FETCHER_SPEC.loader.exec_module(MCA_FETCHER)
+
 OSM_FETCHER_SPEC = importlib.util.spec_from_file_location(
     "city_stamp_osm_fetcher",
     Path(__file__).with_name("fetch-osm-name-translations.py"),
@@ -30,6 +44,62 @@ WIKIDATA_FETCHER = importlib.util.module_from_spec(WIKIDATA_FETCHER_SPEC)
 WIKIDATA_FETCHER_SPEC.loader.exec_module(WIKIDATA_FETCHER)
 
 
+class MainlandCityUnitSourceTests(unittest.TestCase):
+    def test_only_municipalities_and_prefecture_level_cities_are_selected(self):
+        tree = {
+            "level": 0,
+            "children": [
+                {
+                    "code": "11",
+                    "name": "北京市",
+                    "type": "直辖市",
+                    "children": [
+                        {"code": "110101", "name": "东城区", "type": "市辖区"}
+                    ],
+                },
+                {
+                    "code": "44",
+                    "name": "广东省",
+                    "type": "省",
+                    "children": [
+                        {
+                            "code": "4405",
+                            "name": "汕头市",
+                            "type": "地级市",
+                            "children": [
+                                {"code": "440507", "name": "龙湖区", "type": "市辖区"}
+                            ],
+                        },
+                        {"code": "4452", "name": "揭阳市", "type": "地级市", "children": []},
+                        {"code": "445222", "name": "揭西县", "type": "县"},
+                        {"code": "4453", "name": "自治州示例", "type": "自治州"},
+                    ],
+                },
+                {
+                    "code": "81",
+                    "name": "香港特别行政区",
+                    "type": "特别行政区",
+                    "children": [],
+                },
+            ],
+        }
+
+        cities = MCA_FETCHER.collect_mainland_city_units(
+            tree,
+            lambda name: name.removesuffix("市"),
+            expected_count=3,
+        )
+
+        self.assertEqual(
+            [(city["code"], city["cityName"], city["administrativeLevel"]) for city in cities],
+            [
+                ("110000", "北京市", "municipality"),
+                ("440500", "汕头市", "prefecture-level-city"),
+                ("445200", "揭阳市", "prefecture-level-city"),
+            ],
+        )
+
+
 class WikidataNameSourceTests(unittest.TestCase):
     def test_fetch_query_accepts_exact_english_labels_and_aliases(self):
         query = WIKIDATA_FETCHER.build_query(["Kyoto"])
@@ -37,6 +107,7 @@ class WikidataNameSourceTests(unittest.TestCase):
         self.assertIn('"Kyoto"@en', query)
         self.assertIn("http://www.w3.org/2004/02/skos/core#altLabel", query)
         self.assertIn('LANG(?en) = "en"', query)
+        self.assertIn('LANGMATCHES(LANG(?zh), "zh")', query)
         self.assertIn("?zhKind", query)
         self.assertIn('BIND("label" AS ?zhKind)', query)
         self.assertIn('BIND("alias" AS ?zhKind)', query)
@@ -50,6 +121,8 @@ class WikidataNameSourceTests(unittest.TestCase):
         writer.writerow(["<Q2>", '"Nara"@en', '"奈良"@zh', '"alias"', "POINT(135.8 34.7)", '"2"'])
         writer.writerow(["<Q3>", '"Osaka"@en', '"大阪"@zh', '"alias"', "POINT(135.5 34.7)", '"3"'])
         writer.writerow(["<Q3>", '"Osaka"@en', '"大坂"@zh', '"alias"', "POINT(135.5 34.7)", '"3"'])
+        writer.writerow(["<Q4>", '"Lanzhou"@en', '"兰州"@zh-Hans', '"label"', "POINT(103.8 36.1)", '"4"'])
+        writer.writerow(["<Q5>", '"Tainan"@en', '"台南"@zh-Hant', '"alias"', "POINT(120.2 23)", '"5"'])
 
         candidates = WIKIDATA_FETCHER.read_query_candidates(response.getvalue())
 
@@ -58,6 +131,8 @@ class WikidataNameSourceTests(unittest.TestCase):
             {
                 ("Kyoto", "京都", "POINT(135.7 35)", "1"),
                 ("Nara", "奈良", "POINT(135.8 34.7)", "2"),
+                ("Lanzhou", "兰州", "POINT(103.8 36.1)", "4"),
+                ("Tainan", "台南", "POINT(120.2 23)", "5"),
             },
         )
 
@@ -109,6 +184,98 @@ class WikidataNameSourceTests(unittest.TestCase):
             {("Kyoto", "京都", "POINT(135.7 35.0)", "1857910")},
         )
 
+    def test_builder_reads_chinese_language_variants_without_suffix(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "wikidata.tsv"
+            path.write_text(
+                '?en\t?zh\t?coord\t?geonameId\n'
+                '"Lanzhou"@en\t"兰州"@zh-Hans\t"POINT(103.8 36.1)"\t"4"\n',
+                encoding="utf-8",
+            )
+
+            candidates = BUILDER.read_wikidata_wup_candidates(path)
+
+        self.assertEqual(candidates["lanzhou"][0]["cityName"], "兰州")
+
+    def test_mca_snapshot_contains_only_official_mainland_city_level_units(self):
+        cities = BUILDER.read_mainland_city_units(
+            Path(__file__).with_name("mainland-city-units.json")
+        )
+        by_name = {city["City_Name"]: city for city in cities}
+
+        self.assertEqual(len(cities), 297)
+        self.assertEqual(
+            sum(city["administrativeLevel"] == "municipality" for city in cities),
+            4,
+        )
+        self.assertEqual(
+            sum(city["administrativeLevel"] == "prefecture-level-city" for city in cities),
+            293,
+        )
+        self.assertEqual(by_name["汕头市"]["City_Code"], "440500")
+        self.assertEqual(by_name["汕头市"]["latinName"], "Shantou")
+        self.assertEqual(by_name["揭阳市"]["City_Code"], "445200")
+        self.assertEqual(by_name["揭阳市"]["latinName"], "Jieyang")
+        self.assertNotIn("揭西县", by_name)
+        self.assertNotIn("普宁市", by_name)
+        self.assertNotIn("东莞市辖区", by_name)
+
+    def test_mca_tree_filter_excludes_counties_and_non_city_prefectures(self):
+        tree = {
+            "level": 0,
+            "children": [
+                {
+                    "code": "11",
+                    "name": "北京市",
+                    "level": 1,
+                    "type": "直辖市",
+                    "children": [
+                        {"code": "110101", "name": "东城区", "type": "市辖区"}
+                    ],
+                },
+                {
+                    "code": "44",
+                    "name": "广东省",
+                    "level": 1,
+                    "type": "省",
+                    "children": [
+                        {
+                            "code": "4405",
+                            "name": "汕头市",
+                            "type": "地级市",
+                            "children": [
+                                {"code": "440507", "name": "龙湖区", "type": "市辖区"}
+                            ],
+                        },
+                        {"code": "4452", "name": "揭阳市", "type": "地级市", "children": []},
+                        {"code": "445200", "name": "揭西县", "type": "县"},
+                        {"code": "445300", "name": "某自治州", "type": "自治州"},
+                    ],
+                },
+                {
+                    "code": "81",
+                    "name": "香港特别行政区",
+                    "type": "特别行政区",
+                    "children": [],
+                },
+            ],
+        }
+
+        cities = MCA_FETCHER.collect_mainland_city_units(
+            tree,
+            lambda name: name,
+            expected_count=3,
+        )
+
+        self.assertEqual(
+            [(city["code"], city["cityName"], city["administrativeLevel"]) for city in cities],
+            [
+                ("110000", "北京市", "municipality"),
+                ("440500", "汕头市", "prefecture-level-city"),
+                ("445200", "揭阳市", "prefecture-level-city"),
+            ],
+        )
+
     def test_geonames_english_alternate_name_is_indexed_to_its_entity(self):
         by_country_name = defaultdict(lambda: defaultdict(list))
         records_by_id = {
@@ -145,6 +312,85 @@ class WikidataNameSourceTests(unittest.TestCase):
             names = BUILDER.read_wikidata_geonames_chinese_names(path)
 
         self.assertEqual(names, {"123": "唯一名称"})
+
+    def test_nearest_geoname_fallback_uses_closest_point_without_name_match(self):
+        nearest = {
+            "geonameId": "near",
+            "latitude": 40.01,
+            "longitude": -75,
+        }
+        farther = {
+            "geonameId": "far",
+            "latitude": 40.2,
+            "longitude": -75,
+        }
+        grids = {
+            "US": {
+                (39, -76): [farther],
+                (40, -75): [nearest],
+            }
+        }
+
+        match = BUILDER.nearest_geoname_candidate(
+            {
+                "ISO2_Code": "US",
+                "PWCent_Latitude": "40",
+                "PWCent_Longitude": "-75",
+            },
+            grids,
+        )
+
+        self.assertEqual(match["geonameId"], "near")
+
+    def test_catalog_validation_allows_original_wup_name_fallback(self):
+        wup_cities = [
+            {
+                "wupKey": "USA-1",
+                "ISO3_Code": "USA",
+                "City_Code": "1",
+            }
+        ]
+        areas = [
+            {"id": "US", "nameZh": "美国", "nameEn": "UNITED STATES"},
+            {"id": "CN", "nameZh": "中国大陆", "nameEn": "MAINLAND CHINA"},
+            {"id": "CN-HK", "nameZh": "中国香港", "nameEn": "HONG KONG · CHINA"},
+            {"id": "CN-MO", "nameZh": "中国澳门", "nameEn": "MACAO · CHINA"},
+            {"id": "CN-TW", "nameZh": "中国台湾", "nameEn": "TAIWAN · CHINA"},
+        ]
+        cities = [
+            {
+                "id": "wup-usa-1",
+                "cityName": "Example Town",
+                "latinName": "Example Town",
+                "areaId": "US",
+                "areaNameZh": "美国",
+                "areaNameEn": "UNITED STATES",
+                "serial": "01",
+                "aliases": [],
+                "nameSource": "wup-original",
+                "matchConfidence": "unmatched",
+            }
+        ]
+
+        BUILDER.validate_catalog(wup_cities, areas, cities)
+
+    def test_catalog_uses_mainland_china_area_label(self):
+        self.assertEqual(
+            BUILDER.stable_area("CN"),
+            {"id": "CN", "nameZh": "中国大陆", "nameEn": "MAINLAND CHINA"},
+        )
+
+    def test_mainland_china_is_listed_before_taiwan(self):
+        areas = [
+            {"id": "CN-TW", "nameZh": "中国台湾"},
+            {"id": "CN-MO", "nameZh": "中国澳门"},
+            {"id": "CN", "nameZh": "中国大陆"},
+        ]
+
+        ordered = BUILDER.sort_areas_for_display(areas)
+        ids = [area["id"] for area in ordered]
+
+        self.assertLess(ids.index("CN"), ids.index("CN-TW"))
 
     def test_wup_match_requires_an_unambiguous_nearest_coordinate(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -21,7 +21,7 @@
 | DIA-005 | 草稿保存与放弃 | [日记管理](modules/diary-management.md)，DIA-005-AC* | E02/04/05/06 | TC-DIA-005-001 | [T-DIA-005](../delivery/tasks/DIA-005.md) | [DIA-005](../delivery/test-cases/DIA-005.md) |
 | DIA-006 | 回忆检索 | [日记管理](modules/diary-management.md)，DIA-006-AC* | 日期/界面筛选待补 | TC-DIA-006-001 | [T-DIA-006](../delivery/tasks/DIA-006.md) | [DIA-006](../delivery/test-cases/DIA-006.md) |
 | DIA-007 | 月度装订 | [日记管理](modules/diary-management.md)，DIA-007-AC* | E15：动态分组；文件待Q-011 | TC-DIA-007-001 | [T-DIA-007](../delivery/tasks/DIA-007.md) | [DIA-007](../delivery/test-cases/DIA-007.md) |
-| SHR-001 | 公开范围 | [分享](modules/sharing-and-privacy.md)，SHR-001-AC* | E11：保存与空选段拦截 | TC-SHR-001-001 | [T-SHR-001](../delivery/tasks/SHR-001.md) | [SHR-001](../delivery/test-cases/SHR-001.md) |
+| SHR-001 | 公开范围与发现同步 | [分享](modules/sharing-and-privacy.md)，SHR-001-AC* | E11：保存/选段；DEV-63：自动发布/撤下子集 | TC-SHR-001-001 | [T-SHR-001](../delivery/tasks/SHR-001.md) | [SHR-001](../delivery/test-cases/SHR-001.md) |
 | SHR-002 | 选段公开 | [分享](modules/sharing-and-privacy.md)，SHR-002-AC* | E11/12/14 | TC-SHR-002-001 | [T-SHR-002](../delivery/tasks/SHR-002.md) | [SHR-002](../delivery/test-cases/SHR-002.md) |
 | SHR-003 | 匿名公开 | [分享](modules/sharing-and-privacy.md)，SHR-003-AC* | E13：文本和元数据；遮挡界面待补 | TC-SHR-003-001 | [T-SHR-003](../delivery/tasks/SHR-003.md) | [SHR-003](../delivery/test-cases/SHR-003.md) |
 | SHR-004 | 海报与预览 | [分享](modules/sharing-and-privacy.md)，SHR-004-AC* | E12/13：内容投影；界面待补 | TC-SHR-004-001 | [T-SHR-004](../delivery/tasks/SHR-004.md) | [SHR-004](../delivery/test-cases/SHR-004.md) |
@@ -78,7 +78,7 @@
 | TC-CRE-002-001 | CRE-002-AC01/02；BR-04 | 有效创作草稿，分别选择0/2/3张不同有效照片 | 观察生成按钮；0/2张不可用、3张可继续，生成入口同时拒绝不足下限 | 界面 + 领域 |
 | TC-CRE-005-001 | CRE-005-AC04；BR-03 | 生成任务A运行；退出后开始B | 注入A的进度/完成回调；B与草稿内容不被A覆盖 | 领域 |
 | TC-DIA-005-001 | DIA-005-AC02/03/05；BR-01/02 | 已保存日记，记录原正文与ID | 编辑并放弃；原文/ID/数量不变。另一轮保存沿用ID；重复保存不新增作品 | 领域 + 界面 |
-| TC-SHR-001-001 | SHR-001-AC02、SHR-002-AC01；BR-07 | 已有公开设置，取消所有选段 | 完成时提示至少一段，原设置没有部分写入；选四种范围的有效设置后能重进读取 | 界面 + 领域 |
+| TC-SHR-001-001 | SHR-001-AC02、SHR-002-AC01；BR-07 | 已有公开设置，取消所有选段 | 完成时提示至少一段，原设置没有部分写入；三种当前开放范围能重进读取；旧 `public-comments` 映射为公开仅点赞 | 界面 + 领域 |
 | TC-SHR-002-001 | SHR-002-AC02/03；BR-07 | 正文A含图A、正文B含图B、无图引用C | 仅公开B时海报/全文/摘要不出现A；仅公开C时不回退使用原图 | 领域 + 界面 |
 | TC-SHR-003-001 | SHR-003-AC01～03；BR-08 | 姓名、曾用名、图片说明、人脸区域，多尺寸预览 | 匿名且选段后查看海报/全文；文字身份不暴露、已标记面容遮挡对齐、原作品不改 | 领域 + 视觉 |
 | TC-SHR-005-001 | SHR-005-AC01；BR-09；AC02～04另待Q-014 | 私密与非私密两篇作品 | 原型核验私密平台拦截及预览/记录分离；Q-014确认后另扩展真实文件可打开、内容一致与渠道交付用例 | 领域 + 界面；真实集成待补 |

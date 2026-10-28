@@ -1,0 +1,3979 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-10-26",
+  "basis": "Existing cityStampCatalogAreas order and bundled city-stamp-catalog.json; prior WUP rows are discovery candidates only, not proof of administrative city status.",
+  "policy": "Publish only units whose official city-level administrative category and stable identity are evidenced. Do not infer status from name suffixes or WUP/GeoNames/OSM populated-place classes.",
+  "areas": [
+    {
+      "order": 1,
+      "areaId": "BT",
+      "areaNameZh": "不丹",
+      "areaNameEn": "BHUTAN",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official urban Thromde/municipality units; exact eligible classes and complete list still require verification.",
+      "findings": [
+        "The two existing WUP rows are Thimphu and Phuntsholing. Official Thromde material confirms municipal administration for Thimphu; the complete national list and the boundary between urban Thromdes and other local units are not yet established.",
+        "Do not retain other WUP rows or add other Thromdes until the complete official classification is verified."
+      ],
+      "sources": [
+        {
+          "publisher": "Thimphu Thromde",
+          "url": "https://thimphucity.bt/about/",
+          "evidence": "Official municipal authority describes Thimphu Thromde and its urban administrative scope.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Election Commission of Bhutan",
+          "url": "https://www.ecb.bt/issuance-of-the-final-electoral-roll-for-the-dzongkhag-thromdes-of-phentshogling-and-thimphu-for-the-thromde-elections-2026/",
+          "evidence": "Official election material identifies Thimphu and Phuentsholing as Dzongkhag Thromdes; it is not a complete national city-unit register.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Complete official urban Thromde classification and roster."
+      ]
+    },
+    {
+      "order": 2,
+      "areaId": "TL",
+      "areaNameZh": "东帝汶",
+      "areaNameEn": "TIMOR-LESTE",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city or explicitly urban city-municipality units only; district/municipality records are not assumed to be cities.",
+      "findings": [
+        "The existing WUP row is Dili. The Government portal describes Dili as the national capital and describes the district/municipality hierarchy, but the reviewed material does not establish a separate city-level administrative unit corresponding to the WUP row.",
+        "Keep the Dili candidate in the source-gap queue until a city-level boundary or official city-unit classification is demonstrated."
+      ],
+      "sources": [
+        {
+          "publisher": "Government of Timor-Leste",
+          "url": "https://timor-leste.gov.tl/?p=91&lang=en",
+          "evidence": "Official administrative-division page describes Dili as the capital and lists district/subdistrict structure; it does not by itself classify the WUP Dili entity as a city-level administrative unit.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Evidence that the Dili candidate is a city-level administrative unit."
+      ]
+    },
+    {
+      "order": 3,
+      "areaId": "CN",
+      "areaNameZh": "中国大陆",
+      "areaNameEn": "MAINLAND CHINA",
+      "previousCatalogRecords": 297,
+      "previousWupRecords": 0,
+      "auditStatus": "verified-existing",
+      "unitDefinition": "Four municipalities and prefecture-level cities from the reviewed Ministry of Civil Affairs snapshot.",
+      "findings": [
+        "Existing reviewed Mainland China source snapshot contains 297 eligible units: 4 municipalities and 293 prefecture-level cities."
+      ],
+      "sources": [
+        {
+          "publisher": "Ministry of Civil Affairs of the People's Republic of China",
+          "url": "https://dmfw.mca.gov.cn/XzqhVersionPublish.html",
+          "evidence": "Reviewed local snapshot: tools/city-stamps/mainland-city-units.json, data cutoff 2025-12-31.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": 297,
+      "productScopeUnitCount": null,
+      "sourceGaps": []
+    },
+    {
+      "order": 4,
+      "areaId": "CN-TW",
+      "areaNameZh": "中国台湾",
+      "areaNameEn": "TAIWAN · CHINA",
+      "previousCatalogRecords": 27,
+      "previousWupRecords": 27,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "The official city/municipality classes recognized by local administrative law; exclude ordinary townships, districts, and populated places.",
+      "findings": [
+        "The existing 27 WUP rows include names explicitly classified as townships, towns, districts, stations, or raw populated-place labels; WUP status does not establish city-level administrative status.",
+        "The official legal overview confirms distinct municipalities/cities and county-administered cities, but a complete current unit list with stable administrative codes and name evidence has not yet been assembled."
+      ],
+      "sources": [
+        {
+          "publisher": "Ministry of the Interior, Taiwan",
+          "url": "https://www.moi.gov.tw/cp.aspx?n=674",
+          "evidence": "Official overview states the hierarchy includes municipalities, cities, counties, and county-administered cities and reports their unit counts; a complete city-unit roster is still required.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Office of the President, Republic of China (Taiwan)",
+          "url": "https://english.president.gov.tw/Page/106",
+          "evidence": "Official page describes the local-government hierarchy and identifies the six special municipalities and three provincial cities; it does not enumerate county-administered cities.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Ministry of the Interior, Taiwan, Laws and Regulations",
+          "url": "https://glrs.moi.gov.tw/LawContent.aspx?id=FL001120",
+          "evidence": "Local Government Act distinguishes provinces, special municipalities, counties, cities, townships, towns, and county-administered cities.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Complete official city-unit roster and stable identifiers."
+      ]
+    },
+    {
+      "order": 5,
+      "areaId": "CN-MO",
+      "areaNameZh": "中国澳门",
+      "areaNameEn": "MACAO · CHINA",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "scope-exception-currently-conforms",
+      "unitDefinition": "Keep Macau as one product region; do not expand its seven parishes into city records.",
+      "findings": [
+        "The existing single Macau record matches the approved product scope. The official source describes the Macau SAR territory and its seven parishes; the parishes are not expanded into city entries."
+      ],
+      "sources": [
+        {
+          "publisher": "Cartography and Cadastre Bureau, Macao SAR Government",
+          "url": "https://www.dscc.gov.mo/zh-hant/geographical_location.html",
+          "evidence": "Official geographic page describes the Macau SAR territory and its seven parishes.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": 1,
+      "sourceGaps": []
+    },
+    {
+      "order": 6,
+      "areaId": "CN-HK",
+      "areaNameZh": "中国香港",
+      "areaNameEn": "HONG KONG · CHINA",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "scope-exception-pending-rebuild",
+      "unitDefinition": "Keep Hong Kong as one product region; do not expand its districts or urban places into city records.",
+      "findings": [
+        "The existing six WUP rows include multiple district/urban-place records. The approved product scope is one Hong Kong region unit, so these rows must be consolidated to one verified regional entry during data reconstruction."
+      ],
+      "sources": [
+        {
+          "publisher": "Home Affairs Department, Hong Kong SAR Government",
+          "url": "https://www.had.gov.hk/en/18_districts/my_map.htm",
+          "evidence": "Official page enumerates the 18 districts; the audit follows the approved single-region product scope rather than treating districts as cities.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": 1,
+      "sourceGaps": [
+        "Select and document the single Hong Kong regional entry during reconstruction."
+      ]
+    },
+    {
+      "order": 7,
+      "areaId": "CF",
+      "areaNameZh": "中非共和国",
+      "areaNameEn": "CENTRAL AFRICAN REPUBLIC",
+      "previousCatalogRecords": 18,
+      "previousWupRecords": 18,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level administrative units or urban-type local municipalities; general rural-inclusive communes and quartiers are not presumed to qualify.",
+      "findings": [
+        "The Government portal describes 7 regions, 16 prefectures, 72 subprefectures, 175 communes, and more than 8,500 villages/quartiers, and names principal cities. It does not classify those city names as a distinct administrative city/municipality level or provide stable unit codes.",
+        "The 18 existing WUP candidates therefore remain unverified until their exact government unit/category and identity are matched."
+      ],
+      "sources": [
+        {
+          "publisher": "Government of the Central African Republic",
+          "url": "https://gouv.cf/node/56",
+          "evidence": "Official portal gives the administrative hierarchy and a list of principal cities, but does not establish a city-level administrative category or stable city IDs.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 8,
+      "areaId": "DK",
+      "areaNameZh": "丹麦",
+      "areaNameEn": "DENMARK",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level administrative units or city-type municipalities; general rural-inclusive municipalities and statistical urban settlements are not city-level units.",
+      "findings": [
+        "Statistics Denmark describes 98 municipalities as local administrative units and defines urban areas separately as built-up/statistical areas. This supports excluding municipality-wide rural-inclusive areas as city records.",
+        "The five existing WUP rows still need an explicit candidate disposition in the audit before the area can be marked complete."
+      ],
+      "sources": [
+        {
+          "publisher": "Statistics Denmark",
+          "url": "https://www.dst.dk/da/Statistik/dokumentation/nomenklaturer/nuts",
+          "evidence": "Official statistical nomenclature describes the 2007 local-government reform and 98 municipalities.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Statistics Denmark",
+          "url": "https://www.dst.dk/en/Statistik/dokumentation/documentationofstatistics/urban-areas/statistical-presentation",
+          "evidence": "Official statistical presentation treats urban areas as a separate statistical classification, not municipal administrative units.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 9,
+      "areaId": "UA",
+      "areaNameZh": "乌克兰",
+      "areaNameEn": "UKRAINE",
+      "previousCatalogRecords": 112,
+      "previousWupRecords": 112,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially coded settlement category 'city'; exclude urban-type settlements, villages, and city districts.",
+      "findings": [
+        "The State Statistics Service identifies the official KATOTTG codifier as the source of administrative-territorial units and settlements, with a fourth-level category explicitly including cities, urban-type settlements, villages, and settlements. The complete current source snapshot and city-only extraction have not yet been checked into the project.",
+        "Use the codifier's persistent system number as the stable source identity; do not infer inclusion from the WUP name."
+      ],
+      "sources": [
+        {
+          "publisher": "State Statistics Service of Ukraine",
+          "url": "https://stat.gov.ua/en/node/7413",
+          "evidence": "Official catalog description gives the KATOTTG hierarchy, explicitly lists cities as a settlement category, and describes persistent unique system numbers.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Ministry for Communities and Territories Development of Ukraine",
+          "url": "https://mindev.gov.ua/diialnist/rozvytok-mistsevoho-samovriaduvannia/kodyfikator-administratyvno-terytorialnykh-odynyts-ta-terytorii-terytorialnykh-hromad",
+          "evidence": "Official ministry source linked by the State Statistics Service as the maintained codifier.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 10,
+      "areaId": "UZ",
+      "areaNameZh": "乌兹别克斯坦",
+      "areaNameEn": "UZBEKISTAN",
+      "previousCatalogRecords": 122,
+      "previousWupRecords": 122,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially classified city units only; districts and lower-level populated entities must be excluded.",
+      "findings": [
+        "The National Statistics Committee publishes an official city classifier, but the discovered table includes district rows as well. The precise category field, complete city-only roster, stable codes, and WUP crosswalk still require review."
+      ],
+      "sources": [
+        {
+          "publisher": "National Statistics Committee of the Republic of Uzbekistan",
+          "url": "https://api.siat.stat.uz/media/uploads/sdmx/sdmx_data_290.pdf",
+          "evidence": "Official statistical classifier titled Cities; its contents also include district labels, so the title alone is insufficient for inclusion.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 11,
+      "areaId": "UG",
+      "areaNameZh": "乌干达",
+      "areaNameEn": "UGANDA",
+      "previousCatalogRecords": 67,
+      "previousWupRecords": 67,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially designated city local governments; exclude districts and lower-level urban/rural localities.",
+      "findings": [
+        "The 2024 census source states that Uganda had 135 districts and 11 cities at census time. The complete city roster and the 67 legacy WUP candidate dispositions still need to be assembled from the official census/admin source."
+      ],
+      "sources": [
+        {
+          "publisher": "Uganda Bureau of Statistics",
+          "url": "https://www.ubos.org/wp-content/uploads/2025/06/Bugisu-Sub-Region-Census-2024-Profile-Report.pdf",
+          "evidence": "Official 2024 census profile states the country had 135 districts and 11 cities at census time.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 12,
+      "areaId": "UY",
+      "areaNameZh": "乌拉圭",
+      "areaNameEn": "URUGUAY",
+      "previousCatalogRecords": 7,
+      "previousWupRecords": 7,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level administrative units or city-type municipalities; statistical localities and broad municipal jurisdictions must be distinguished.",
+      "findings": [
+        "Government sources provide a geographic address model with locality codes and a map/list of municipalities, but these sources do not yet establish that every locality or municipality is a city-type administrative unit.",
+        "The seven legacy WUP candidates require a category and parent-jurisdiction crosswalk before inclusion or exclusion."
+      ],
+      "sources": [
+        {
+          "publisher": "National Directorate of Taxation, Uruguay",
+          "url": "https://www.gub.uy/direccion-general-impositiva/sites/direccion-general-impositiva/files/documentos/publicaciones/Codigos%20de%20Departamento%20y%20Localidad.pdf",
+          "evidence": "Official department and locality code list; locality codes alone do not prove city-level administrative status.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Office of Planning and Budget, Uruguay",
+          "url": "https://www.opp.gub.uy/sites/default/files/inline-files/Mapa%20Municipios_2020.pdf",
+          "evidence": "Official municipality map/list; rural-inclusive scope and city-type eligibility require further review.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 13,
+      "areaId": "TD",
+      "areaNameZh": "乍得",
+      "areaNameEn": "CHAD",
+      "previousCatalogRecords": 66,
+      "previousWupRecords": 66,
+      "auditStatus": "source-discovery-gap",
+      "unitDefinition": null,
+      "findings": [
+        "Initial French- and English-language searches did not surface a usable government city-level roster or administrative city classification. This is a source-discovery gap, not evidence that no such source exists.",
+        "The 66 existing WUP candidates remain unverified and must not be treated as official cities."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 14,
+      "areaId": "YE",
+      "areaNameZh": "也门",
+      "areaNameEn": "YEMEN",
+      "previousCatalogRecords": 191,
+      "previousWupRecords": 191,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level administrative units or city-type municipalities; district-level local government is not assumed to be an urban city unit.",
+      "findings": [
+        "The reviewed official legal portal describes local councils and administrative districts, but the source does not establish a separate city-level unit corresponding to the existing WUP candidates.",
+        "The 191 legacy candidates require a current, usable official roster and unit-category crosswalk; no WUP row is accepted from its name or settlement status alone."
+      ],
+      "sources": [
+        {
+          "publisher": "Yemen legal information portal",
+          "url": "https://agoye.gov.ye/page.php?id=395&lng=arabic",
+          "evidence": "Official legal material describes local authority and district councils; it does not establish the WUP settlement records as city-level administrative units.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 15,
+      "areaId": "AM",
+      "areaNameZh": "亚美尼亚",
+      "areaNameEn": "ARMENIA",
+      "previousCatalogRecords": 3,
+      "previousWupRecords": 3,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially classified city-level administrative or urban municipal units; rural communities and lower-level localities are excluded.",
+      "findings": [
+        "Armstat publishes current marz/Yerevan and urban/rural community statistics, but the located pages do not provide the complete legal city-status roster, stable unit identifiers, and a WUP candidate crosswalk.",
+        "The three legacy WUP candidates remain unverified pending a source that distinguishes city-status localities from communities and other settlements."
+      ],
+      "sources": [
+        {
+          "publisher": "Statistical Committee of the Republic of Armenia",
+          "url": "https://armstat.am/file/article/marzer_2025_4.pdf",
+          "evidence": "Official 2025 population publication for marzes and Yerevan; requires further extraction and legal-category cross-check.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Statistical Committee of the Republic of Armenia",
+          "url": "https://armstat.am/file/article/sv_12_25e_510.pdf",
+          "evidence": "Official statistical report distinguishes urban and rural communities; this alone does not provide the city-level administrative roster.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 16,
+      "areaId": "IL",
+      "areaNameZh": "以色列",
+      "areaNameEn": "ISRAEL",
+      "previousCatalogRecords": 38,
+      "previousWupRecords": 38,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official locality categories and municipal status; include only city-level municipal/locality types supported by an official code.",
+      "findings": [
+        "The Central Bureau of Statistics publishes locality lists with locality type and locality code and separate municipal-status tables. The discovered snapshots are dated 2017/2019; a current roster and a precise municipality-versus-locality inclusion rule are still required.",
+        "The 38 legacy WUP rows have not yet been cross-matched to current official locality codes and municipal categories."
+      ],
+      "sources": [
+        {
+          "publisher": "Israel Central Bureau of Statistics",
+          "url": "https://www.cbs.gov.il/he/publications/doclib/2019/households17_1755/list_e.pdf",
+          "evidence": "Official locality list by size/type includes locality codes; publication is historical and requires a current refresh.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Israel Central Bureau of Statistics",
+          "url": "https://www.cbs.gov.il/he/publications/doclib/2017/socio_eco13_1694/t07.pdf",
+          "evidence": "Official table includes municipal status and locality type/code; publication is historical and requires current verification.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 17,
+      "areaId": "IQ",
+      "areaNameZh": "伊拉克",
+      "areaNameEn": "IRAQ",
+      "previousCatalogRecords": 140,
+      "previousWupRecords": 140,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level administrative units or city-type municipalities; governorates, districts, subdistricts, and urban census areas are distinct categories.",
+      "findings": [
+        "The official statistics office publishes population estimates by governorate, district, and subdistrict, while the 2024 census questionnaire separately records urban/rural status. Neither source by itself classifies the existing 140 WUP candidates as city-level administrative units.",
+        "A current official city/municipality roster and stable unit IDs remain missing."
+      ],
+      "sources": [
+        {
+          "publisher": "Central Statistical Organization, Iraq",
+          "url": "https://cosit.gov.iq/documents/population/projection/%D8%AA%D8%B1%D9%83%D9%8A%D8%A8%D8%A9%20%D8%B3%D9%83%D8%A7%D9%86%D9%8A%D8%A9.pdf",
+          "evidence": "Official 2023 population estimates are organized by administrative governorate, district, and subdistrict, not a city class.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Central Statistical Organization, Iraq",
+          "url": "https://cosit.gov.iq/images/census2024/Enumeration%20Questionnaire%20English%20copy.pdf",
+          "evidence": "Official 2024 census form records urban/rural status separately from governorate, district, and nahya; urban status alone is not city administration.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 18,
+      "areaId": "IR",
+      "areaNameZh": "伊朗",
+      "areaNameEn": "IRAN (ISLAMIC REPUBLIC OF)",
+      "previousCatalogRecords": 259,
+      "previousWupRecords": 259,
+      "auditStatus": "source-discovery-gap",
+      "unitDefinition": null,
+      "findings": [
+        "Initial official-source searches did not locate a usable current city-level administrative roster with stable IDs and clear distinction from counties/districts. Search results that list cities are non-official and are not accepted as evidence.",
+        "The 259 existing WUP rows remain unverified; this status records a source gap, not that no official source exists."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 19,
+      "areaId": "BZ",
+      "areaNameZh": "伯利兹",
+      "areaNameEn": "BELIZE",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city councils/city municipalities; town councils require separate category review and are not included merely because they are municipalities.",
+      "findings": [
+        "Belize's Ministry responsible for local government identifies distinct City Council Acts for Belize City and Belmopan and a separate Town Council Act. This supports a city-versus-town legal distinction; complete current city-unit roster, stable identifiers, and the single legacy WUP crosswalk remain to be recorded."
+      ],
+      "sources": [
+        {
+          "publisher": "Ministry of Rural Transformation, Community Development, Labour and Local Government, Belize",
+          "url": "https://www.ruraltransformation.gov.bz/the-ministry/local-government/belize-mayors-association/",
+          "evidence": "Official ministry page distinguishes town and city councils and names the separate Belize City Council Act, Belmopan City Council Act, and Town Council Act.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Ministry of Local Government, Belize",
+          "url": "https://mlgrd.gov.bz/the-ministry/local-government/laws/",
+          "evidence": "Official local-government laws index lists the Belize City Council and Belmopan City Council Acts.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 20,
+      "areaId": "CV",
+      "areaNameZh": "佛得角",
+      "areaNameEn": "CABO VERDE",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-status localities or explicitly urban municipal units; municipality-wide territories and statistical localities are not assumed to be cities.",
+      "findings": [
+        "The National Statistics Institute's 2021 census material documents 22 administrative Concelhos and labels Praia as the capital city, but the reviewed pages do not provide a complete legal city-status roster or stable city IDs.",
+        "The two legacy WUP candidates require city-status and parent-municipality verification."
+      ],
+      "sources": [
+        {
+          "publisher": "National Statistics Institute of Cabo Verde",
+          "url": "https://ine.cv/wp-content/uploads/2022/11/cabo-verde.pdf",
+          "evidence": "Official 2021 census publication documents 22 Concelhos and identifies Praia as the capital city; it is not a complete city-status list.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 21,
+      "areaId": "RU",
+      "areaNameZh": "俄罗斯",
+      "areaNameEn": "RUSSIAN FEDERATION",
+      "previousCatalogRecords": 310,
+      "previousWupRecords": 310,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially classified city settlements with stable administrative-territorial codes; exclude urban-type settlements, villages, and municipal territories that are not cities.",
+      "findings": [
+        "Rosstat maintains official OKATO and OKTMO classifiers with current amendments. The classifier files need to be obtained and parsed to isolate settlement type 'city', confirm current names/codes, and crosswalk the 310 legacy WUP candidates."
+      ],
+      "sources": [
+        {
+          "publisher": "Federal State Statistics Service (Rosstat), Russian Federation",
+          "url": "https://rosstat.gov.ru/classification",
+          "evidence": "Official page lists current OKATO and OKTMO administrative/municipal territorial classifiers and their updates.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 22,
+      "areaId": "BG",
+      "areaNameZh": "保加利亚",
+      "areaNameEn": "BULGARIA",
+      "previousCatalogRecords": 18,
+      "previousWupRecords": 18,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially classified towns/cities with settlement codes; exclude villages, mayoralties, municipalities, and city districts.",
+      "findings": [
+        "The National Statistical Institute publishes a 2025 administrative-territorial and territorial division with separate municipality, town, and village categories and EKKATTE codes. The city/town class can be audited from this source, but the complete row extraction and 18-candidate WUP crosswalk have not yet been recorded."
+      ],
+      "sources": [
+        {
+          "publisher": "National Statistical Institute of Bulgaria",
+          "url": "https://www.nsi.bg/en/statistical-data/46/1333",
+          "evidence": "Official 2025 data distinguishes municipalities, towns, and villages and publishes EKKATTE identifiers.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "National Statistical Institute of Bulgaria",
+          "url": "https://www.nsi.bg/en/file/35537/ATTD_RB_2025.pdf",
+          "evidence": "Official 2025 administrative-territorial publication with settlement and administrative-code tables.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 23,
+      "areaId": "HR",
+      "areaNameZh": "克罗地亚",
+      "areaNameEn": "CROATIA",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level local self-government units (grad); distinguish cities from municipalities and settlements.",
+      "findings": [
+        "The Croatian Bureau of Statistics' Spatial Statistical Register contains cities/municipalities and settlements as distinct spatial-unit classes. A current official roster, stable IDs, and the six legacy WUP candidate mappings remain to be checked."
+      ],
+      "sources": [
+        {
+          "publisher": "Croatian Bureau of Statistics",
+          "url": "https://web.dzs.hr/Eng/international/Quality_Report/Quality_Report_Results/Quality%20Report%20_Spatial%20Register%202018%20EN.pdf",
+          "evidence": "Official register documentation distinguishes counties, cities/municipalities, and settlements; current snapshot extraction is pending.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 24,
+      "areaId": "GM",
+      "areaNameZh": "冈比亚",
+      "areaNameEn": "GAMBIA",
+      "previousCatalogRecords": 7,
+      "previousWupRecords": 7,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city or city-type municipal local-government authorities; regional area councils and districts are not presumed to be cities.",
+      "findings": [
+        "The Government of The Gambia lists Banjul City Council and Kanifing Municipal Council separately from regional area councils. The full statutory city/municipality classification, stable identifiers, and seven WUP candidate dispositions remain to be documented."
+      ],
+      "sources": [
+        {
+          "publisher": "Government of The Gambia",
+          "url": "https://gambia.gov.gm/gambia-app/our-ministries-3/local-government-areas/",
+          "evidence": "Official local-government directory distinguishes Banjul City Council, Kanifing Municipal Council, and regional Area Councils.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 25,
+      "areaId": "IS",
+      "areaNameZh": "冰岛",
+      "areaNameEn": "ICELAND",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially designated city-type municipality or city unit; general rural-inclusive municipalities and statistical urban nuclei must be distinguished.",
+      "findings": [
+        "Statistics Iceland distinguishes municipal jurisdictions from urban nuclei/localities and identifies Reykjavík as a municipality and the largest urban locality. Current legal category, city-level eligibility, stable code, and the single WUP crosswalk remain to be verified."
+      ],
+      "sources": [
+        {
+          "publisher": "Statistics Iceland",
+          "url": "https://www.statice.is/publications/news-archive/inhabitants/the-population-on-1-january-2024/",
+          "evidence": "Official population release lists municipalities and identifies Reykjavík as the most populous municipality.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "Statistics Iceland",
+          "url": "https://statice.is/publications/news-archive/inhabitants/population-by-urban-nuclei-2001-2020/",
+          "evidence": "Official statistical series treats urban nuclei/localities as a separate statistical geography.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 26,
+      "areaId": "GN",
+      "areaNameZh": "几内亚",
+      "areaNameEn": "GUINEA",
+      "previousCatalogRecords": 38,
+      "previousWupRecords": 38,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official urban communes/local governments only; rural communes, subprefectures, and prefectures are excluded.",
+      "findings": [
+        "The National Statistics Institute's administrative definitions distinguish urban communes from rural communes and identify the urban commune as a local administrative body. Available official definitions/statistics found so far are dated 2014–2016; a current list, stable codes, and the 38 legacy WUP candidate crosswalk remain to be verified."
+      ],
+      "sources": [
+        {
+          "publisher": "National Institute of Statistics, Guinea",
+          "url": "https://www.stat-guinee.org/images/Documents/Publications/INS/annuelles/annuaire/INS_annuaire_2016.pdf",
+          "evidence": "Official statistical yearbook defines urban and rural communes separately and describes the urban commune's municipal administration.",
+          "accessedAt": "2026-10-26"
+        },
+        {
+          "publisher": "National Institute of Statistics, Guinea",
+          "url": "https://www.stat-guinee.org/index.php?option=com_content&view=article&id=271&catid=2",
+          "evidence": "Official statistical site provides a prefecture/subprefecture/commune list; current urban/rural class linkage is still needed.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 27,
+      "areaId": "GW",
+      "areaNameZh": "几内亚比绍",
+      "areaNameEn": "GUINEA-BISSAU",
+      "previousCatalogRecords": 4,
+      "previousWupRecords": 4,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Officially designated city or urban municipal unit; regions/sectors and rural localities are not assumed to be cities.",
+      "findings": [
+        "The National Statistics Institute publishes an official statistical yearbook describing regional and sector-level administration, but the reviewed source does not establish a city-level administrative category or stable city roster. Four WUP candidates remain unverified."
+      ],
+      "sources": [
+        {
+          "publisher": "National Institute of Statistics of Guinea-Bissau",
+          "url": "https://www.stat-guinebissau.com/Menu_principal/Pubica%C3%A7%C3%B5es/anuario/boletim_estatistico_GB/guinebissau-em-numero2017.pdf",
+          "evidence": "Official statistical bulletin provides regional administrative data; no city-level category is established by the reviewed material.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 28,
+      "areaId": "CG",
+      "areaNameZh": "刚果（布）",
+      "areaNameEn": "CONGO",
+      "previousCatalogRecords": 12,
+      "previousWupRecords": 12,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level or urban municipal administrative units; departments and statistical urban areas alone are insufficient.",
+      "findings": [
+        "The National Institute of Statistics has published the 2023/2024 population census preliminary report, but the source surfaced so far reports departments and population concentration rather than a complete city/municipal legal roster. Twelve WUP candidates remain unverified."
+      ],
+      "sources": [
+        {
+          "publisher": "National Institute of Statistics, Republic of the Congo",
+          "url": "https://ins-congo.cg/rapport-preliminaire/",
+          "evidence": "Official census preliminary report identifies departments and urban population distribution; a city-level administrative roster is still required.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 29,
+      "areaId": "CD",
+      "areaNameZh": "刚果（金）",
+      "areaNameEn": "DEMOCRATIC REPUBLIC OF THE CONGO",
+      "previousCatalogRecords": 445,
+      "previousWupRecords": 445,
+      "auditStatus": "source-discovery-gap",
+      "unitDefinition": null,
+      "findings": [
+        "Initial searches surfaced legal gazette copies on a non-government host describing cities and communes as administrative levels, but no usable official government-hosted roster with stable codes was located. The re-hosted legal text is not accepted as the production source under the current source/permission rules.",
+        "The 445 legacy WUP candidates remain unverified; this is a source-hosting gap, not evidence that no official source exists."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 30,
+      "areaId": "LY",
+      "areaNameZh": "利比亚",
+      "areaNameEn": "LIBYA",
+      "previousCatalogRecords": 15,
+      "previousWupRecords": 15,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level administrative units or city-type urban municipalities; municipality-wide rural-inclusive jurisdictions are not presumed to be cities.",
+      "findings": [
+        "The Ministry of Local Government publishes a municipality list and states municipalities are local-administration units. The source does not distinguish city-type units from broader municipal jurisdictions; 15 WUP candidates remain unverified."
+      ],
+      "sources": [
+        {
+          "publisher": "Ministry of Local Government, State of Libya",
+          "url": "https://www.lgm.gov.ly/municipalities",
+          "evidence": "Official ministry list of municipalities and statement that municipalities are local administration units; city-type eligibility is not specified.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 31,
+      "areaId": "LR",
+      "areaNameZh": "利比里亚",
+      "areaNameEn": "LIBERIA",
+      "previousCatalogRecords": 13,
+      "previousWupRecords": 13,
+      "auditStatus": "source-review-started",
+      "unitDefinition": "Official city-level administrative units or city-type municipalities; census-defined urban areas are not equivalent to city administrations.",
+      "findings": [
+        "The Liberia Institute of Statistics defines urban areas by population (2,000+) and county-capital exceptions. This is a statistical urban definition, not a legal city/municipality roster; 13 WUP candidates remain unverified."
+      ],
+      "sources": [
+        {
+          "publisher": "Liberia Institute of Statistics and Geo-Information Services",
+          "url": "https://lisgis.gov.lr/censusreport/thematic/ThematicReportonMigrationUrbanization.pdf",
+          "evidence": "Official 2022 census report defines statistical urban areas; it does not establish city-level administrative status.",
+          "accessedAt": "2026-10-26"
+        }
+      ],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 32,
+      "areaId": "CA",
+      "areaNameZh": "加拿大",
+      "areaNameEn": "CANADA",
+      "previousCatalogRecords": 63,
+      "previousWupRecords": 63,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 33,
+      "areaId": "GH",
+      "areaNameZh": "加纳",
+      "areaNameEn": "GHANA",
+      "previousCatalogRecords": 105,
+      "previousWupRecords": 105,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 34,
+      "areaId": "GA",
+      "areaNameZh": "加蓬",
+      "areaNameEn": "GABON",
+      "previousCatalogRecords": 8,
+      "previousWupRecords": 8,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 35,
+      "areaId": "HU",
+      "areaNameZh": "匈牙利",
+      "areaNameEn": "HUNGARY",
+      "previousCatalogRecords": 19,
+      "previousWupRecords": 19,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 36,
+      "areaId": "MK",
+      "areaNameZh": "北马其顿",
+      "areaNameEn": "NORTH MACEDONIA",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 37,
+      "areaId": "SS",
+      "areaNameZh": "南苏丹",
+      "areaNameEn": "SOUTH SUDAN",
+      "previousCatalogRecords": 40,
+      "previousWupRecords": 40,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 38,
+      "areaId": "ZA",
+      "areaNameZh": "南非",
+      "areaNameEn": "SOUTH AFRICA",
+      "previousCatalogRecords": 124,
+      "previousWupRecords": 124,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 39,
+      "areaId": "BW",
+      "areaNameZh": "博茨瓦纳",
+      "areaNameEn": "BOTSWANA",
+      "previousCatalogRecords": 9,
+      "previousWupRecords": 9,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 40,
+      "areaId": "QA",
+      "areaNameZh": "卡塔尔",
+      "areaNameEn": "QATAR",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 41,
+      "areaId": "RW",
+      "areaNameZh": "卢旺达",
+      "areaNameEn": "RWANDA",
+      "previousCatalogRecords": 33,
+      "previousWupRecords": 33,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 42,
+      "areaId": "LU",
+      "areaNameZh": "卢森堡",
+      "areaNameEn": "LUXEMBOURG",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 43,
+      "areaId": "IN",
+      "areaNameZh": "印度",
+      "areaNameEn": "INDIA",
+      "previousCatalogRecords": 2748,
+      "previousWupRecords": 2748,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 44,
+      "areaId": "ID",
+      "areaNameZh": "印度尼西亚",
+      "areaNameEn": "INDONESIA",
+      "previousCatalogRecords": 467,
+      "previousWupRecords": 467,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 45,
+      "areaId": "GT",
+      "areaNameZh": "危地马拉",
+      "areaNameEn": "GUATEMALA",
+      "previousCatalogRecords": 49,
+      "previousWupRecords": 49,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 46,
+      "areaId": "EC",
+      "areaNameZh": "厄瓜多尔",
+      "areaNameEn": "ECUADOR",
+      "previousCatalogRecords": 42,
+      "previousWupRecords": 42,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 47,
+      "areaId": "ER",
+      "areaNameZh": "厄立特里亚",
+      "areaNameEn": "ERITREA",
+      "previousCatalogRecords": 13,
+      "previousWupRecords": 13,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 48,
+      "areaId": "SY",
+      "areaNameZh": "叙利亚",
+      "areaNameEn": "SYRIAN ARAB REPUBLIC",
+      "previousCatalogRecords": 72,
+      "previousWupRecords": 72,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 49,
+      "areaId": "CU",
+      "areaNameZh": "古巴",
+      "areaNameEn": "CUBA",
+      "previousCatalogRecords": 32,
+      "previousWupRecords": 32,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 50,
+      "areaId": "KG",
+      "areaNameZh": "吉尔吉斯斯坦",
+      "areaNameEn": "KYRGYZSTAN",
+      "previousCatalogRecords": 23,
+      "previousWupRecords": 23,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 51,
+      "areaId": "DJ",
+      "areaNameZh": "吉布提",
+      "areaNameEn": "DJIBOUTI",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 52,
+      "areaId": "KZ",
+      "areaNameZh": "哈萨克斯坦",
+      "areaNameEn": "KAZAKHSTAN",
+      "previousCatalogRecords": 54,
+      "previousWupRecords": 54,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 53,
+      "areaId": "CO",
+      "areaNameZh": "哥伦比亚",
+      "areaNameEn": "COLOMBIA",
+      "previousCatalogRecords": 99,
+      "previousWupRecords": 99,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 54,
+      "areaId": "CR",
+      "areaNameZh": "哥斯达黎加",
+      "areaNameEn": "COSTA RICA",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 55,
+      "areaId": "CM",
+      "areaNameZh": "喀麦隆",
+      "areaNameEn": "CAMEROON",
+      "previousCatalogRecords": 90,
+      "previousWupRecords": 90,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 56,
+      "areaId": "TM",
+      "areaNameZh": "土库曼斯坦",
+      "areaNameEn": "TURKMENISTAN",
+      "previousCatalogRecords": 16,
+      "previousWupRecords": 16,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 57,
+      "areaId": "TR",
+      "areaNameZh": "土耳其",
+      "areaNameEn": "TÜRKIYE",
+      "previousCatalogRecords": 198,
+      "previousWupRecords": 198,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 58,
+      "areaId": "ST",
+      "areaNameZh": "圣多美和普林西比",
+      "areaNameEn": "SAO TOME AND PRINCIPE",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 59,
+      "areaId": "GY",
+      "areaNameZh": "圭亚那",
+      "areaNameEn": "GUYANA",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 60,
+      "areaId": "TZ",
+      "areaNameZh": "坦桑尼亚",
+      "areaNameEn": "UNITED REPUBLIC OF TANZANIA",
+      "previousCatalogRecords": 142,
+      "previousWupRecords": 142,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 61,
+      "areaId": "EG",
+      "areaNameZh": "埃及",
+      "areaNameEn": "EGYPT",
+      "previousCatalogRecords": 340,
+      "previousWupRecords": 340,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 62,
+      "areaId": "ET",
+      "areaNameZh": "埃塞俄比亚",
+      "areaNameEn": "ETHIOPIA",
+      "previousCatalogRecords": 501,
+      "previousWupRecords": 501,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 63,
+      "areaId": "KI",
+      "areaNameZh": "基里巴斯",
+      "areaNameEn": "KIRIBATI",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 64,
+      "areaId": "TJ",
+      "areaNameZh": "塔吉克斯坦",
+      "areaNameEn": "TAJIKISTAN",
+      "previousCatalogRecords": 39,
+      "previousWupRecords": 39,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 65,
+      "areaId": "SN",
+      "areaNameZh": "塞内加尔",
+      "areaNameEn": "SENEGAL",
+      "previousCatalogRecords": 49,
+      "previousWupRecords": 49,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 66,
+      "areaId": "RS",
+      "areaNameZh": "塞尔维亚",
+      "areaNameEn": "SERBIA",
+      "previousCatalogRecords": 20,
+      "previousWupRecords": 20,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 67,
+      "areaId": "SL",
+      "areaNameZh": "塞拉利昂",
+      "areaNameEn": "SIERRA LEONE",
+      "previousCatalogRecords": 17,
+      "previousWupRecords": 17,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 68,
+      "areaId": "CY",
+      "areaNameZh": "塞浦路斯",
+      "areaNameEn": "CYPRUS",
+      "previousCatalogRecords": 4,
+      "previousWupRecords": 4,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 69,
+      "areaId": "MX",
+      "areaNameZh": "墨西哥",
+      "areaNameEn": "MEXICO",
+      "previousCatalogRecords": 210,
+      "previousWupRecords": 210,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 70,
+      "areaId": "TG",
+      "areaNameZh": "多哥",
+      "areaNameEn": "TOGO",
+      "previousCatalogRecords": 33,
+      "previousWupRecords": 33,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 71,
+      "areaId": "DO",
+      "areaNameZh": "多米尼加共和国",
+      "areaNameEn": "DOMINICAN REPUBLIC",
+      "previousCatalogRecords": 19,
+      "previousWupRecords": 19,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 72,
+      "areaId": "AT",
+      "areaNameZh": "奥地利",
+      "areaNameEn": "AUSTRIA",
+      "previousCatalogRecords": 8,
+      "previousWupRecords": 8,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 73,
+      "areaId": "VE",
+      "areaNameZh": "委内瑞拉",
+      "areaNameEn": "VENEZUELA (BOLIVARIAN REPUBLIC OF)",
+      "previousCatalogRecords": 75,
+      "previousWupRecords": 75,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 74,
+      "areaId": "BD",
+      "areaNameZh": "孟加拉国",
+      "areaNameEn": "BANGLADESH",
+      "previousCatalogRecords": 371,
+      "previousWupRecords": 371,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 75,
+      "areaId": "AO",
+      "areaNameZh": "安哥拉",
+      "areaNameEn": "ANGOLA",
+      "previousCatalogRecords": 120,
+      "previousWupRecords": 120,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 76,
+      "areaId": "NI",
+      "areaNameZh": "尼加拉瓜",
+      "areaNameEn": "NICARAGUA",
+      "previousCatalogRecords": 20,
+      "previousWupRecords": 20,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 77,
+      "areaId": "NG",
+      "areaNameZh": "尼日利亚",
+      "areaNameEn": "NIGERIA",
+      "previousCatalogRecords": 791,
+      "previousWupRecords": 791,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 78,
+      "areaId": "NE",
+      "areaNameZh": "尼日尔",
+      "areaNameEn": "NIGER",
+      "previousCatalogRecords": 74,
+      "previousWupRecords": 74,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 79,
+      "areaId": "NP",
+      "areaNameZh": "尼泊尔",
+      "areaNameEn": "NEPAL",
+      "previousCatalogRecords": 36,
+      "previousWupRecords": 36,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 80,
+      "areaId": "PS",
+      "areaNameZh": "巴勒斯坦领土",
+      "areaNameEn": "STATE OF PALESTINE",
+      "previousCatalogRecords": 16,
+      "previousWupRecords": 16,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 81,
+      "areaId": "BS",
+      "areaNameZh": "巴哈马",
+      "areaNameEn": "BAHAMAS",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 82,
+      "areaId": "PK",
+      "areaNameZh": "巴基斯坦",
+      "areaNameEn": "PAKISTAN",
+      "previousCatalogRecords": 508,
+      "previousWupRecords": 508,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 83,
+      "areaId": "BB",
+      "areaNameZh": "巴巴多斯",
+      "areaNameEn": "BARBADOS",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 84,
+      "areaId": "PG",
+      "areaNameZh": "巴布亚新几内亚",
+      "areaNameEn": "PAPUA NEW GUINEA",
+      "previousCatalogRecords": 22,
+      "previousWupRecords": 22,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 85,
+      "areaId": "PY",
+      "areaNameZh": "巴拉圭",
+      "areaNameEn": "PARAGUAY",
+      "previousCatalogRecords": 11,
+      "previousWupRecords": 11,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 86,
+      "areaId": "PA",
+      "areaNameZh": "巴拿马",
+      "areaNameEn": "PANAMA",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 87,
+      "areaId": "BH",
+      "areaNameZh": "巴林",
+      "areaNameEn": "BAHRAIN",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 88,
+      "areaId": "BR",
+      "areaNameZh": "巴西",
+      "areaNameEn": "BRAZIL",
+      "previousCatalogRecords": 384,
+      "previousWupRecords": 384,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 89,
+      "areaId": "BF",
+      "areaNameZh": "布基纳法索",
+      "areaNameEn": "BURKINA FASO",
+      "previousCatalogRecords": 48,
+      "previousWupRecords": 48,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 90,
+      "areaId": "BI",
+      "areaNameZh": "布隆迪",
+      "areaNameEn": "BURUNDI",
+      "previousCatalogRecords": 42,
+      "previousWupRecords": 42,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 91,
+      "areaId": "GR",
+      "areaNameZh": "希腊",
+      "areaNameEn": "GREECE",
+      "previousCatalogRecords": 12,
+      "previousWupRecords": 12,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 92,
+      "areaId": "CW",
+      "areaNameZh": "库拉索",
+      "areaNameEn": "CURAÇAO",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 93,
+      "areaId": "DE",
+      "areaNameZh": "德国",
+      "areaNameEn": "GERMANY",
+      "previousCatalogRecords": 114,
+      "previousWupRecords": 114,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 94,
+      "areaId": "IT",
+      "areaNameZh": "意大利",
+      "areaNameEn": "ITALY",
+      "previousCatalogRecords": 104,
+      "previousWupRecords": 104,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 95,
+      "areaId": "SB",
+      "areaNameZh": "所罗门群岛",
+      "areaNameEn": "SOLOMON ISLANDS",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 96,
+      "areaId": "LV",
+      "areaNameZh": "拉脱维亚",
+      "areaNameEn": "LATVIA",
+      "previousCatalogRecords": 3,
+      "previousWupRecords": 3,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 97,
+      "areaId": "NO",
+      "areaNameZh": "挪威",
+      "areaNameEn": "NORWAY",
+      "previousCatalogRecords": 9,
+      "previousWupRecords": 9,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 98,
+      "areaId": "CZ",
+      "areaNameZh": "捷克",
+      "areaNameEn": "CZECHIA",
+      "previousCatalogRecords": 17,
+      "previousWupRecords": 17,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 99,
+      "areaId": "MD",
+      "areaNameZh": "摩尔多瓦",
+      "areaNameEn": "REPUBLIC OF MOLDOVA",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 100,
+      "areaId": "MA",
+      "areaNameZh": "摩洛哥",
+      "areaNameEn": "MOROCCO",
+      "previousCatalogRecords": 77,
+      "previousWupRecords": 77,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 101,
+      "areaId": "MC",
+      "areaNameZh": "摩纳哥",
+      "areaNameEn": "MONACO",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 102,
+      "areaId": "BN",
+      "areaNameZh": "文莱",
+      "areaNameEn": "BRUNEI DARUSSALAM",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 103,
+      "areaId": "FJ",
+      "areaNameZh": "斐济",
+      "areaNameEn": "FIJI",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 104,
+      "areaId": "SZ",
+      "areaNameZh": "斯威士兰",
+      "areaNameEn": "ESWATINI",
+      "previousCatalogRecords": 3,
+      "previousWupRecords": 3,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 105,
+      "areaId": "SK",
+      "areaNameZh": "斯洛伐克",
+      "areaNameEn": "SLOVAKIA",
+      "previousCatalogRecords": 8,
+      "previousWupRecords": 8,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 106,
+      "areaId": "SI",
+      "areaNameZh": "斯洛文尼亚",
+      "areaNameEn": "SLOVENIA",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 107,
+      "areaId": "LK",
+      "areaNameZh": "斯里兰卡",
+      "areaNameEn": "SRI LANKA",
+      "previousCatalogRecords": 30,
+      "previousWupRecords": 30,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 108,
+      "areaId": "SG",
+      "areaNameZh": "新加坡",
+      "areaNameEn": "SINGAPORE",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 109,
+      "areaId": "NC",
+      "areaNameZh": "新喀里多尼亚",
+      "areaNameEn": "NEW CALEDONIA",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 110,
+      "areaId": "NZ",
+      "areaNameZh": "新西兰",
+      "areaNameEn": "NEW ZEALAND",
+      "previousCatalogRecords": 11,
+      "previousWupRecords": 11,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 111,
+      "areaId": "JP",
+      "areaNameZh": "日本",
+      "areaNameEn": "JAPAN",
+      "previousCatalogRecords": 182,
+      "previousWupRecords": 182,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 112,
+      "areaId": "CL",
+      "areaNameZh": "智利",
+      "areaNameEn": "CHILE",
+      "previousCatalogRecords": 39,
+      "previousWupRecords": 39,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 113,
+      "areaId": "KP",
+      "areaNameZh": "朝鲜",
+      "areaNameEn": "DEM. PEOPLE'S REPUBLIC OF KOREA",
+      "previousCatalogRecords": 117,
+      "previousWupRecords": 117,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 114,
+      "areaId": "KH",
+      "areaNameZh": "柬埔寨",
+      "areaNameEn": "CAMBODIA",
+      "previousCatalogRecords": 20,
+      "previousWupRecords": 20,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 115,
+      "areaId": "GE",
+      "areaNameZh": "格鲁吉亚",
+      "areaNameEn": "GEORGIA",
+      "previousCatalogRecords": 11,
+      "previousWupRecords": 11,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 116,
+      "areaId": "BE",
+      "areaNameZh": "比利时",
+      "areaNameEn": "BELGIUM",
+      "previousCatalogRecords": 16,
+      "previousWupRecords": 16,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 117,
+      "areaId": "MR",
+      "areaNameZh": "毛里塔尼亚",
+      "areaNameEn": "MAURITANIA",
+      "previousCatalogRecords": 12,
+      "previousWupRecords": 12,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 118,
+      "areaId": "MU",
+      "areaNameZh": "毛里求斯",
+      "areaNameEn": "MAURITIUS",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 119,
+      "areaId": "SA",
+      "areaNameZh": "沙特阿拉伯",
+      "areaNameEn": "SAUDI ARABIA",
+      "previousCatalogRecords": 60,
+      "previousWupRecords": 60,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 120,
+      "areaId": "FR",
+      "areaNameZh": "法国",
+      "areaNameEn": "FRANCE",
+      "previousCatalogRecords": 92,
+      "previousWupRecords": 92,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 121,
+      "areaId": "GF",
+      "areaNameZh": "法属圭亚那",
+      "areaNameEn": "FRENCH GUIANA",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 122,
+      "areaId": "PF",
+      "areaNameZh": "法属波利尼西亚",
+      "areaNameEn": "FRENCH POLYNESIA",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 123,
+      "areaId": "PL",
+      "areaNameZh": "波兰",
+      "areaNameEn": "POLAND",
+      "previousCatalogRecords": 68,
+      "previousWupRecords": 68,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 124,
+      "areaId": "PR",
+      "areaNameZh": "波多黎各",
+      "areaNameEn": "PUERTO RICO",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 125,
+      "areaId": "BA",
+      "areaNameZh": "波斯尼亚和黑塞哥维那",
+      "areaNameEn": "BOSNIA AND HERZEGOVINA",
+      "previousCatalogRecords": 9,
+      "previousWupRecords": 9,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 126,
+      "areaId": "TH",
+      "areaNameZh": "泰国",
+      "areaNameEn": "THAILAND",
+      "previousCatalogRecords": 82,
+      "previousWupRecords": 82,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 127,
+      "areaId": "JE",
+      "areaNameZh": "泽西岛",
+      "areaNameEn": "JERSEY",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 128,
+      "areaId": "ZW",
+      "areaNameZh": "津巴布韦",
+      "areaNameEn": "ZIMBABWE",
+      "previousCatalogRecords": 26,
+      "previousWupRecords": 26,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 129,
+      "areaId": "HN",
+      "areaNameZh": "洪都拉斯",
+      "areaNameEn": "HONDURAS",
+      "previousCatalogRecords": 18,
+      "previousWupRecords": 18,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 130,
+      "areaId": "HT",
+      "areaNameZh": "海地",
+      "areaNameEn": "HAITI",
+      "previousCatalogRecords": 29,
+      "previousWupRecords": 29,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 131,
+      "areaId": "AU",
+      "areaNameZh": "澳大利亚",
+      "areaNameEn": "AUSTRALIA",
+      "previousCatalogRecords": 44,
+      "previousWupRecords": 44,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 132,
+      "areaId": "IE",
+      "areaNameZh": "爱尔兰",
+      "areaNameEn": "IRELAND",
+      "previousCatalogRecords": 7,
+      "previousWupRecords": 7,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 133,
+      "areaId": "EE",
+      "areaNameZh": "爱沙尼亚",
+      "areaNameEn": "ESTONIA",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 134,
+      "areaId": "JM",
+      "areaNameZh": "牙买加",
+      "areaNameEn": "JAMAICA",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 135,
+      "areaId": "TT",
+      "areaNameZh": "特立尼达和多巴哥",
+      "areaNameEn": "TRINIDAD AND TOBAGO",
+      "previousCatalogRecords": 3,
+      "previousWupRecords": 3,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 136,
+      "areaId": "BO",
+      "areaNameZh": "玻利维亚",
+      "areaNameEn": "BOLIVIA (PLURINATIONAL STATE OF)",
+      "previousCatalogRecords": 21,
+      "previousWupRecords": 21,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 137,
+      "areaId": "SE",
+      "areaNameZh": "瑞典",
+      "areaNameEn": "SWEDEN",
+      "previousCatalogRecords": 20,
+      "previousWupRecords": 20,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 138,
+      "areaId": "CH",
+      "areaNameZh": "瑞士",
+      "areaNameEn": "SWITZERLAND",
+      "previousCatalogRecords": 21,
+      "previousWupRecords": 21,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 139,
+      "areaId": "GP",
+      "areaNameZh": "瓜德罗普",
+      "areaNameEn": "GUADELOUPE",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 140,
+      "areaId": "VU",
+      "areaNameZh": "瓦努阿图",
+      "areaNameEn": "VANUATU",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 141,
+      "areaId": "RE",
+      "areaNameZh": "留尼汪",
+      "areaNameEn": "RÉUNION",
+      "previousCatalogRecords": 4,
+      "previousWupRecords": 4,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 142,
+      "areaId": "BY",
+      "areaNameZh": "白俄罗斯",
+      "areaNameEn": "BELARUS",
+      "previousCatalogRecords": 17,
+      "previousWupRecords": 17,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 143,
+      "areaId": "GI",
+      "areaNameZh": "直布罗陀",
+      "areaNameEn": "GIBRALTAR",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 144,
+      "areaId": "KW",
+      "areaNameZh": "科威特",
+      "areaNameEn": "KUWAIT",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 145,
+      "areaId": "KM",
+      "areaNameZh": "科摩罗",
+      "areaNameEn": "COMOROS",
+      "previousCatalogRecords": 2,
+      "previousWupRecords": 2,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 146,
+      "areaId": "CI",
+      "areaNameZh": "科特迪瓦",
+      "areaNameEn": "CÔTE D'IVOIRE",
+      "previousCatalogRecords": 88,
+      "previousWupRecords": 88,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 147,
+      "areaId": "XK",
+      "areaNameZh": "科索沃",
+      "areaNameEn": "KOSOVO (UNDER UNSC RES. 1244)",
+      "previousCatalogRecords": 8,
+      "previousWupRecords": 8,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 148,
+      "areaId": "PE",
+      "areaNameZh": "秘鲁",
+      "areaNameEn": "PERU",
+      "previousCatalogRecords": 55,
+      "previousWupRecords": 55,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 149,
+      "areaId": "TN",
+      "areaNameZh": "突尼斯",
+      "areaNameEn": "TUNISIA",
+      "previousCatalogRecords": 26,
+      "previousWupRecords": 26,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 150,
+      "areaId": "LT",
+      "areaNameZh": "立陶宛",
+      "areaNameEn": "LITHUANIA",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 151,
+      "areaId": "SO",
+      "areaNameZh": "索马里",
+      "areaNameEn": "SOMALIA",
+      "previousCatalogRecords": 86,
+      "previousWupRecords": 86,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 152,
+      "areaId": "JO",
+      "areaNameZh": "约旦",
+      "areaNameEn": "JORDAN",
+      "previousCatalogRecords": 25,
+      "previousWupRecords": 25,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 153,
+      "areaId": "NA",
+      "areaNameZh": "纳米比亚",
+      "areaNameEn": "NAMIBIA",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 154,
+      "areaId": "MM",
+      "areaNameZh": "缅甸",
+      "areaNameEn": "MYANMAR",
+      "previousCatalogRecords": 145,
+      "previousWupRecords": 145,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 155,
+      "areaId": "RO",
+      "areaNameZh": "罗马尼亚",
+      "areaNameEn": "ROMANIA",
+      "previousCatalogRecords": 43,
+      "previousWupRecords": 43,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 156,
+      "areaId": "US",
+      "areaNameZh": "美国",
+      "areaNameEn": "UNITED STATES OF AMERICA",
+      "previousCatalogRecords": 444,
+      "previousWupRecords": 444,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 157,
+      "areaId": "LA",
+      "areaNameZh": "老挝",
+      "areaNameEn": "LAO PEOPLE'S DEMOCRATIC REPUBLIC",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 158,
+      "areaId": "KE",
+      "areaNameZh": "肯尼亚",
+      "areaNameEn": "KENYA",
+      "previousCatalogRecords": 99,
+      "previousWupRecords": 99,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 159,
+      "areaId": "FI",
+      "areaNameZh": "芬兰",
+      "areaNameEn": "FINLAND",
+      "previousCatalogRecords": 6,
+      "previousWupRecords": 6,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 160,
+      "areaId": "SD",
+      "areaNameZh": "苏丹",
+      "areaNameEn": "SUDAN",
+      "previousCatalogRecords": 173,
+      "previousWupRecords": 173,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 161,
+      "areaId": "SR",
+      "areaNameZh": "苏里南",
+      "areaNameEn": "SURINAME",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 162,
+      "areaId": "GB",
+      "areaNameZh": "英国",
+      "areaNameEn": "UNITED KINGDOM",
+      "previousCatalogRecords": 166,
+      "previousWupRecords": 166,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 163,
+      "areaId": "NL",
+      "areaNameZh": "荷兰",
+      "areaNameEn": "NETHERLANDS",
+      "previousCatalogRecords": 49,
+      "previousWupRecords": 49,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 164,
+      "areaId": "MZ",
+      "areaNameZh": "莫桑比克",
+      "areaNameEn": "MOZAMBIQUE",
+      "previousCatalogRecords": 90,
+      "previousWupRecords": 90,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 165,
+      "areaId": "LS",
+      "areaNameZh": "莱索托",
+      "areaNameEn": "LESOTHO",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 166,
+      "areaId": "PH",
+      "areaNameZh": "菲律宾",
+      "areaNameEn": "PHILIPPINES",
+      "previousCatalogRecords": 162,
+      "previousWupRecords": 162,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 167,
+      "areaId": "SV",
+      "areaNameZh": "萨尔瓦多",
+      "areaNameEn": "EL SALVADOR",
+      "previousCatalogRecords": 12,
+      "previousWupRecords": 12,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 168,
+      "areaId": "WS",
+      "areaNameZh": "萨摩亚",
+      "areaNameEn": "SAMOA",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 169,
+      "areaId": "PT",
+      "areaNameZh": "葡萄牙",
+      "areaNameEn": "PORTUGAL",
+      "previousCatalogRecords": 10,
+      "previousWupRecords": 10,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 170,
+      "areaId": "MN",
+      "areaNameZh": "蒙古",
+      "areaNameEn": "MONGOLIA",
+      "previousCatalogRecords": 5,
+      "previousWupRecords": 5,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 171,
+      "areaId": "EH",
+      "areaNameZh": "西撒哈拉",
+      "areaNameEn": "WESTERN SAHARA",
+      "previousCatalogRecords": 4,
+      "previousWupRecords": 4,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 172,
+      "areaId": "ES",
+      "areaNameZh": "西班牙",
+      "areaNameEn": "SPAIN",
+      "previousCatalogRecords": 90,
+      "previousWupRecords": 90,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 173,
+      "areaId": "BJ",
+      "areaNameZh": "贝宁",
+      "areaNameEn": "BENIN",
+      "previousCatalogRecords": 51,
+      "previousWupRecords": 51,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 174,
+      "areaId": "ZM",
+      "areaNameZh": "赞比亚",
+      "areaNameEn": "ZAMBIA",
+      "previousCatalogRecords": 54,
+      "previousWupRecords": 54,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 175,
+      "areaId": "GQ",
+      "areaNameZh": "赤道几内亚",
+      "areaNameEn": "EQUATORIAL GUINEA",
+      "previousCatalogRecords": 3,
+      "previousWupRecords": 3,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 176,
+      "areaId": "VN",
+      "areaNameZh": "越南",
+      "areaNameEn": "VIET NAM",
+      "previousCatalogRecords": 178,
+      "previousWupRecords": 178,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 177,
+      "areaId": "AZ",
+      "areaNameZh": "阿塞拜疆",
+      "areaNameEn": "AZERBAIJAN",
+      "previousCatalogRecords": 26,
+      "previousWupRecords": 26,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 178,
+      "areaId": "AF",
+      "areaNameZh": "阿富汗",
+      "areaNameEn": "AFGHANISTAN",
+      "previousCatalogRecords": 198,
+      "previousWupRecords": 198,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 179,
+      "areaId": "DZ",
+      "areaNameZh": "阿尔及利亚",
+      "areaNameEn": "ALGERIA",
+      "previousCatalogRecords": 142,
+      "previousWupRecords": 142,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 180,
+      "areaId": "AL",
+      "areaNameZh": "阿尔巴尼亚",
+      "areaNameEn": "ALBANIA",
+      "previousCatalogRecords": 8,
+      "previousWupRecords": 8,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 181,
+      "areaId": "AE",
+      "areaNameZh": "阿拉伯联合酋长国",
+      "areaNameEn": "UNITED ARAB EMIRATES",
+      "previousCatalogRecords": 21,
+      "previousWupRecords": 21,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 182,
+      "areaId": "OM",
+      "areaNameZh": "阿曼",
+      "areaNameEn": "OMAN",
+      "previousCatalogRecords": 16,
+      "previousWupRecords": 16,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 183,
+      "areaId": "AR",
+      "areaNameZh": "阿根廷",
+      "areaNameEn": "ARGENTINA",
+      "previousCatalogRecords": 80,
+      "previousWupRecords": 80,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 184,
+      "areaId": "KR",
+      "areaNameZh": "韩国",
+      "areaNameEn": "REPUBLIC OF KOREA",
+      "previousCatalogRecords": 65,
+      "previousWupRecords": 65,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 185,
+      "areaId": "MV",
+      "areaNameZh": "马尔代夫",
+      "areaNameEn": "MALDIVES",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 186,
+      "areaId": "MW",
+      "areaNameZh": "马拉维",
+      "areaNameEn": "MALAWI",
+      "previousCatalogRecords": 21,
+      "previousWupRecords": 21,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 187,
+      "areaId": "MQ",
+      "areaNameZh": "马提尼克",
+      "areaNameEn": "MARTINIQUE",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 188,
+      "areaId": "MY",
+      "areaNameZh": "马来西亚",
+      "areaNameEn": "MALAYSIA",
+      "previousCatalogRecords": 60,
+      "previousWupRecords": 60,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 189,
+      "areaId": "YT",
+      "areaNameZh": "马约特",
+      "areaNameEn": "MAYOTTE",
+      "previousCatalogRecords": 3,
+      "previousWupRecords": 3,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 190,
+      "areaId": "MT",
+      "areaNameZh": "马耳他",
+      "areaNameEn": "MALTA",
+      "previousCatalogRecords": 1,
+      "previousWupRecords": 1,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 191,
+      "areaId": "MG",
+      "areaNameZh": "马达加斯加",
+      "areaNameEn": "MADAGASCAR",
+      "previousCatalogRecords": 40,
+      "previousWupRecords": 40,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 192,
+      "areaId": "ML",
+      "areaNameZh": "马里",
+      "areaNameEn": "MALI",
+      "previousCatalogRecords": 47,
+      "previousWupRecords": 47,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 193,
+      "areaId": "LB",
+      "areaNameZh": "黎巴嫩",
+      "areaNameEn": "LEBANON",
+      "previousCatalogRecords": 9,
+      "previousWupRecords": 9,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    },
+    {
+      "order": 194,
+      "areaId": "ME",
+      "areaNameZh": "黑山",
+      "areaNameEn": "MONTENEGRO",
+      "previousCatalogRecords": 4,
+      "previousWupRecords": 4,
+      "auditStatus": "not-started",
+      "unitDefinition": null,
+      "findings": [
+        "Official city-level administrative classification and complete source roster have not yet been reviewed."
+      ],
+      "sources": [],
+      "eligibleUnitCount": null,
+      "productScopeUnitCount": null,
+      "sourceGaps": [
+        "Official classification, complete roster, stable IDs, and name sources."
+      ]
+    }
+  ]
+}

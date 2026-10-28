@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { EventEmitter } from 'node:events';
 import { AIImageGenerationController } from './ai-image-generation.controller';
 import { AIImageGenerationService } from './ai-image-generation.service';
+import { PhotoAssetError } from '../photos/photo-asset.service';
 
 const validRequest = {
   version: 'ai-image-generation-v1',
@@ -71,5 +72,20 @@ describe('AIImageGenerationController', () => {
       },
     });
     expect(generation.generate).toHaveBeenCalledWith('device-1', validRequest, expect.any(AbortSignal));
+  });
+
+  test('returns a quota conflict without pretending the provider failed', async () => {
+    const generation = {
+      generate: jest.fn().mockRejectedValue(
+        new PhotoAssetError('limit_exceeded', '素材库最多保存 100 张照片，请先删除部分素材。'),
+      ),
+    };
+    const controller = new AIImageGenerationController(generation as unknown as AIImageGenerationService);
+    const { request, response } = createHttpContext(validRequest);
+
+    await expect(controller.generate('device-1', request, response)).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: 'limit_exceeded', retryable: false } },
+    });
   });
 });

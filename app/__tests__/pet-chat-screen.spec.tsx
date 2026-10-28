@@ -6,6 +6,8 @@ import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 
 const mockRouter = { push: jest.fn() };
+const mockGetAnchorSummary = jest.fn();
+const mockRouteParams: { conversationId?: string; focusMessageId?: string } = {};
 
 jest.mock('../../src/store/use-app-store', () => {
   const { createTestStore } = require('../../src/test-utils/create-test-store');
@@ -14,8 +16,13 @@ jest.mock('../../src/store/use-app-store', () => {
   return { useAppStore: store, appSelectors: selectors, getDiaryStatistics };
 });
 
+jest.mock('../../src/store/adapters/backend-anchor-read-model-adapter', () => ({
+  createBackendAnchorReadModelRepository: () => ({ getSummary: mockGetAnchorSummary }),
+}));
+
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
+  useLocalSearchParams: () => mockRouteParams,
 }));
 
 jest.mock('../../src/components/layout/screen', () => ({
@@ -47,12 +54,142 @@ describe('Pet chat screen reply feedback', () => {
   beforeEach(() => {
     resetAppStore();
     jest.clearAllMocks();
+    mockGetAnchorSummary.mockResolvedValue({ total: 7 });
+    mockRouteParams.conversationId = undefined;
+    mockRouteParams.focusMessageId = undefined;
   });
 
   test('does not show a separate name beneath the mascot', async () => {
     const screen = await render(<PetScreen />);
 
     expect(screen.queryByText('小橘', { exact: true })).toBeNull();
+  });
+
+  test('shows the authenticated anchor count from the backend summary', async () => {
+    const screen = await render(<PetScreen />);
+
+    await waitFor(() => expect(screen.getByLabelText('7 个锚点')).toBeTruthy());
+    expect(mockGetAnchorSummary).toHaveBeenCalledTimes(1);
+  });
+
+  test('restores the latest saved chat on a normal visit', async () => {
+    const restoreLatestChatConversation = jest.fn(async () => {
+      useAppStore.setState({
+        chatHistoryStatus: 'ready',
+        chatConversationId: 'conversation-latest',
+        chatMessages: [{
+          id: 'user-latest',
+          conversationId: 'conversation-latest',
+          requestId: 'request-latest',
+          role: 'user',
+          text: '今天看到了夕阳。',
+        }],
+      });
+      return true;
+    });
+    useAppStore.setState({ chatHistoryStatus: 'idle', restoreLatestChatConversation });
+    const screen = await render(<PetScreen />);
+
+    await waitFor(() => expect(restoreLatestChatConversation).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('今天看到了夕阳。')).toBeTruthy();
+  });
+
+  test('blocks sending during restore and retries history without sending a new message', async () => {
+    let finishRestore!: () => void;
+    const pending = new Promise<void>(resolve => { finishRestore = resolve; });
+    const restoreLatestChatConversation = jest.fn()
+      .mockImplementationOnce(async () => {
+        useAppStore.setState({ chatHistoryStatus: 'loading' });
+        await pending;
+        useAppStore.setState({ chatHistoryStatus: 'error' });
+        return false;
+      })
+      .mockImplementationOnce(async () => {
+        useAppStore.setState({ chatHistoryStatus: 'ready' });
+        return false;
+      });
+    const sendChat = jest.fn();
+    useAppStore.setState({ chatHistoryStatus: 'idle', restoreLatestChatConversation, sendChat });
+    const screen = await render(<PetScreen />);
+
+    await waitFor(() => expect(screen.getByPlaceholderText('正在恢复聊天记录…')).toBeTruthy());
+    fireEvent.changeText(screen.getByLabelText('和小橘聊天'), '先恢复再发送');
+    expect(screen.getByLabelText('发送消息').props.accessibilityState.disabled).toBe(true);
+    finishRestore();
+    await waitFor(() => expect(screen.getByLabelText('重试加载聊天记录')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('重试加载聊天记录'));
+    await waitFor(() => expect(restoreLatestChatConversation).toHaveBeenCalledTimes(2));
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('先恢复再发送')).toBeTruthy();
+  });
+
+  test('does not show stale messages while a different identity is being checked', async () => {
+    useAppStore.setState({
+      chatHistoryStatus: 'loading',
+      chatMessages: [{
+        id: 'old-user',
+        conversationId: 'old-conversation',
+        requestId: 'old-request',
+        role: 'user',
+        text: '旧设备的消息',
+      }],
+      restoreLatestChatConversation: jest.fn(async () => false),
+    });
+
+    const screen = await render(<PetScreen />);
+
+    expect(screen.queryByText('旧设备的消息')).toBeNull();
+    expect(screen.getByPlaceholderText('正在恢复聊天记录…')).toBeTruthy();
+  });
+
+  test('opens the conversation and source message selected by a chat anchor', async () => {
+    mockRouteParams.conversationId = 'conversation-memory';
+    mockRouteParams.focusMessageId = 'message-memory';
+    const loadChatConversation = jest.fn(async (conversationId: string) => {
+      useAppStore.setState({
+        chatConversationId: conversationId,
+        chatMessages: [{
+          id: 'message-memory',
+          conversationId,
+          requestId: 'request-memory',
+          role: 'user',
+          text: '那天我和老朋友聊了很久。',
+        }],
+      });
+      return true;
+    });
+    const restoreLatestChatConversation = jest.fn();
+    useAppStore.setState({ loadChatConversation, restoreLatestChatConversation });
+
+    const screen = await render(<PetScreen />);
+
+    await waitFor(() => expect(loadChatConversation).toHaveBeenCalledWith('conversation-memory'));
+    expect(screen.getByText('那天我和老朋友聊了很久。')).toBeTruthy();
+    expect(restoreLatestChatConversation).not.toHaveBeenCalled();
+  });
+
+  test('loads the source conversation selected by a chat memory anchor', async () => {
+    mockRouteParams.conversationId = 'conversation-memory';
+    mockRouteParams.focusMessageId = 'message-memory';
+    const loadChatConversation = jest.fn(async (conversationId: string) => {
+      useAppStore.setState({
+        chatConversationId: conversationId,
+        chatMessages: [{
+          id: 'message-memory',
+          conversationId,
+          requestId: 'request-memory',
+          role: 'user',
+          text: '那天我和老朋友聊了很久。',
+        }],
+      });
+      return true;
+    });
+    useAppStore.setState({ loadChatConversation });
+
+    const screen = await render(<PetScreen />);
+
+    await waitFor(() => expect(loadChatConversation).toHaveBeenCalledWith('conversation-memory'));
+    expect(screen.getByText('那天我和老朋友聊了很久。')).toBeTruthy();
   });
 
   test('retries a failed reply from its existing assistant bubble', async () => {

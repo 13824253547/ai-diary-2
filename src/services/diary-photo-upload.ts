@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { getMaterialPhotoContentUrl } from './material-photo-api';
 import type { DiaryPhoto } from '../types/diary';
 import type { GenerationPhotoUpload } from '../repositories/core-diary-repository';
 
@@ -11,10 +12,39 @@ export class DiaryPhotoUploadPreparationError extends Error {
   }
 }
 
-function getReadableUri(photo: DiaryPhoto) {
+function getLocalReadableUri(photo: DiaryPhoto) {
   const uri = photo.localUri ?? photo.uri;
   if (!uri || !/^(file|content):\/\//i.test(uri)) return undefined;
   return uri;
+}
+
+async function getReadableUri(photo: DiaryPhoto) {
+  const localUri = getLocalReadableUri(photo);
+  if (localUri) return { uri: localUri };
+  if (!photo.uri
+    || !photo.sourceAssetId
+    || !photo.remoteHeaders?.['x-device-id']
+    || !(photo.source === 'device' || (photo.source === 'generated' && photo.generationSource === 'provider'))
+    || photo.uri !== getMaterialPhotoContentUrl(photo.id)
+    || !FileSystem.cacheDirectory) {
+    return undefined;
+  }
+
+  const destination = `${FileSystem.cacheDirectory}diary-material-${encodeURIComponent(photo.id)}-${Date.now()}.jpg`;
+  let download: Awaited<ReturnType<typeof FileSystem.downloadAsync>>;
+  try {
+    download = await FileSystem.downloadAsync(photo.uri, destination, {
+      headers: photo.remoteHeaders,
+    });
+  } catch (error) {
+    await FileSystem.deleteAsync(destination, { idempotent: true }).catch(() => undefined);
+    throw error;
+  }
+  if (download.status !== 200) {
+    await FileSystem.deleteAsync(download.uri, { idempotent: true }).catch(() => undefined);
+    return undefined;
+  }
+  return { uri: download.uri, temporaryUri: download.uri };
 }
 
 function getCaptureDateHint(value: string | undefined) {
@@ -53,26 +83,32 @@ export async function prepareDiaryPhotoUploads(
   try {
     for (const photoId of photoIds) {
       const photo = catalog.find(item => item.id === photoId);
-      const uri = photo && getReadableUri(photo);
-      if (!photo || !uri) {
+      const readable = photo ? await getReadableUri(photo) : undefined;
+      if (!photo || !readable) {
         throw new DiaryPhotoUploadPreparationError('所选照片无法读取，请返回相册重新选择。');
       }
 
-      const result = await ImageManipulator.manipulateAsync(
-        uri,
-        getImageActions(photo),
-        {
-          compress: 0.84,
-          format: ImageManipulator.SaveFormat.JPEG,
-        },
-      );
-      uploads.push({
-        photoId,
-        uri: result.uri,
-        mimeType: 'image/jpeg',
-        date: getCaptureDateHint(photo.date),
-        cleanupUri: result.uri,
-      });
+      try {
+        const result = await ImageManipulator.manipulateAsync(
+          readable.uri,
+          getImageActions(photo),
+          {
+            compress: 0.84,
+            format: ImageManipulator.SaveFormat.JPEG,
+          },
+        );
+        uploads.push({
+          photoId,
+          uri: result.uri,
+          mimeType: 'image/jpeg',
+          date: getCaptureDateHint(photo.date),
+          cleanupUri: result.uri,
+        });
+      } finally {
+        if (readable.temporaryUri) {
+          await FileSystem.deleteAsync(readable.temporaryUri, { idempotent: true }).catch(() => undefined);
+        }
+      }
     }
     return uploads;
   } catch (error) {

@@ -360,6 +360,59 @@ describe('Library screen material management', () => {
     }
   });
 
+  test('restores generated and uploaded materials after a fresh page load', async () => {
+    const generated: DiaryPhoto = {
+      ...buildPhoto('generated-remote-1'),
+      sourceAssetId: 'image-request-1',
+      source: 'generated',
+      generationRequestId: 'image-request-1',
+      generationPrompt: '雨后的老街',
+      generationSource: 'provider',
+      uri: 'https://api.example.test/photos/materials/generated-remote-1/content',
+      localUri: undefined,
+      remoteHeaders: { 'x-device-id': 'test-device' },
+    };
+    const uploaded: DiaryPhoto = {
+      ...buildPhoto('uploaded-remote-1'),
+      uri: 'https://api.example.test/photos/materials/uploaded-remote-1/content',
+      localUri: undefined,
+      remoteHeaders: { 'x-device-id': 'test-device' },
+    };
+    jest.spyOn(materialPhotoApi, 'listMaterialPhotosFromBackend')
+      .mockResolvedValue({ ok: true, photos: [generated, uploaded] });
+    const workerId = process.env.JEST_WORKER_ID;
+    delete process.env.JEST_WORKER_ID;
+    try {
+      const screen = await render(<LibraryScreen />);
+
+      await waitFor(() => expect(useAppStore.getState().materialPhotoIds)
+        .toEqual([generated.id, uploaded.id]));
+      expect(screen.getByTestId(`material-photo-${generated.id}`)).toBeTruthy();
+      expect(screen.getByTestId(`material-photo-${uploaded.id}`)).toBeTruthy();
+      expect(screen.queryByText('还没有照片素材')).toBeNull();
+    } finally {
+      if (workerId === undefined) delete process.env.JEST_WORKER_ID;
+      else process.env.JEST_WORKER_ID = workerId;
+    }
+  });
+
+  test('shows a load error instead of a false empty library when the refresh fails', async () => {
+    jest.spyOn(materialPhotoApi, 'listMaterialPhotosFromBackend')
+      .mockResolvedValue({ ok: false, message: 'temporary network failure' });
+    const workerId = process.env.JEST_WORKER_ID;
+    delete process.env.JEST_WORKER_ID;
+    try {
+      const screen = await render(<LibraryScreen />);
+
+      await waitFor(() => expect(screen.getByText('素材暂时无法加载')).toBeTruthy());
+      expect(screen.queryByText('还没有照片素材')).toBeNull();
+      expect(screen.queryByText('temporary network failure')).toBeNull();
+    } finally {
+      if (workerId === undefined) delete process.env.JEST_WORKER_ID;
+      else process.env.JEST_WORKER_ID = workerId;
+    }
+  });
+
   test('allows uploads above twelve total and stops selection at one hundred', async () => {
     const existing = Array.from({ length: 99 }, (_, index) => buildPhoto(`cloud-existing-${index + 1}`));
     const incoming = [buildPhoto('device-new-1'), buildPhoto('device-new-2')];

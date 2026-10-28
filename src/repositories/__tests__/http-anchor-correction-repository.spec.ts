@@ -14,6 +14,16 @@ const record = {
   updatedAt: '2026-10-16T00:00:00.000Z',
 };
 
+const chatRecord = {
+  id: 'chat-correction-1',
+  anchorId: 'chat-anchor-1',
+  anchorBatchId: 'chat-batch-1',
+  correction: '小橘记得这段聊天让你感到被理解。',
+  version: 1,
+  source: 'user' as const,
+  updatedAt: '2026-10-16T00:00:00.000Z',
+};
+
 describe('HttpAnchorCorrectionRepository', () => {
   const client = {
     request: jest.fn(),
@@ -139,5 +149,69 @@ describe('HttpAnchorCorrectionRepository', () => {
       diaryVersion: 3,
       anchorId: 'anchor-1',
     })).rejects.toBeInstanceOf(AnchorCorrectionRepositoryError);
+  });
+
+  test('reads and writes a correction bound to a chat batch', async () => {
+    jest.mocked(client.request).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: { ok: true, version: 'chat-anchor-correction-v1', data: null },
+    });
+    await expect(repository.getChatCorrection({
+      anchorId: 'chat-anchor-1',
+      anchorBatchId: 'chat-batch-1',
+    })).resolves.toBeNull();
+    expect(client.request).toHaveBeenCalledWith(
+      '/anchors/chat-anchor-1/chat-correction?anchorBatchId=chat-batch-1',
+      { method: 'GET' },
+      undefined,
+    );
+
+    jest.mocked(client.request).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: { ok: true, version: 'chat-anchor-correction-v1', data: chatRecord },
+    });
+    await expect(repository.saveChatCorrection({
+      anchorId: 'chat-anchor-1',
+      anchorBatchId: 'chat-batch-1',
+      correction: ` ${chatRecord.correction} `,
+      expectedVersion: 0,
+      idempotencyKey: 'chat-command-1',
+    })).resolves.toEqual(chatRecord);
+    expect(client.request).toHaveBeenLastCalledWith(
+      '/anchors/chat-anchor-1/chat-correction',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          anchorBatchId: 'chat-batch-1',
+          correction: chatRecord.correction,
+          expectedVersion: 0,
+          idempotencyKey: 'chat-command-1',
+        }),
+      },
+      undefined,
+    );
+  });
+
+  test('enforces the confirmed 240-character correction limit before network access', async () => {
+    await expect(repository.saveCorrection({
+      diaryId: 'diary-1',
+      diaryVersion: 3,
+      anchorId: 'anchor-1',
+      sourceBlockId: 'block-1',
+      correction: '字'.repeat(241),
+      expectedVersion: 0,
+      idempotencyKey: 'diary-command-too-long',
+    })).rejects.toMatchObject({ code: 'invalid_input' });
+    await expect(repository.saveChatCorrection({
+      anchorId: 'chat-anchor-1',
+      anchorBatchId: 'chat-batch-1',
+      correction: '字'.repeat(241),
+      expectedVersion: 0,
+      idempotencyKey: 'chat-command-too-long',
+    })).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(client.request).not.toHaveBeenCalled();
   });
 });

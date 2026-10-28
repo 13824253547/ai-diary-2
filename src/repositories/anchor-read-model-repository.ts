@@ -2,6 +2,8 @@ import type { ApiRequestOptions } from '../services/api-client';
 import type {
   AnchorExtractionRunRecord,
   AnchorsByTagPage,
+  MemoryAnchorFeedPage,
+  MemoryAnchorSummary,
   ProviderAnchorResult,
 } from '../contracts/anchor-read-model-contract';
 
@@ -49,4 +51,10 @@ export interface AnchorReadRepository {
     page?: number;
     pageSize?: 10 | 20 | 50 | 100;
   }, options?: ApiRequestOptions): Promise<AnchorsByTagPage>;
+  listFeed(input?: {
+    tagId?: string;
+    page?: number;
+    pageSize?: 10 | 20 | 50 | 100;
+  }, options?: ApiRequestOptions): Promise<MemoryAnchorFeedPage>;
+  getSummary(options?: ApiRequestOptions): Promise<MemoryAnchorSummary>;
 }

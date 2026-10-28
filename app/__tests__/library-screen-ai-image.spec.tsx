@@ -7,6 +7,7 @@ import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryPhoto } from '../../src/types/diary';
 import * as saveImage from '../../src/services/save-generated-image';
+import * as materialPhotoApi from '../../src/services/material-photo-api';
 
 const mockRouter = {
   push: jest.fn(),
@@ -17,23 +18,28 @@ const mockRouter = {
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
+  useLocalSearchParams: () => ({}),
 }));
 
 jest.mock('../../src/components/layout/screen', () => ({
-  Screen: ({ children, header }: { children: React.ReactNode; header?: React.ReactNode }) => {
+  Screen: ({ children, header, footer }: { children: React.ReactNode; header?: React.ReactNode; footer?: React.ReactNode }) => {
     const { View } = require('react-native');
-    return <View>{header}{children}</View>;
+    return <View>{header}{children}{footer}</View>;
   },
 }));
 
 jest.mock('../../src/components/common/button', () => ({
-  Button: ({ label, onPress, disabled = false }: {
+  Button: ({ label, onPress, disabled = false, loading = false }: {
     label: string;
     onPress?: () => void;
     disabled?: boolean;
+    loading?: boolean;
   }) => {
-    const { Text } = require('react-native');
-    return <Text accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} onPress={onPress}>{label}</Text>;
+    const { Text, View } = require('react-native');
+    return <View>
+      <Text accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} onPress={onPress}>{label}</Text>
+      {loading ? <Text accessibilityRole="progressbar" accessibilityLabel="正在生成配图">⟳</Text> : null}
+    </View>;
   },
 }));
 
@@ -166,6 +172,8 @@ describe('Library AI image generation panel', () => {
 
     await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByLabelText('正在生成配图')).toBeTruthy());
+    expect(screen.getByLabelText('正在为你描绘画面，请稍候…')).toBeTruthy();
+    expect(screen.queryByText('正在生成…')).toBeNull();
     expect(screen.getByLabelText('画面描述').props.editable).toBe(false);
     await pressAction(screen, '取消生成');
     await waitFor(() => expect(cancel).toHaveBeenCalledWith('image-request-1'));
@@ -210,8 +218,9 @@ describe('Library AI image generation panel', () => {
     await pressAction(screen, '重新生成');
     await waitFor(() => expect(screen.getByTestId('material-photo-preview')).toBeTruthy());
     expect(screen.getByLabelText('保存到相册')).toBeTruthy();
+    expect(screen.getByLabelText('用于明信片')).toBeTruthy();
+    expect(screen.queryByLabelText('更多配图操作')).toBeNull();
     expect(screen.queryByLabelText('用于日记')).toBeNull();
-    expect(screen.queryByLabelText('用于明信片')).toBeNull();
 
     expect(useAppStore.getState().materialPhotoIds).toContain('generated-material-1');
     await pressAction(screen, '保存到相册');
@@ -219,23 +228,97 @@ describe('Library AI image generation panel', () => {
       expect.objectContaining({ source: 'generated', generationSource: 'provider' }),
     ));
     expect(screen.getByText('已保存到系统相册。')).toBeTruthy();
+    expect(Alert.alert).not.toHaveBeenCalled();
 
-    await pressAction(screen, '更多配图操作');
-    expect(Alert.alert).toHaveBeenCalledWith('更多操作', undefined, [
-      expect.objectContaining({ text: '用于日记', onPress: expect.any(Function) }),
-      expect.objectContaining({ text: '用于明信片', onPress: expect.any(Function) }),
-      expect.objectContaining({ text: '取消', style: 'cancel' }),
-    ]);
-    const actions = (Alert.alert as jest.Mock).mock.calls.at(-1)?.[2] as Array<{
-      text: string;
-      onPress?: () => void;
-    }>;
-    await act(async () => {
-      actions.find(action => action.text === '用于明信片')?.onPress?.();
-    });
+    await pressAction(screen, '用于明信片');
     expect(mockRouter.push).toHaveBeenCalledWith({
-      pathname: '/postcard',
+      pathname: '/postcard/apply',
       params: { photoId: 'generated-material-1' },
     });
+
+    await pressAction(screen, '预览雨后的老街');
+    expect(screen.getByTestId('material-photo-preview')).toBeTruthy();
+    expect(screen.getByLabelText('保存到相册')).toBeTruthy();
+    expect(screen.getByLabelText('用于明信片')).toBeTruthy();
+    expect(screen.queryByLabelText('更多配图操作')).toBeNull();
+    expect(screen.queryByLabelText('用于日记')).toBeNull();
+
+    await pressAction(screen, '生成日记');
+    expect(mockRouter.push).toHaveBeenLastCalledWith({
+      pathname: '/album/select',
+      params: { draftId: expect.any(String), source: 'materials' },
+    });
+    const draftId = (mockRouter.push.mock.calls.at(-1)?.[0] as {
+      params: { draftId: string };
+    }).params.draftId;
+    expect(useAppStore.getState().drafts[draftId]?.selectedPhotoIds).toEqual(['generated-material-1']);
+    expect(useAppStore.getState().currentStep).toBe('album');
+  });
+
+  test('keeps a newly saved AI material when an older initial refresh finishes later', async () => {
+    let finishRefresh!: (result: { ok: true; photos: DiaryPhoto[] }) => void;
+    const initialRefresh = new Promise<{ ok: true; photos: DiaryPhoto[] }>(resolve => {
+      finishRefresh = resolve;
+    });
+    jest.spyOn(materialPhotoApi, 'listMaterialPhotosFromBackend').mockReturnValue(initialRefresh);
+    const generate = jest.fn(async (description: string) => {
+      const photo = generatedPhoto('image-request-race', description);
+      useAppStore.getState().registerPhotos([photo]);
+      useAppStore.getState().addMaterialPhoto(photo.id);
+      return {
+        ok: true as const,
+        requestId: 'image-request-race',
+        photoId: photo.id,
+        source: 'provider' as const,
+      };
+    });
+    useAppStore.setState({ generateMaterialImage: generate as AppStore['generateMaterialImage'] });
+    const workerId = process.env.JEST_WORKER_ID;
+    delete process.env.JEST_WORKER_ID;
+    try {
+      const screen = await render(<LibraryScreen />);
+      useAppStore.setState({ generateMaterialImage: generate as AppStore['generateMaterialImage'] });
+      await openAIPanel(screen);
+      fireEvent.changeText(screen.getByLabelText('画面描述'), '雨后的老街');
+      await waitFor(() => expect(screen.getByLabelText('画面描述').props.value).toBe('雨后的老街'));
+      await pressAction(screen, '生成配图');
+      await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(useAppStore.getState().materialPhotoIds).toContain('generated-material-1'));
+
+      await act(async () => {
+        finishRefresh({ ok: true, photos: [] });
+        await initialRefresh;
+      });
+
+      expect(useAppStore.getState().materialPhotoIds).toContain('generated-material-1');
+    } finally {
+      if (workerId === undefined) delete process.env.JEST_WORKER_ID;
+      else process.env.JEST_WORKER_ID = workerId;
+    }
+  });
+
+  test('disables the existing generate button when uploaded and AI images fill the library', async () => {
+    const generated = generatedPhoto('saved-image-request', '之前的配图');
+    const uploaded = Array.from({ length: 99 }, (_, index) => ({
+      ...generated,
+      id: `uploaded-${index}`,
+      source: 'device' as const,
+      generationRequestId: undefined,
+      generationPrompt: undefined,
+      generationSource: undefined,
+    }));
+    const generate = jest.fn();
+    useAppStore.setState({
+      photos: [generated, ...uploaded],
+      materialPhotoIds: [generated.id, ...uploaded.map(photo => photo.id)],
+      generateMaterialImage: generate as AppStore['generateMaterialImage'],
+    });
+    const screen = await render(<LibraryScreen />);
+
+    await openAIPanel(screen);
+    fireEvent.changeText(screen.getByLabelText('画面描述'), '第 101 张配图');
+    await waitFor(() => expect(screen.getByLabelText('素材库已满，请先删除部分照片')).toBeTruthy());
+    expect(screen.getByLabelText('素材库已满，请先删除部分照片').props.accessibilityState.disabled).toBe(true);
+    expect(generate).not.toHaveBeenCalled();
   });
 });

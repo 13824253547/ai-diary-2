@@ -25,6 +25,27 @@ export type SaveAnchorCorrectionInput = GetAnchorCorrectionQuery & {
   idempotencyKey: string;
 };
 
+export type ChatAnchorCorrectionRecord = {
+  id: string;
+  anchorId: string;
+  anchorBatchId: string;
+  correction: string;
+  version: number;
+  source: 'user';
+  updatedAt: string;
+};
+
+export type ChatAnchorCorrectionQuery = {
+  anchorId: string;
+  anchorBatchId: string;
+};
+
+export type SaveChatAnchorCorrectionInput = ChatAnchorCorrectionQuery & {
+  correction: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -42,6 +63,21 @@ export function isAnchorCorrectionRecord(value: unknown): value is AnchorCorrect
     && isNonEmptyString(value.anchorId)
     && isNonEmptyString(value.sourceBlockId)
     && isNonEmptyString(value.correction)
+    && Array.from(value.correction).length <= 240
+    && Number.isSafeInteger(value.version)
+    && (value.version as number) > 0
+    && value.source === 'user'
+    && typeof value.updatedAt === 'string'
+    && Number.isFinite(Date.parse(value.updatedAt));
+}
+
+export function isChatAnchorCorrectionRecord(value: unknown): value is ChatAnchorCorrectionRecord {
+  return isRecord(value)
+    && isNonEmptyString(value.id)
+    && isNonEmptyString(value.anchorId)
+    && isNonEmptyString(value.anchorBatchId)
+    && isNonEmptyString(value.correction)
+    && Array.from(value.correction).length <= 240
     && Number.isSafeInteger(value.version)
     && (value.version as number) > 0
     && value.source === 'user'

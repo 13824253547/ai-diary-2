@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Screen } from '../../src/components/layout/screen';
@@ -5,10 +6,13 @@ import { TopBar } from '../../src/components/layout/top-bar';
 import { Button } from '../../src/components/common/button';
 import { EmptyResult, IconAction } from '../../src/components/common/support-ui';
 import { CityStamp, getCityStampConfig } from '../../src/components/library/city-stamp';
+import { getVisitedCityStampIds } from '../../src/components/library/city-stamp-catalog';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
 import { useAppStore } from '../../src/store/use-app-store';
+import { capturePostcard, discardPostcard, savePostcard, sharePostcard } from '../../src/services/postcard-export';
 import type { DiaryPhoto } from '../../src/types/diary';
+import type { PostcardComposition } from '../../src/types/postcard';
 
 const stickerDecorations = ['stickerHappy', 'mascotCamera', 'stickerCool', 'stickerCry', 'stickerLove'] as const;
 
@@ -17,26 +21,92 @@ function isStickerDecoration(value?: string): value is (typeof stickerDecoration
 }
 
 function getPhotoImageSource(photo: DiaryPhoto): ImageSourcePropType | undefined {
-  if (photo.localUri || photo.uri) return { uri: photo.localUri ?? photo.uri };
+  if (photo.localUri || photo.uri) {
+    return { uri: photo.localUri ?? photo.uri, ...(!photo.localUri && photo.remoteHeaders ? { headers: photo.remoteHeaders } : {}) };
+  }
   return photo.image;
 }
 
 export default function PostcardScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ photoId?: string; decoration?: string }>();
+  const params = useLocalSearchParams<PostcardComposition & { decoration?: string }>();
   const registeredPhoto = useAppStore(state => state.photos.find(photo => photo.id === params.photoId));
-  const materialPhoto = registeredPhoto?.source === 'device' ? registeredPhoto : undefined;
+  const diaries = useAppStore(state => state.diaries);
+  const unlockedCityStampIds = getVisitedCityStampIds(diaries);
+  const materialPhoto = registeredPhoto?.source === 'device' || registeredPhoto?.source === 'generated'
+    ? registeredPhoto : undefined;
   const image = materialPhoto ? getPhotoImageSource(materialPhoto) : undefined;
-  const cityStamp = getCityStampConfig(params.decoration);
-  const decoration = isStickerDecoration(params.decoration) ? art[params.decoration] : art.mascot;
-  return <Screen header={<TopBar title="明信片" centered onBackPress={() => router.back()} trailing={<IconAction name="images-outline" label="选择素材" onPress={() => router.push('/library')} />} />}>
-    {!materialPhoto ? <EmptyResult title="请选择真实照片"><Button label="前往素材库" onPress={() => router.replace('/library')} /></EmptyResult> : <>
-      <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View style={s.card}><Image testID="postcard-photo" source={image as ImageSourcePropType} style={s.image} /><View style={s.stamp}><Text style={s.stampText}>{`${materialPhoto.location}\n${materialPhoto.date}`}</Text></View><Text style={s.words}>把这段真实回忆，{`\n`}寄给未来的自己</Text>{cityStamp ? <CityStamp {...cityStamp} testID="postcard-decoration" style={s.mascot} /> : <Image testID="postcard-decoration" source={decoration} resizeMode="contain" style={s.mascot} />}</View></View>
-      <Text style={s.note}>已使用你从设备相册选择的照片</Text>
-      <Button disabled label="明信片文件导出暂未接入" onPress={() => {}} />
+  const legacyStickerId = isStickerDecoration(params.decoration) ? params.decoration : undefined;
+  const legacyCityStampId = params.decoration && !legacyStickerId && getCityStampConfig(params.decoration)
+    ? params.decoration : undefined;
+  const stickerId = isStickerDecoration(params.stickerId) ? params.stickerId : legacyStickerId;
+  const cityStampId = params.cityStampId
+    ? unlockedCityStampIds.has(params.cityStampId) ? params.cityStampId : undefined
+    : legacyCityStampId;
+  const cityStamp = cityStampId ? getCityStampConfig(cityStampId) : undefined;
+  const legacyDecorationTestId = params.decoration && !params.stickerId && !params.cityStampId
+    ? 'postcard-decoration' : undefined;
+  const cardRef = useRef<View>(null);
+  const busyRef = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [imageReady, setImageReady] = useState(false);
+  const [message, setMessage] = useState('');
+  const inputKey = `${materialPhoto?.id ?? ''}:${materialPhoto?.localUri ?? materialPhoto?.uri ?? ''}:${params.stickerId ?? stickerId ?? ''}:${params.cityStampId ?? cityStamp?.id ?? ''}:${params.decoration ?? ''}`;
+  const inputKeyRef = useRef(inputKey);
+  inputKeyRef.current = inputKey;
+  useEffect(() => {
+    setImageReady(false);
+    setMessage('');
+  }, [inputKey]);
+  useEffect(() => () => {
+    inputKeyRef.current = '';
+  }, []);
+
+  const exportCard = async (destination: 'share' | 'save') => {
+    if (busyRef.current || !materialPhoto || !imageReady) return;
+    busyRef.current = true;
+    setBusy(true);
+    setMessage('');
+    let uri: string | undefined;
+    try {
+      uri = await capturePostcard(cardRef);
+      if (inputKeyRef.current !== inputKey) return;
+      if (destination === 'share') {
+        const result = await sharePostcard(uri);
+        if (inputKeyRef.current === inputKey) {
+          setMessage(result === 'opened' ? '' : '此设备暂不支持系统分享。');
+        }
+      } else {
+        const result = await savePostcard(uri);
+        if (inputKeyRef.current === inputKey) {
+          setMessage(result === 'saved' ? '已保存到系统相册。' : '请允许保存图片到系统相册后重试。');
+        }
+      }
+    } catch {
+      if (inputKeyRef.current === inputKey) setMessage('明信片暂时无法导出，请确认照片可读取后重试。');
+    } finally {
+      await discardPostcard(uri);
+      busyRef.current = false;
+      if (inputKeyRef.current) setBusy(false);
+    }
+  };
+  const stampText = [materialPhoto?.location?.trim(), materialPhoto?.date?.trim()]
+    .filter(value => value && value !== '未知地点' && value !== '未知日期').join('\n');
+  const applyParams: PostcardComposition = {
+    ...(materialPhoto ? { photoId: materialPhoto.id } : {}),
+    ...(stickerId ? { stickerId } : {}),
+    ...(cityStamp ? { cityStampId: cityStamp.id } : {}),
+  };
+  return <Screen header={<TopBar title="明信片" centered onBackPress={() => router.back()} trailing={<IconAction name="images-outline" label="编辑素材" onPress={() => router.push({ pathname: '/postcard/apply', params: applyParams })} />} />}>
+    {!materialPhoto ? <EmptyResult title="请选择真实照片"><Button label="应用明信片素材" onPress={() => router.replace({ pathname: '/postcard/apply', params: applyParams })} /></EmptyResult> : <>
+      <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View ref={cardRef} collapsable={false} style={s.card}><Image key={inputKey} testID="postcard-photo" source={image as ImageSourcePropType} style={s.image} onLoad={() => setImageReady(true)} onError={() => { setImageReady(false); setMessage('照片暂时无法读取，请重新选择素材。'); }} />{stampText ? <View style={s.stamp}><Text style={s.stampText}>{stampText}</Text></View> : null}{cityStamp ? <CityStamp {...cityStamp} width={68} height={68} testID={legacyDecorationTestId ?? 'postcard-city-stamp'} style={s.cityStampOverlay} /> : null}<Text style={s.words}>把这段真实回忆，{`\n`}寄给未来的自己</Text>{stickerId ? <Image testID={legacyDecorationTestId ?? 'postcard-sticker'} source={art[stickerId]} resizeMode="contain" style={s.mascot} /> : null}</View></View>
+      <Text style={s.note}>已使用当前选择的真实照片</Text>
+      <Button disabled={busy || !imageReady} label={busy ? '正在准备明信片…' : '分享明信片'} onPress={() => { void exportCard('share'); }} />
+      <Button disabled={busy || !imageReady} label="保存到相册" variant="secondary" onPress={() => { void exportCard('save'); }} />
+      {message ? <Text accessibilityLiveRegion="polite" style={s.note}>{message}</Text> : null}
     </>}
   </Screen>;
 }
 const s = StyleSheet.create({
-  stack: { height: 435, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, backCard: { position: 'absolute', width: '85%', height: 388, backgroundColor: '#fff9ed', borderWidth: 1, borderColor: colors.border, borderRadius: 10, top: 24 }, card: { width: '88%', height: 397, backgroundColor: '#fffaf0', borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, transform: [{ rotate: '2deg' }], shadowColor: '#785636', shadowOpacity: .13, shadowRadius: 5, shadowOffset: { width: 0, height: 3 } }, image: { width: '100%', height: 280, borderRadius: 3, resizeMode: 'cover' }, stamp: { position: 'absolute', top: 31, right: 21, borderWidth: 1, borderColor: '#9f7b5e', width: 69, height: 69, borderRadius: 36, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-14deg' }] }, stampText: { color: '#78583f', fontSize: 8, textAlign: 'center', lineHeight: 11 }, words: { fontSize: 20, lineHeight: 30, color: '#38291e', fontFamily: 'Kaiti SC', marginTop: 12, marginLeft: 4 }, mascot: { width: 66, height: 72, position: 'absolute', bottom: 8, right: 9 }, note: { textAlign: 'center', color: colors.textSecondary, fontSize: 13 },
+  stack: { height: 435, alignItems: 'center', justifyContent: 'center', marginTop: 8 }, backCard: { position: 'absolute', width: '85%', height: 388, backgroundColor: '#fff9ed', borderWidth: 1, borderColor: colors.border, borderRadius: 10, top: 24 }, card: { width: '88%', height: 397, backgroundColor: '#fffaf0', borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 12, transform: [{ rotate: '2deg' }], shadowColor: '#785636', shadowOpacity: .13, shadowRadius: 5, shadowOffset: { width: 0, height: 3 } }, image: { width: '100%', height: 280, borderRadius: 3, resizeMode: 'cover' }, stamp: { position: 'absolute', top: 31, right: 21, borderWidth: 1, borderColor: '#9f7b5e', width: 69, height: 69, borderRadius: 36, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-14deg' }] }, stampText: { color: '#78583f', fontSize: 8, textAlign: 'center', lineHeight: 11 }, cityStampOverlay: { position: 'absolute', top: 200, left: 18, width: 68, height: 68, transform: [{ rotate: '-7deg' }] }, words: { fontSize: 20, lineHeight: 30, color: '#38291e', fontFamily: 'Kaiti SC', marginTop: 12, marginLeft: 4 }, mascot: { width: 66, height: 72, position: 'absolute', bottom: 8, right: 9 }, note: { textAlign: 'center', color: colors.textSecondary, fontSize: 13 },
 });

@@ -23,6 +23,7 @@ export type ChatTurnRecord = {
   sequence: number;
   userMessageId: string;
   assistantMessageId?: string;
+  deviceLocalDate?: string;
   attempt: number;
   status: 'pending' | 'completed' | 'failed';
   failureCode?: 'timeout' | 'cancelled' | 'provider_failed';
@@ -80,6 +81,18 @@ function normalizePositiveInteger(value: unknown, field: string) {
   return value as number;
 }
 
+function normalizeDeviceLocalDate(value: unknown) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new ChatSessionError('invalid_input', '聊天日期格式无效。');
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    throw new ChatSessionError('invalid_input', '聊天日期无效。');
+  }
+  return value;
+}
+
 function fingerprint(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -127,6 +140,7 @@ function mapTurn(record: {
   sequence: number;
   userMessageId: string;
   assistantMessageId: string | null;
+  deviceLocalDate: string | null;
   attempt: number;
   status: string;
   failureCode: string | null;
@@ -138,6 +152,7 @@ function mapTurn(record: {
     sequence: record.sequence,
     userMessageId: record.userMessageId,
     ...(record.assistantMessageId ? { assistantMessageId: record.assistantMessageId } : {}),
+    ...(record.deviceLocalDate ? { deviceLocalDate: record.deviceLocalDate } : {}),
     attempt: record.attempt,
     status: record.status as ChatTurnRecord['status'],
     ...(record.failureCode === 'timeout'
@@ -234,19 +249,21 @@ export class ChatSessionsService {
     requestId: string;
     userMessageId: string;
     text: string;
+    deviceLocalDate?: string;
   }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
     const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const userMessageId = normalizeIdentifier(input.userMessageId, 'userMessageId');
     const text = typeof input.text === 'string' ? input.text.trim() : '';
     if (!text) throw new ChatSessionError('invalid_input', '消息内容不能为空。');
+    const deviceLocalDate = normalizeDeviceLocalDate(input.deviceLocalDate);
     const policyCode = classifyPetChatInput(text);
     if (policyCode) {
       throw new ChatSessionError(policyCode, getPetChatPolicyMessage(policyCode));
     }
     assertReplyProviderAvailable();
     const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
-    const requestHash = fingerprint([conversationId, requestId, userMessageId, text]);
+    const requestHash = fingerprint([conversationId, requestId, userMessageId, text, deviceLocalDate ?? null]);
 
     try {
       return await this.prisma.$transaction(async transaction => {
@@ -291,6 +308,8 @@ export class ChatSessionsService {
             requestHash,
             sequence,
             userMessageId,
+            deviceLocalDate,
+            memoryEligible: Boolean(deviceLocalDate),
             attempt: 1,
             status: 'pending',
           },

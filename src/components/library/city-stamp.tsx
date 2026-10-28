@@ -117,7 +117,7 @@ export function CityStamp({
         <Path id={topArcId} d="M 11 37.5 A 26.5 26.5 0 0 1 64 37.5" fill="none" />
         <Path id={bottomArcId} d="M 11 37.5 A 26.5 26.5 0 0 0 64 37.5" fill="none" />
       </Defs>
-      <SvgText fill={inkColor} fontFamily="Georgia" fontSize={headerText.fontSize} letterSpacing="0.55" opacity="0.83">
+      <SvgText fill={inkColor} fontFamily="Georgia" fontSize={headerText.fontSize} letterSpacing="0.55" opacity="0.83" textAnchor="middle">
         <TextPath href={`#${topArcId}`} startOffset="50%" textAnchor="middle">
           {headerText.text}
         </TextPath>

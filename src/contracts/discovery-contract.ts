@@ -2,14 +2,28 @@ export const DISCOVERY_CONTRACT_VERSION = 'discovery-read-v1';
 export const DISCOVERY_PAGE_SIZES = [10, 20, 50, 100] as const;
 
 export type DiscoveryStoriesQuery = {
-  category: 'latest';
+  category: 'latest' | 'same-city';
   keyword?: string;
+  city?: string;
   page: number;
   pageSize: typeof DISCOVERY_PAGE_SIZES[number];
 };
 
+export type DiscoveryStoryBlock = {
+  id: string;
+  type: 'text' | 'quote';
+  title?: string;
+  content: string;
+  photos: Array<{
+    photoId: string;
+    caption: string;
+    uri: string;
+  }>;
+};
+
 export type DiscoveryStoryContract = {
   id: string;
+  characterId?: string;
   title: string;
   author: string;
   coverUri: string;
@@ -19,6 +33,7 @@ export type DiscoveryStoryContract = {
   likesEnabled: boolean;
   likeCount: number;
   liked: boolean;
+  blocks: DiscoveryStoryBlock[];
 };
 
 export type DiscoveryStoriesPage = {
@@ -45,9 +60,13 @@ function isNonEmptyString(value: unknown): value is string {
 export function isDiscoveryStoryContract(value: unknown): value is DiscoveryStoryContract {
   return isRecord(value)
     && isNonEmptyString(value.id)
+    && (value.characterId === undefined || (
+      typeof value.characterId === 'string'
+      && ['character-blue', 'character-green', 'character-brown', 'character-red', 'character-brown-2', 'character-blue-2'].includes(value.characterId)
+    ))
     && typeof value.title === 'string'
     && typeof value.author === 'string'
-    && isNonEmptyString(value.coverUri)
+    && typeof value.coverUri === 'string'
     && typeof value.date === 'string'
     && Number.isFinite(Date.parse(value.date))
     && typeof value.location === 'string'
@@ -55,7 +74,20 @@ export function isDiscoveryStoryContract(value: unknown): value is DiscoveryStor
     && typeof value.likesEnabled === 'boolean'
     && Number.isSafeInteger(value.likeCount)
     && (value.likeCount as number) >= 0
-    && typeof value.liked === 'boolean';
+    && typeof value.liked === 'boolean'
+    && Array.isArray(value.blocks)
+    && value.blocks.every(block =>
+      isRecord(block)
+      && isNonEmptyString(block.id)
+      && (block.type === 'text' || block.type === 'quote')
+      && typeof block.content === 'string'
+      && (block.title === undefined || typeof block.title === 'string')
+      && Array.isArray(block.photos)
+      && block.photos.every(photo =>
+        isRecord(photo)
+        && isNonEmptyString(photo.photoId)
+        && typeof photo.caption === 'string'
+        && isNonEmptyString(photo.uri)));
 }
 
 export function isDiscoveryStoriesPage(value: unknown): value is DiscoveryStoriesPage {

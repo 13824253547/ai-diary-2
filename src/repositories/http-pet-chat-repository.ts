@@ -47,6 +47,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isLocalDateKey(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 function isOkEnvelope(value: unknown): value is OkEnvelope<unknown> {
   return isRecord(value)
     && value.ok === true
@@ -103,11 +109,13 @@ export class HttpPetChatRepository implements PetChatRepository {
     requestId: string;
     userMessageId: string;
     text: string;
+    deviceLocalDate?: string;
   }, options?: ApiRequestOptions): Promise<PetChatConversation> {
     if (!input.conversationId.trim()
       || !input.requestId.trim()
       || !input.userMessageId.trim()
-      || !input.text.trim()) {
+      || !input.text.trim()
+      || (input.deviceLocalDate !== undefined && !isLocalDateKey(input.deviceLocalDate))) {
       throw new PetChatRepositoryError('invalid_input', '聊天消息信息无效。', false);
     }
     return this.requestData(
@@ -119,6 +127,7 @@ export class HttpPetChatRepository implements PetChatRepository {
           requestId: input.requestId,
           userMessageId: input.userMessageId,
           text: input.text.trim(),
+          ...(input.deviceLocalDate ? { deviceLocalDate: input.deviceLocalDate } : {}),
         }),
       },
       isPetChatConversation,

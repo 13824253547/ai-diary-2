@@ -1,7 +1,10 @@
 import type { ApiRequestOptions } from '../services/api-client';
 import type {
   AnchorCorrectionRecord,
+  ChatAnchorCorrectionQuery,
+  ChatAnchorCorrectionRecord,
   GetAnchorCorrectionQuery,
+  SaveChatAnchorCorrectionInput,
   SaveAnchorCorrectionInput,
 } from '../contracts/anchor-correction-contract';
 
@@ -35,4 +38,12 @@ export interface AnchorCorrectionRepository {
     input: SaveAnchorCorrectionInput,
     options?: ApiRequestOptions,
   ): Promise<AnchorCorrectionRecord>;
+  getChatCorrection(
+    query: ChatAnchorCorrectionQuery,
+    options?: ApiRequestOptions,
+  ): Promise<ChatAnchorCorrectionRecord | null>;
+  saveChatCorrection(
+    input: SaveChatAnchorCorrectionInput,
+    options?: ApiRequestOptions,
+  ): Promise<ChatAnchorCorrectionRecord>;
 }

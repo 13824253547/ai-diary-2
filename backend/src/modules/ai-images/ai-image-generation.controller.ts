@@ -91,7 +91,7 @@ export class AIImageGenerationController {
         throw new HttpException({
           ok: false,
           error: { code: error.code, message: error.message, retryable: error.code === 'storage_failed' },
-        }, 500);
+        }, error.code === 'limit_exceeded' ? 409 : 500);
       }
       throw new HttpException({
         ok: false,

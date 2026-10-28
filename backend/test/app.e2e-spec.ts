@@ -5,6 +5,10 @@ import { AppModule } from '../src/app.module';
 import { configureApiBodyParser } from '../src/common/api-body-parser';
 import { MemoryStoreService, type DiaryContentSnapshotRecord } from '../src/common/memory-store.service';
 import { PrismaService } from '../src/common/prisma.service';
+import { ChatDailyAnchorService } from '../src/modules/anchors/chat-daily-anchor.service';
+import { ArkMemoryAnchorProvider, MemoryAnchorProviderError } from '../src/modules/anchors/ark-memory-anchor-provider';
+import { ArkGrowthInsightProvider, GrowthInsightProviderError } from '../src/modules/growth/ark-growth-insight-provider';
+import { GrowthInsightsService } from '../src/modules/growth/growth-insights.service';
 
 describe('Backend foundation (e2e)', () => {
   let app: INestApplication;
@@ -119,6 +123,358 @@ describe('Backend foundation (e2e)', () => {
       .get('/api/health')
       .expect(400);
     expect(response.body.error.code).toBe('device_identity_required');
+  });
+
+  it('requires device identity and initializes the flower baseline idempotently', async () => {
+    const missingIdentity = await request(app.getHttpServer())
+      .get('/api/growth/state')
+      .expect(400);
+    expect(missingIdentity.body.error.code).toBe('device_identity_required');
+
+    await request(app.getHttpServer())
+      .post('/api/growth/flowers/initialize')
+      .set('x-device-id', deviceA)
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.data.flowerAnalysis).toMatchObject({
+          status: 'succeeded',
+          completedBatches: 0,
+          totalBatches: 0,
+        });
+        expect(body.data.report.unlocked).toBe(false);
+      });
+
+    await request(app.getHttpServer())
+      .post('/api/growth/flowers/initialize')
+      .set('x-device-id', deviceA)
+      .expect(201);
+    expect(await prisma.growthRecognitionRun.count({ where: { ownerDeviceId: deviceA } })).toBe(1);
+
+    await request(app.getHttpServer())
+      .get('/api/growth/state')
+      .set('x-device-id', deviceB)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.flowers.every((flower: { status: string }) => flower.status === 'locked')).toBe(true);
+        expect(body.data.report.unlocked).toBe(false);
+      });
+  });
+
+  it('marks in-flight growth requests interrupted on restart without resubmitting them', async () => {
+    const run = await prisma.growthRecognitionRun.create({
+      data: {
+        ownerDeviceId: deviceA,
+        runKey: 'restart-inflight-recognition',
+        kind: 'baseline',
+        sourceVersion: 'restart-source-version',
+        sourceDiaryRefs: [],
+        nextBatchIndex: 0,
+        inFlightBatchIndex: 0,
+        batchCount: 1,
+        status: 'running',
+      },
+    });
+    const job = await prisma.growthReportJob.create({
+      data: {
+        ownerDeviceId: deviceA,
+        requestId: 'restart-inflight-report',
+        sourceVersion: 'restart-report-version',
+        sourceDiaryRefs: [],
+        nextBatchIndex: 0,
+        inFlightBatchIndex: 1,
+        batchCount: 1,
+        status: 'running',
+      },
+    });
+    const provider = app.get(ArkGrowthInsightProvider);
+    const recognize = jest.spyOn(provider, 'recognizeFlowers');
+    const summarize = jest.spyOn(provider, 'summarizeReportChunk');
+    const synthesize = jest.spyOn(provider, 'synthesizeReport');
+
+    process.env.NODE_ENV = 'development';
+    try {
+      await app.get(GrowthInsightsService).onModuleInit();
+    } finally {
+      process.env = { ...originalEnv };
+    }
+
+    try {
+      const [recoveredRun, recoveredJob] = await Promise.all([
+        prisma.growthRecognitionRun.findUnique({ where: { id: run.id } }),
+        prisma.growthReportJob.findUnique({ where: { id: job.id } }),
+      ]);
+      expect(recoveredRun).toMatchObject({
+        status: 'failed',
+        failureCode: 'interrupted',
+        inFlightBatchIndex: null,
+      });
+      expect(recoveredJob).toMatchObject({
+        status: 'failed',
+        failureCode: 'interrupted',
+        inFlightBatchIndex: null,
+      });
+      expect(recognize).not.toHaveBeenCalled();
+      expect(summarize).not.toHaveBeenCalled();
+      expect(synthesize).not.toHaveBeenCalled();
+    } finally {
+      recognize.mockRestore();
+      summarize.mockRestore();
+      synthesize.mockRestore();
+    }
+  });
+
+  it('persists the device-local publication date on creation and preserves it on edits', async () => {
+    const photoIds = ['local-date-photo-1', 'local-date-photo-2', 'local-date-photo-3'];
+    const initial = await store.saveDiaryWithCommand({
+      draftId: 'local-date-draft',
+      idempotencyKey: 'local-date-create',
+      title: '本地日期日记',
+      summary: '连续记录的一天。',
+      location: '',
+      date: '2026.10.20',
+      publishedLocalDate: '2026-10-20',
+      privacy: 'private',
+      photoIds,
+      contentSnapshot: createDiaryContentSnapshot('本地日期日记', photoIds),
+      version: 1,
+    }, deviceA);
+
+    const created = await prisma.diary.findUnique({ where: { id: initial.diaryId } });
+    expect(created?.publishedLocalDate).toBe('2026-10-20');
+
+    await store.saveDiaryWithCommand({
+      id: initial.diaryId,
+      draftId: 'local-date-draft',
+      sourceDiaryId: initial.diaryId,
+      sourceDiaryVersion: 1,
+      idempotencyKey: 'local-date-edit',
+      title: '本地日期日记（已编辑）',
+      summary: '编辑仍沿用首发日。',
+      location: '',
+      date: initial.date,
+      publishedLocalDate: '2026-10-21',
+      privacy: 'private',
+      photoIds,
+      contentSnapshot: createDiaryContentSnapshot('本地日期日记（已编辑）', photoIds),
+      version: 2,
+    }, deviceA);
+
+    const edited = await prisma.diary.findUnique({ where: { id: initial.diaryId } });
+    expect(edited?.version).toBe(2);
+    expect(edited?.publishedLocalDate).toBe('2026-10-20');
+  });
+
+  it('authorizes report generation only after three device-owned flowers', async () => {
+    await prisma.diary.create({
+      data: {
+        id: 'growth-diary-1',
+        ownerDeviceId: deviceA,
+        draftId: 'growth-draft-1',
+        title: '海边散步',
+        summary: '和朋友一起看海。',
+        location: '',
+        date: new Date('2026-10-20T00:00:00.000Z'),
+        publishedLocalDate: '2026-10-20',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: {
+          type: 'travel',
+          subtitle: '',
+          helperMessage: '',
+          characterId: 'character-blue',
+          companionName: '自己',
+          coverPhotoId: 'photo-1',
+          blocks: [{ id: 'block-1', type: 'text', content: '和许久未见的朋友并肩走到海边。' }],
+          people: [],
+        },
+        version: 1,
+      },
+    });
+    for (const flowerKey of ['pathfinder', 'self-awareness', 'healing']) {
+      await prisma.growthFlower.create({
+        data: {
+          ownerDeviceId: deviceA,
+          flowerKey,
+          summary: '有日记来源支持的短说明。',
+          sourceDiaryIds: ['growth-diary-1'],
+          sourceDiaryVersions: [{ id: 'growth-diary-1', version: 1 }],
+          sourceHash: `hash-${flowerKey}`,
+        },
+      });
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/growth/reports/ensure-current')
+      .set('x-device-id', deviceB)
+      .expect(403)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('not_unlocked');
+      });
+    await prisma.growthInsightReport.create({
+      data: {
+        ownerDeviceId: deviceB,
+        sourceVersion: 'locked-fixture',
+        sourceDiaryIds: ['device-a-private-diary'],
+        sourceDiaryVersions: [{ id: 'device-a-private-diary', version: 1 }],
+        sourceDiaryCount: 1,
+        dimensions: [],
+      },
+    });
+    await request(app.getHttpServer())
+      .get('/api/growth/reports/current')
+      .set('x-device-id', deviceB)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.report.unlocked).toBe(false);
+        expect(body.data.report.current).toBeUndefined();
+      });
+
+    await request(app.getHttpServer())
+      .post('/api/growth/reports/ensure-current')
+      .set('x-device-id', deviceA)
+      .expect(201)
+      .expect(({ body }) => {
+        expect(body.data.report).toMatchObject({
+          unlocked: true,
+          status: 'pending',
+        });
+        expect(body.data.report.current).toBeUndefined();
+      });
+
+    expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceA } })).toBe(1);
+    expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceB } })).toBe(0);
+  });
+
+  it('persists evidence-bound AI flower awards and a three-dimension report', async () => {
+    await prisma.diary.create({
+      data: {
+        id: 'growth-diary-source',
+        ownerDeviceId: deviceA,
+        draftId: 'growth-draft-source',
+        title: '同行海边',
+        summary: '和朋友去看海。',
+        location: '',
+        date: new Date('2026-10-20T00:00:00.000Z'),
+        publishedLocalDate: '2026-10-20',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: {
+          type: 'travel',
+          subtitle: '',
+          helperMessage: '',
+          characterId: 'character-blue',
+          companionName: '自己',
+          coverPhotoId: 'photo-1',
+          blocks: [{ id: 'block-1', type: 'text', content: '和许久未见的朋友并肩走到海边，心里很放松。' }],
+          people: [],
+        },
+        version: 1,
+      },
+    });
+    const provider = app.get(ArkGrowthInsightProvider);
+    const recognize = jest.spyOn(provider, 'recognizeFlowers').mockResolvedValue({
+      flowers: [
+        { flowerId: 'pathfinder', summary: '你愿意和朋友一起走向新的风景。', sourceDiaryIds: ['growth-diary-source'] },
+        { flowerId: 'self-awareness', summary: '你能留意自己在陪伴中的感受。', sourceDiaryIds: ['growth-diary-source'] },
+        { flowerId: 'healing', summary: '你在熟悉的陪伴里慢慢放松下来。', sourceDiaryIds: ['growth-diary-source'] },
+      ],
+      tripDiaryIds: ['growth-diary-source'],
+    });
+    const summarize = jest.spyOn(provider, 'summarizeReportChunk').mockResolvedValue([
+      { dimensionId: 'inner-contrast', observation: '你珍惜熟悉的关系，也愿意走向新风景。', sourceDiaryIds: ['growth-diary-source'] },
+      { dimensionId: 'cherished-connections', observation: '你记得与老朋友并肩的时刻。', sourceDiaryIds: ['growth-diary-source'] },
+      { dimensionId: 'personality-traits', observation: '你会留意陪伴带给自己的安心。', sourceDiaryIds: ['growth-diary-source'] },
+    ]);
+    const synthesize = jest.spyOn(provider, 'synthesizeReport').mockResolvedValue([
+      { id: 'inner-contrast', title: '内在的小矛盾', content: '你珍惜熟悉的关系，也愿意走向新风景。', sourceDiaryIds: ['growth-diary-source'] },
+      { id: 'cherished-connections', title: '真正珍视的东西', content: '你记得与老朋友并肩的时刻。', sourceDiaryIds: ['growth-diary-source'] },
+      { id: 'personality-traits', title: '正在形成的特质', content: '你会留意陪伴带给自己的安心。', sourceDiaryIds: ['growth-diary-source'] },
+    ]);
+    const growth = app.get(GrowthInsightsService);
+
+    await growth.initializeFlowers(deviceA);
+    const run = await prisma.growthRecognitionRun.findUnique({
+      where: { ownerDeviceId_runKey: { ownerDeviceId: deviceA, runKey: 'baseline-v1' } },
+    });
+    expect(run).toBeTruthy();
+    await (growth as unknown as {
+      processRecognitionRun: (runId: string, ownerDeviceId: string) => Promise<void>;
+    }).processRecognitionRun(run!.id, deviceA);
+
+    const flowerState = await growth.getState(deviceA);
+    expect(flowerState.flowers.filter(flower => flower.status === 'bloomed')).toHaveLength(3);
+    expect(flowerState.milestones.firstTrip).toMatchObject({
+      achieved: true,
+      sourceDiaryIds: ['growth-diary-source'],
+    });
+    expect(recognize).toHaveBeenCalledTimes(1);
+
+    await growth.ensureCurrentReport(deviceA);
+    const reportJob = await prisma.growthReportJob.findFirst({ where: { ownerDeviceId: deviceA } });
+    expect(reportJob).toBeTruthy();
+    await (growth as unknown as {
+      processReportJob: (jobId: string, ownerDeviceId: string) => Promise<void>;
+    }).processReportJob(reportJob!.id, deviceA);
+
+    const reportState = await growth.getState(deviceA);
+    expect(reportState.report.status).toBe('succeeded');
+    expect(reportState.report.current?.sourceDiaryIds).toEqual(['growth-diary-source']);
+    expect(reportState.report.current?.dimensions).toHaveLength(3);
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    expect(await prisma.growthFlower.count({ where: { ownerDeviceId: deviceA } })).toBe(3);
+
+    const lastGoodReportId = reportState.report.current?.reportId;
+    await prisma.diary.update({
+      where: { id: 'growth-diary-source' },
+      data: {
+        version: 2,
+        summary: '编辑后的新来源版本。',
+        contentSnapshot: {
+          type: 'travel',
+          subtitle: '',
+          helperMessage: '',
+          characterId: 'character-blue',
+          companionName: '自己',
+          coverPhotoId: 'photo-1',
+          blocks: [{ id: 'block-1', type: 'text', content: '编辑后仍记得和老朋友同行。' }],
+          people: [],
+        },
+      },
+    });
+    const staleState = await growth.getState(deviceA);
+    expect(staleState.report).toMatchObject({ status: 'stale', stale: true });
+    expect(staleState.report.current?.reportId).toBe(lastGoodReportId);
+
+    const updateState = await growth.ensureCurrentReport(deviceA);
+    expect(updateState.report).toMatchObject({ status: 'pending', stale: true });
+    expect(updateState.report.current?.reportId).toBe(lastGoodReportId);
+    const updateJob = await prisma.growthReportJob.findFirst({
+      where: { ownerDeviceId: deviceA, status: 'pending' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(updateJob).toBeTruthy();
+    summarize.mockRejectedValueOnce(new GrowthInsightProviderError('provider_failed'));
+    await (growth as unknown as {
+      processReportJob: (jobId: string, ownerDeviceId: string) => Promise<void>;
+    }).processReportJob(updateJob!.id, deviceA);
+    const failedUpdate = await growth.getState(deviceA);
+    expect(failedUpdate.report).toMatchObject({ status: 'failed', stale: true });
+    expect(failedUpdate.report.current?.reportId).toBe(lastGoodReportId);
+
+    const retried = await growth.retryCurrentReport(deviceA);
+    expect(retried.report.status).toBe('pending');
+    await (growth as unknown as {
+      processReportJob: (jobId: string, ownerDeviceId: string) => Promise<void>;
+    }).processReportJob(updateJob!.id, deviceA);
+    const refreshed = await growth.getState(deviceA);
+    expect(refreshed.report).toMatchObject({ status: 'succeeded', stale: false });
+    expect(refreshed.report.current?.reportId).not.toBe(lastGoodReportId);
+    expect(await prisma.growthInsightReport.count({ where: { ownerDeviceId: deviceA } })).toBe(1);
+
+    recognize.mockRestore();
+    summarize.mockRestore();
+    synthesize.mockRestore();
   });
 
   it('rejects missing device identity instead of reading the shared anonymous namespace', async () => {
@@ -1398,6 +1754,216 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
+  it('publishes selected diary content to latest and withdraws it when the diary becomes private', async () => {
+    const draft = await store.createDraft({
+      id: 'draft-discovery-publish',
+      type: 'travel',
+      characterId: 'character-blue',
+      selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+      privacy: 'private',
+      version: 1,
+    }, deviceA);
+    const saved = await request(app.getHttpServer())
+      .post('/api/diaries/save')
+      .set('x-device-id', deviceA)
+      .send({
+        draftId: draft.id,
+        idempotencyKey: 'discovery-publish-save',
+        title: '厦门海边散步',
+        summary: '和海风一起慢下来。',
+        location: '厦门市',
+        date: '2026-10-20',
+        privacy: 'private',
+        photoIds: ['photo-1', 'photo-2', 'photo-3'],
+        contentSnapshot: {
+          type: 'travel',
+          subtitle: '厦门',
+          helperMessage: '',
+          characterId: 'character-blue',
+          companionName: '自己',
+          coverPhotoId: 'photo-1',
+          posterPhotoIds: ['photo-1', 'photo-2'],
+          blocks: [
+            { id: 'block-public', type: 'text', title: '海风', content: '沿着厦门海边慢慢走。' },
+            { id: 'block-private', type: 'text', content: '这段只留给自己。' },
+          ],
+          people: [],
+        },
+        version: 1,
+      })
+      .expect(201);
+    const diaryId = saved.body.data.diaryId as string;
+
+    await request(app.getHttpServer())
+      .post('/api/sharing/project')
+      .set('x-device-id', deviceA)
+      .send({ diaryId, privacy: 'public-comments', publicBlockIds: ['block-public'] })
+      .expect(201);
+
+    const story = await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } });
+    expect(story).toMatchObject({
+      ownerDeviceId: deviceA,
+      sourceDiaryVersion: 1,
+      publicationStatus: 'published',
+      title: '厦门海边散步',
+      cityKey: '厦门',
+      body: '沿着厦门海边慢慢走。',
+    });
+    expect(story?.body).not.toContain('这段只留给自己');
+
+    const latest = await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .query({ category: 'latest', page: '1', pageSize: '20' })
+      .set('x-device-id', deviceB)
+      .expect(200);
+    expect(latest.body.data.items).toHaveLength(1);
+    expect(latest.body.data.items[0].blocks).toMatchObject([{
+      id: 'block-public',
+      content: '沿着厦门海边慢慢走。',
+      photos: [],
+    }]);
+
+    const sameCity = await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .query({ category: 'same-city', city: '厦门市', page: '1', pageSize: '20' })
+      .set('x-device-id', deviceB)
+      .expect(200);
+    expect(sameCity.body.data.items.map((item: { id: string }) => item.id)).toEqual([story?.id]);
+
+    await request(app.getHttpServer())
+      .post('/api/sharing/project')
+      .set('x-device-id', deviceA)
+      .send({ diaryId, privacy: 'private' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .query({ category: 'latest', page: '1', pageSize: '20' })
+      .set('x-device-id', deviceB)
+      .expect(200)
+      .expect(({ body }) => expect(body.data.items).toEqual([]));
+    expect(await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } }))
+      .toMatchObject({ publicationStatus: 'withdrawn', body: '', cityKey: '' });
+  });
+
+  it('publishes selected diary content to discovery and withdraws it when the diary becomes private', async () => {
+    const saved = await store.saveDiary({
+      draftId: 'draft-discovery-publish',
+      title: '厦门海边散步',
+      summary: '和海风一起慢下来。',
+      location: '厦门市',
+      date: '2026-10-20',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      publicBlockIds: undefined,
+      contentSnapshot: {
+        type: 'travel',
+        subtitle: '厦门',
+        helperMessage: '',
+        characterId: 'character-blue',
+        companionName: '自己',
+        coverPhotoId: 'photo-1',
+        posterPhotoIds: ['photo-1', 'photo-2'],
+        blocks: [
+          { id: 'block-public', type: 'text', title: '海风', content: '沿着厦门海边慢慢走。' },
+          { id: 'block-private', type: 'text', content: '这段只留给自己。' },
+        ],
+        people: [],
+      },
+      version: 1,
+    }, deviceA);
+    const diaryId = saved.id;
+
+    await request(app.getHttpServer())
+      .post('/api/sharing/project')
+      .set('x-device-id', deviceA)
+      .send({ diaryId, privacy: 'public-comments', publicBlockIds: ['block-public'] })
+      .expect(201);
+
+    const story = await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } });
+    expect(story).toMatchObject({
+      ownerDeviceId: deviceA,
+      sourceDiaryVersion: 1,
+      publicationStatus: 'published',
+      title: '厦门海边散步',
+      cityKey: '厦门',
+      body: '沿着厦门海边慢慢走。',
+    });
+    expect(story?.body).not.toContain('这段只留给自己');
+
+    const latest = await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .query({ category: 'latest', page: '1', pageSize: '20' })
+      .set('x-device-id', deviceB)
+      .expect(200);
+    expect(latest.body.data.items).toHaveLength(1);
+    expect(latest.body.data.items[0].blocks).toMatchObject([{
+      id: 'block-public',
+      content: '沿着厦门海边慢慢走。',
+      photos: [],
+    }]);
+
+    const sameCity = await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .query({ category: 'same-city', city: '厦门市', page: '1', pageSize: '20' })
+      .set('x-device-id', deviceB)
+      .expect(200);
+    expect(sameCity.body.data.items.map((item: { id: string }) => item.id)).toEqual([story?.id]);
+
+    await request(app.getHttpServer())
+      .post('/api/sharing/project')
+      .set('x-device-id', deviceA)
+      .send({ diaryId, privacy: 'private' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .get('/api/discovery/stories')
+      .query({ category: 'latest', page: '1', pageSize: '20' })
+      .set('x-device-id', deviceB)
+      .expect(200)
+      .expect(({ body }) => expect(body.data.items).toEqual([]));
+    expect(await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } }))
+      .toMatchObject({ publicationStatus: 'withdrawn', body: '', cityKey: '' });
+  });
+
+  it('blocks anonymous discovery publication when selected photos cannot be masked', async () => {
+    const saved = await store.saveDiary({
+      draftId: 'draft-discovery-anonymous',
+      title: '和小林的海边日记',
+      summary: '海边散步。',
+      location: '厦门市',
+      date: '2026-10-20',
+      privacy: 'private',
+      photoIds: ['photo-1', 'photo-2', 'photo-3'],
+      publicBlockIds: undefined,
+      contentSnapshot: {
+        type: 'travel',
+        subtitle: '海边',
+        helperMessage: '',
+        characterId: 'character-blue',
+        companionName: '小林',
+        coverPhotoId: 'photo-1',
+        posterPhotoIds: ['photo-1', 'photo-2'],
+        blocks: [
+          { id: 'block-public', type: 'text', content: '和小林在厦门散步。', photoIds: ['photo-1'] },
+          { id: 'photo-public', type: 'photo', photoId: 'photo-1', caption: '小林看海', relatedBlockId: 'block-public' },
+        ],
+        people: [{ id: 'person-1', name: '小林', aliases: [], photoIds: ['photo-1'], avatarPhotoId: 'photo-1' }],
+      },
+      version: 1,
+    }, deviceA);
+
+    await request(app.getHttpServer())
+      .post('/api/sharing/project')
+      .set('x-device-id', deviceA)
+      .send({ diaryId: saved.id, privacy: 'anonymous', publicBlockIds: ['block-public'] })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('publication_blocked');
+        expect(body.error.message).toContain('匿名照片遮挡目前不可用');
+      });
+    expect(await prisma.discoveryStory.count()).toBe(0);
+    expect(await store.getDiary(saved.id, deviceA)).toMatchObject({ privacy: 'private' });
+  });
+
   it('reads published discovery snapshots and persists device-scoped idempotent likes', async () => {
     const publishedAt = new Date('2026-10-16T10:00:00.000Z');
     const stories = [
@@ -1794,6 +2360,31 @@ describe('Backend foundation (e2e)', () => {
       correction: '海边散步让我放慢了脚步。',
       version: 1,
     });
+    const feed = await request(app.getHttpServer())
+      .get('/api/anchors/feed')
+      .query({ tagId: 'tag-seaside', page: '1', pageSize: '10' })
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(feed.body).toMatchObject({
+      version: 'memory-anchor-v1',
+      data: {
+        tagId: 'tag-seaside',
+        total: 1,
+        items: [{
+          sourceType: 'diary',
+          anchorId: 'anchor-e2e-anchor-1',
+          excerpt: '沿着海港散步',
+          correction: '海边散步让我放慢了脚步。',
+          diary: { id: diaryId, version: 1, coverPhotoId: 'photo-1' },
+          sourceBlockIds: [sourceBlockId],
+        }],
+      },
+    });
+    await request(app.getHttpServer())
+      .get('/api/anchors/summary')
+      .set('x-device-id', deviceB)
+      .expect(200)
+      .expect(({ body }) => expect(body.data.total).toBe(0));
     await request(app.getHttpServer())
       .get('/api/anchors/anchor-e2e-anchor-1/correction')
       .query({ diaryId, diaryVersion: '1' })
@@ -1806,7 +2397,192 @@ describe('Backend foundation (e2e)', () => {
     expect(await prisma.diaryAnchorExtraction.count()).toBe(0);
     expect(await prisma.anchorCorrection.count()).toBe(0);
     expect(await prisma.anchorCorrectionCommand.count()).toBe(0);
+    expect(await prisma.chatDailyAnchor.count()).toBe(0);
+    expect(await prisma.chatDailyAnchorSource.count()).toBe(0);
+    expect(await prisma.chatAnchorCorrection.count()).toBe(0);
+    expect(await prisma.chatAnchorCorrectionCommand.count()).toBe(0);
   });
+
+  it('summarizes only new complete daily chats into one device-scoped anchor and correction', async () => {
+    const provider = app.get(ArkMemoryAnchorProvider);
+    const summarize = jest.spyOn(provider, 'summarize').mockResolvedValue({
+      tagId: 'friends',
+      excerpt: '小橘记得你提到老朋友时，语气里满是珍惜。',
+    });
+    const createTurn = async (input: {
+      conversationId: string;
+      requestId: string;
+      userMessageId: string;
+      assistantMessageId?: string;
+      text: string;
+      reply?: string;
+      deviceLocalDate?: string;
+    }) => {
+      await request(app.getHttpServer())
+        .post(`/api/chat/conversations/${input.conversationId}/turns`)
+        .set('x-device-id', deviceA)
+        .send({
+          requestId: input.requestId,
+          userMessageId: input.userMessageId,
+          text: input.text,
+          ...(input.deviceLocalDate ? { deviceLocalDate: input.deviceLocalDate } : {}),
+        })
+        .expect(201);
+      if (input.reply) {
+        await request(app.getHttpServer())
+          .post(`/api/chat/conversations/${input.conversationId}/turns/${input.requestId}/reply`)
+          .set('x-device-id', deviceA)
+          .send({
+            attempt: 1,
+            assistantMessageId: input.assistantMessageId,
+            text: input.reply,
+            source: 'provider',
+            providerRequestId: `test-provider-${input.requestId}`,
+          })
+          .expect(201);
+      }
+    };
+
+    await createTurn({
+      conversationId: 'chat-memory-day-one',
+      requestId: 'chat-memory-turn-one',
+      userMessageId: 'chat-memory-user-one',
+      assistantMessageId: 'chat-memory-assistant-one',
+      text: '今天见到了以前的同学。',
+      reply: '见到老同学一定有很多回忆吧。',
+      deviceLocalDate: '2026-01-01',
+    });
+    await createTurn({
+      conversationId: 'chat-memory-day-two',
+      requestId: 'chat-memory-turn-two',
+      userMessageId: 'chat-memory-user-two',
+      assistantMessageId: 'chat-memory-assistant-two',
+      text: '我们聊起了以前一起旅行的事。',
+      reply: '听起来那段旅程对你很特别。',
+      deviceLocalDate: '2026-01-02',
+    });
+    await createTurn({
+      conversationId: 'chat-memory-old-session',
+      requestId: 'chat-memory-legacy-turn',
+      userMessageId: 'chat-memory-legacy-user',
+      assistantMessageId: 'chat-memory-legacy-assistant',
+      text: '上线前的旧聊天不应被回填。',
+      reply: '这条旧记录不应进入本功能。',
+    });
+    await createTurn({
+      conversationId: 'chat-memory-pending-session',
+      requestId: 'chat-memory-pending-turn',
+      userMessageId: 'chat-memory-pending-user',
+      text: '这条未完成的聊天不应被总结。',
+      deviceLocalDate: '2026-01-01',
+    });
+
+    await app.get(ChatDailyAnchorService).processCompletedDate(deviceA, '2026-01-03');
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(summarize).toHaveBeenCalledWith({
+      kind: 'chat',
+      messages: [
+        { role: 'user', content: '今天见到了以前的同学。' },
+        { role: 'assistant', content: '见到老同学一定有很多回忆吧。' },
+        { role: 'user', content: '我们聊起了以前一起旅行的事。' },
+        { role: 'assistant', content: '听起来那段旅程对你很特别。' },
+      ],
+    });
+    const batch = await prisma.chatDailyAnchor.findFirstOrThrow({
+      where: { ownerDeviceId: deviceA, status: 'succeeded' },
+      include: { sources: true },
+    });
+    expect(batch).toMatchObject({
+      sourceDateStart: '2026-01-01',
+      sourceDateEnd: '2026-01-02',
+      sourceCount: 4,
+      tagId: 'friends',
+      excerpt: '小橘记得你提到老朋友时，语气里满是珍惜。',
+    });
+    expect(batch.sources).toHaveLength(4);
+    expect(batch.sources.some(source => source.messageId.includes('legacy'))).toBe(false);
+    expect(batch.sources.some(source => source.messageId.includes('pending'))).toBe(false);
+
+    const feed = await request(app.getHttpServer())
+      .get('/api/anchors/feed')
+      .query({ page: '1', pageSize: '10' })
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(feed.body).toMatchObject({
+      version: 'memory-anchor-v1',
+      data: {
+        tagId: null,
+        total: 1,
+        items: [{
+          sourceType: 'chat',
+          anchorId: batch.anchorId,
+          tagId: 'friends',
+          excerpt: batch.excerpt,
+          chat: { batchId: batch.id, sourceDateStart: '2026-01-01', sourceDateEnd: '2026-01-02' },
+        }],
+      },
+    });
+    expect(feed.body.data.items[0].chat.sourceMessages).toHaveLength(4);
+    await request(app.getHttpServer())
+      .get('/api/anchors/summary')
+      .set('x-device-id', deviceA)
+      .expect(200)
+      .expect(({ body }) => expect(body.data.total).toBe(1));
+    await request(app.getHttpServer())
+      .get('/api/anchors/feed')
+      .set('x-device-id', deviceB)
+      .expect(200)
+      .expect(({ body }) => expect(body.data.total).toBe(0));
+
+    await request(app.getHttpServer())
+      .put(`/api/anchors/${batch.anchorId}/chat-correction`)
+      .set('x-device-id', deviceA)
+      .send({
+        anchorBatchId: batch.id,
+        correction: '老朋友让这段旅程变得更有意义。',
+        expectedVersion: 0,
+        idempotencyKey: 'chat-memory-correction-1',
+      })
+      .expect(200)
+      .expect(({ body }) => expect(body.data).toMatchObject({
+        anchorId: batch.anchorId,
+        anchorBatchId: batch.id,
+        correction: '老朋友让这段旅程变得更有意义。',
+        version: 1,
+      }));
+    const correctedFeed = await request(app.getHttpServer())
+      .get('/api/anchors/feed')
+      .query({ tagId: 'friends', page: '1', pageSize: '10' })
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(correctedFeed.body.data.items[0].correction).toBe('老朋友让这段旅程变得更有意义。');
+
+    await app.get(ChatDailyAnchorService).processCompletedDate(deviceA, '2026-01-03');
+    expect(summarize).toHaveBeenCalledTimes(1);
+    summarize.mockReset().mockRejectedValue(new MemoryAnchorProviderError('provider_failed'));
+    await createTurn({
+      conversationId: 'chat-memory-day-three',
+      requestId: 'chat-memory-turn-three',
+      userMessageId: 'chat-memory-user-three',
+      assistantMessageId: 'chat-memory-assistant-three',
+      text: '今天又聊起了老朋友。',
+      reply: '听起来这段友情一直很重要。',
+      deviceLocalDate: '2026-01-03',
+    });
+    await app.get(ChatDailyAnchorService).processCompletedDate(deviceA, '2026-01-04');
+    expect(summarize).toHaveBeenCalledTimes(3);
+    const failedBatch = await prisma.chatDailyAnchor.findFirstOrThrow({
+      where: { ownerDeviceId: deviceA, status: 'failed' },
+    });
+    expect(failedBatch).toMatchObject({ attempt: 3, failureCode: 'provider_failed' });
+    const summary = await request(app.getHttpServer())
+      .get('/api/anchors/summary')
+      .set('x-device-id', deviceA)
+      .expect(200);
+    expect(summary.body.data.total).toBe(1);
+    summarize.mockRestore();
+  }, 20_000);
 
   it('supports generation job create and polling', async () => {
     await request(app.getHttpServer())

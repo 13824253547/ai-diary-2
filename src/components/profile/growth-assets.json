@@ -20,6 +20,20 @@
       616
     ],
     "background": "#FFF3E5",
+    "dynamic_artwork": {
+      "background_file": "assets/restored/growth-flower-cutouts/background.png",
+      "locked_file": "assets/restored/growth-flower-cutouts/locked-gray-brown-bud.png",
+      "open_files": [
+        "assets/restored/growth-flower-cutouts/open-flower-a.png",
+        "assets/restored/growth-flower-cutouts/open-flower-b.png"
+      ],
+      "slot_boxes_px": [
+        [30, 9, 224, 279],
+        [248, 68, 437, 327],
+        [92, 288, 292, 483]
+      ],
+      "source": "Vision instance cutouts from growth-flowers-locked.png; original flower pixels retained."
+    },
     "labels": [
       {
         "id": "friends",
@@ -118,6 +132,20 @@
       495
     ],
     "background": "#FFF3E5",
+    "dynamic_artwork": {
+      "background_file": "assets/restored/growth-flower-cutouts/background.png",
+      "locked_file": "assets/restored/growth-flower-cutouts/locked-gray-brown-bud.png",
+      "open_files": [
+        "assets/restored/growth-flower-cutouts/open-flower-a.png",
+        "assets/restored/growth-flower-cutouts/open-flower-b.png"
+      ],
+      "slot_boxes_px": [
+        [30, 9, 224, 279],
+        [248, 68, 437, 327],
+        [92, 288, 292, 483]
+      ],
+      "source": "Vision foreground instance cutouts from growth-flowers-locked.png; original pixels retained."
+    },
     "labels": [
       {
         "id": "first",

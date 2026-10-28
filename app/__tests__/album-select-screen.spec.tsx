@@ -11,14 +11,16 @@ const mockListDevicePhotoAlbums=jest.fn();
 const mockListDevicePhotos=jest.fn();
 const mockValidateReadableDevicePhotoIds=jest.fn();
 const mockGetPhotoPermissionStatus=jest.fn();
+const mockListMaterialPhotosFromBackend=jest.fn();
 
 let mockDraftId='';
 let mockMode: string | undefined;
+let mockSource: string | undefined;
 let mockCharacterSelected: string | undefined;
 
 jest.mock('expo-router',()=>({
   useRouter:()=>mockRouter,
-  useLocalSearchParams:()=>({draftId:mockDraftId,mode:mockMode,characterSelected:mockCharacterSelected}),
+  useLocalSearchParams:()=>({draftId:mockDraftId,mode:mockMode,source:mockSource,characterSelected:mockCharacterSelected}),
 }));
 
 jest.mock('../../src/services/photo-library',()=>({
@@ -30,6 +32,10 @@ jest.mock('../../src/services/photo-library',()=>({
 
 jest.mock('../../src/services/photo-permission',()=>({
   getPhotoPermissionStatus:(...args: unknown[])=>mockGetPhotoPermissionStatus(...args),
+}));
+
+jest.mock('../../src/services/material-photo-api',()=>({
+  listMaterialPhotosFromBackend:(...args: unknown[])=>mockListMaterialPhotosFromBackend(...args),
 }));
 
 jest.mock('../../src/components/common/button',()=>({
@@ -65,6 +71,22 @@ jest.mock('../../src/components/diary/photo',()=>({
 }));
 
 function buildPhoto(id:string){return{id,title:`照片${id}`,location:'设备相册',emoji:'🖼',color:'#EFE3D5',date:'2026.10.13',localUri:`file://${id}.jpg`,uri:`file://${id}.jpg`,width:100,height:120,source:'device' as const};}
+function buildMaterialPhoto(id:string,source:'device'|'generated'='device'){
+  const requestId=`request-${id}`;
+  return {
+    id,
+    sourceAssetId:source==='generated'?requestId:`source-${id}`,
+    title:`素材${id}`,
+    location:'',
+    emoji:'🖼',
+    color:'#EFE3D5',
+    date:'2026.10.13',
+    uri:`https://api.example.test/photos/materials/${id}/content`,
+    remoteHeaders:{'x-device-id':'device-test','Authorization':'Bearer test-token'},
+    source,
+    ...(source==='generated'?{generationRequestId:requestId,generationPrompt:'雨后的街道',generationSource:'provider' as const}:{}),
+  };
+}
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error?: unknown) => void;
@@ -90,10 +112,12 @@ describe('Album select screen',()=>{
     jest.clearAllMocks();
     alertSpy=jest.spyOn(Alert,'alert').mockImplementation(jest.fn());
     mockMode=undefined;
+    mockSource=undefined;
     mockCharacterSelected=undefined;
     useAppStore.getState().grantPhotoPermission();
     mockDraftId=useAppStore.getState().beginCreation();
     mockGetPhotoPermissionStatus.mockResolvedValue({status:'full',granted:true,canAskAgain:true});
+    mockListMaterialPhotosFromBackend.mockResolvedValue({ok:true,photos:[]});
     mockListDevicePhotoAlbums.mockResolvedValue([{id:'__all__',title:'全部照片',assetCount:6},{id:'album-1',title:'旅行',assetCount:3},{id:'album-2',title:'人物',assetCount:3}]);
     mockValidateReadableDevicePhotoIds.mockImplementation((photoIds: string[])=>Promise.resolve({validIds:photoIds,invalidIds:[]}));
     mockListDevicePhotos.mockImplementation(({albumId}:{albumId?:string})=>{
@@ -132,6 +156,76 @@ describe('Album select screen',()=>{
       expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(['p1','p2','p3']);
       expect(useAppStore.getState().drafts[mockDraftId].selectedPhotoIds).toEqual(['p1','p2','p3']);
       expect(mockRouter.push).toHaveBeenCalledWith({pathname:'/create/template',params:{draftId:mockDraftId}});
+    });
+  });
+
+  test('selects saved material photos without requiring device album permission',async()=>{
+    const materialPhotos=[buildMaterialPhoto('material-1'),buildMaterialPhoto('generated-1','generated'),buildMaterialPhoto('material-3')];
+    mockGetPhotoPermissionStatus.mockResolvedValue({status:'denied',granted:false,canAskAgain:true});
+    mockListMaterialPhotosFromBackend.mockResolvedValue({ok:true,photos:materialPhotos});
+    const screen=await render(<AlbumScreen/>);
+    await waitFor(()=>expect(screen.getByText('需要相册权限')).toBeTruthy());
+
+    await act(async()=>{fireEvent.press(screen.getByText('全部照片'));});
+    await act(async()=>{fireEvent.press(screen.getByText('素材库'));});
+    await waitFor(()=>expect(screen.getByText('图片:material-1')).toBeTruthy());
+    expect(screen.getByText('图片:generated-1')).toBeTruthy();
+
+    for(const photo of materialPhotos){
+      await act(async()=>{fireEvent.press(screen.getByLabelText(photo.title));});
+    }
+    await act(async()=>{fireEvent.press(screen.getByLabelText('生成日记'));});
+
+    await waitFor(()=>{
+      expect(mockValidateReadableDevicePhotoIds).not.toHaveBeenCalled();
+      expect(useAppStore.getState().drafts[mockDraftId].selectedPhotoIds).toEqual(materialPhotos.map(photo=>photo.id));
+      expect(mockRouter.push).toHaveBeenCalledWith({pathname:'/create/template',params:{draftId:mockDraftId}});
+    });
+  });
+
+  test('opens directly in materials and preselects the source photo from a generated image',async()=>{
+    const generated=buildMaterialPhoto('generated-entry','generated');
+    useAppStore.getState().registerPhotos([generated]);
+    useAppStore.setState({materialPhotoIds:[generated.id]});
+    useAppStore.getState().setDraftPhotos(mockDraftId,[generated.id]);
+    mockSource='materials';
+    mockListMaterialPhotosFromBackend.mockResolvedValue({ok:true,photos:[generated]});
+    mockGetPhotoPermissionStatus.mockResolvedValue({status:'denied',granted:false,canAskAgain:true});
+
+    const screen=await render(<AlbumScreen/>);
+
+    await waitFor(()=>expect(screen.getByText('图片:generated-entry')).toBeTruthy());
+    expect(screen.getByText('素材库')).toBeTruthy();
+    expect(screen.getByText('已选 1 张')).toBeTruthy();
+    expect(screen.getByLabelText('素材generated-entry').props.accessibilityState.checked).toBe(true);
+    expect(screen.getByText('至少选择 3 张照片，让回忆更完整')).toBeTruthy();
+    await act(async()=>{fireEvent.press(screen.getByLabelText('生成日记'));});
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    expect(mockGetPhotoPermissionStatus).not.toHaveBeenCalled();
+    expect(mockListDevicePhotoAlbums).not.toHaveBeenCalled();
+    expect(mockListDevicePhotos).not.toHaveBeenCalled();
+  });
+
+  test('keeps material and device selections together and validates only device photos',async()=>{
+    const materialPhoto=buildMaterialPhoto('material-mixed');
+    mockListMaterialPhotosFromBackend.mockResolvedValue({ok:true,photos:[materialPhoto]});
+    const screen=await render(<AlbumScreen/>);
+    await waitFor(()=>expect(screen.getByText('图片:p1')).toBeTruthy());
+    await act(async()=>{fireEvent.press(screen.getByText('全部照片'));});
+    await act(async()=>{fireEvent.press(screen.getByText('素材库'));});
+    await waitFor(()=>expect(screen.getByText('图片:material-mixed')).toBeTruthy());
+    await act(async()=>{fireEvent.press(screen.getByLabelText('素材material-mixed'));});
+    await act(async()=>{fireEvent.press(screen.getByText('素材库'));});
+    await act(async()=>{fireEvent.press(screen.getByText('全部照片 · 6 张'));});
+    await waitFor(()=>expect(screen.getByText('图片:p1')).toBeTruthy());
+    await act(async()=>{fireEvent.press(screen.getByLabelText('照片p1'));});
+    await act(async()=>{fireEvent.press(screen.getByLabelText('照片p2'));});
+    await act(async()=>{fireEvent.press(screen.getByLabelText('生成日记'));});
+
+    await waitFor(()=>{
+      expect(mockValidateReadableDevicePhotoIds).toHaveBeenCalledWith(['p1','p2']);
+      expect(useAppStore.getState().drafts[mockDraftId].selectedPhotoIds).toEqual(['material-mixed','p1','p2']);
+      expect(mockRouter.push).toHaveBeenCalled();
     });
   });
 

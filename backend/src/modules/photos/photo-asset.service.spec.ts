@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Prisma } from '@prisma/client';
@@ -12,6 +12,7 @@ describe('PhotoAssetService', () => {
   let materialRows: Array<Record<string, unknown>>;
   let diaryRows: Array<Record<string, unknown>>;
   let savedDiaryRows: Array<Record<string, unknown>>;
+  let discoveryRows: Array<Record<string, unknown>>;
   let prisma: {
     $executeRaw: jest.Mock;
     $queryRaw: jest.Mock;
@@ -20,6 +21,7 @@ describe('PhotoAssetService', () => {
     materialPhoto: Record<string, jest.Mock>;
     diaryPhotoCopy: Record<string, jest.Mock>;
     diary: Record<string, jest.Mock>;
+    discoveryStory: Record<string, jest.Mock>;
   };
 
   beforeEach(async () => {
@@ -29,10 +31,14 @@ describe('PhotoAssetService', () => {
     materialRows = [];
     diaryRows = [];
     savedDiaryRows = [];
+    discoveryRows = [];
     const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
       Object.entries(where).every(([key, value]) => {
         if (value && typeof value === 'object' && 'in' in value) {
           return ((value as { in: unknown[] }).in).includes(row[key]);
+        }
+        if (value && typeof value === 'object' && 'not' in value) {
+          return row[key] !== (value as { not: unknown }).not;
         }
         return row[key] === value;
       });
@@ -82,6 +88,12 @@ describe('PhotoAssetService', () => {
     const diary = {
       findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
         savedDiaryRows.filter(row => matches(row, where))),
+      findFirst: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
+        savedDiaryRows.find(row => matches(row, where)) ?? null),
+    };
+    const discoveryStory = {
+      findFirst: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
+        discoveryRows.find(row => matches(row, where)) ?? null),
     };
     const materialPhotoQuota = {
       update: jest.fn(async () => ({})),
@@ -93,6 +105,7 @@ describe('PhotoAssetService', () => {
       materialPhoto,
       diaryPhotoCopy,
       diary,
+      discoveryStory,
     };
     prisma = {
       $executeRaw: tx.$executeRaw,
@@ -102,6 +115,7 @@ describe('PhotoAssetService', () => {
       materialPhoto,
       diaryPhotoCopy,
       diary,
+      discoveryStory,
     };
     service = new PhotoAssetService(prisma as unknown as PrismaService);
   });
@@ -165,6 +179,29 @@ describe('PhotoAssetService', () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
 
+  test('counts generated images and uploaded photos in the same device quota', async () => {
+    materialRows.push(...Array.from({ length: 99 }, (_, index) => ({
+      id: `existing-${index}`,
+      ownerDeviceId: 'device-1',
+    })));
+    await service.assertMaterialCapacity('device-1');
+    const image = {
+      buffer: Buffer.from([0xff, 0xd8, 0xff, 0x01, 0x02]),
+      mimeType: 'image/jpeg',
+      extension: 'jpg',
+    };
+    const generated = await service.saveGeneratedMaterial('device-1', 'request-at-limit', '海边日落', image);
+
+    expect(generated.generationRequestId).toBe('request-at-limit');
+    expect(materialRows).toHaveLength(100);
+    await expect(service.assertMaterialCapacity('device-1'))
+      .rejects.toMatchObject<Partial<PhotoAssetError>>({ code: 'limit_exceeded' });
+    await expect(upload('next-device-photo'))
+      .rejects.toMatchObject<Partial<PhotoAssetError>>({ code: 'limit_exceeded' });
+    await expect(service.assertMaterialCapacity('device-2')).resolves.toBeUndefined();
+    expect(materialRows).toHaveLength(100);
+  });
+
   test('copies original bytes into an independent diary asset that survives material deletion', async () => {
     const [material] = await upload('asset-1');
     if (!material) throw new Error('material upload returned no asset');
@@ -219,6 +256,44 @@ describe('PhotoAssetService', () => {
       diaryId: 'diary-uploaded',
       date: '2026.10.20',
     });
+  });
+
+  test('serves only selected photos from an active published discovery story', async () => {
+    const bytes = Buffer.from([0xff, 0xd8, 0xff, 0x01]);
+    await writeFile(join(root, 'public-story-photo.jpg'), bytes);
+    discoveryRows.push({
+      id: 'story-1',
+      ownerDeviceId: 'device-1',
+      sourceDiaryId: 'diary-1',
+      sourceDiaryVersion: 2,
+      publicationStatus: 'published',
+      publishedAt: new Date(),
+      withdrawnAt: null,
+      publicPhotoIds: ['photo-1'],
+    });
+    savedDiaryRows.push({
+      id: 'diary-1',
+      ownerDeviceId: 'device-1',
+      version: 2,
+      privacy: 'public-comments',
+    });
+    diaryRows.push({
+      ownerDeviceId: 'device-1',
+      diaryId: 'diary-1',
+      photoId: 'photo-1',
+      filePath: 'public-story-photo.jpg',
+      mimeType: 'image/jpeg',
+    });
+
+    await expect(service.readDiscoveryPhotoCopy('story-1', 'photo-1'))
+      .resolves.toMatchObject({ buffer: bytes, mimeType: 'image/jpeg' });
+    await expect(service.readDiscoveryPhotoCopy('story-1', 'photo-2'))
+      .rejects.toMatchObject<Partial<PhotoAssetError>>({ code: 'not_found' });
+
+    discoveryRows[0].publicationStatus = 'withdrawn';
+    discoveryRows[0].withdrawnAt = new Date();
+    await expect(service.readDiscoveryPhotoCopy('story-1', 'photo-1'))
+      .rejects.toMatchObject<Partial<PhotoAssetError>>({ code: 'not_found' });
   });
 
   test('removes staged diary copies when the surrounding diary save rolls back', async () => {

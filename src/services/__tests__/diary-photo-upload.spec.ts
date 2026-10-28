@@ -3,6 +3,7 @@ import type { DiaryPhoto } from '../../types/diary';
 
 const mockManipulateAsync = jest.fn();
 const mockDeleteAsync = jest.fn();
+const mockDownloadAsync = jest.fn();
 
 jest.mock('expo-image-manipulator', () => ({
   SaveFormat: { JPEG: 'jpeg' },
@@ -10,7 +11,13 @@ jest.mock('expo-image-manipulator', () => ({
 }));
 
 jest.mock('expo-file-system/legacy', () => ({
+  cacheDirectory: 'file:///cache/',
   deleteAsync: (...args: unknown[]) => mockDeleteAsync(...args),
+  downloadAsync: (...args: unknown[]) => mockDownloadAsync(...args),
+}));
+
+jest.mock('../material-photo-api', () => ({
+  getMaterialPhotoContentUrl: (id: string) => `https://api.example.test/photos/materials/${id}/content`,
 }));
 
 function photo(id: string, overrides: Partial<DiaryPhoto> = {}): DiaryPhoto {
@@ -33,6 +40,10 @@ describe('diary photo upload preparation', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockDeleteAsync.mockResolvedValue(undefined);
+    mockDownloadAsync.mockImplementation(async (_uri: string, destination: string) => ({
+      status: 200,
+      uri: destination,
+    }));
     mockManipulateAsync.mockImplementation(async (uri: string) => ({
       uri: `${uri}.upload.jpg`,
       width: 2048,
@@ -77,6 +88,53 @@ describe('diary photo upload preparation', () => {
     const uploads = await prepareDiaryPhotoUploads(['photo-1'], [photo('photo-1')]);
     await cleanupDiaryPhotoUploads(uploads);
     expect(mockDeleteAsync).toHaveBeenCalledWith('file:///photos/photo-1.heic.upload.jpg', { idempotent: true });
+  });
+
+  test('downloads an authenticated saved material photo before preparing its generation upload', async () => {
+    const material = photo('material-1', {
+      source: 'generated',
+      sourceAssetId: 'image-request-1',
+      generationRequestId: 'image-request-1',
+      generationPrompt: '雨后的老街',
+      generationSource: 'provider',
+      localUri: undefined,
+      uri: 'https://api.example.test/photos/materials/material-1/content',
+      remoteHeaders: {
+        'x-device-id': 'device-1',
+        Authorization: 'Bearer test-token',
+      },
+    });
+
+    const result = await prepareDiaryPhotoUploads(['material-1'], [material]);
+
+    expect(mockDownloadAsync).toHaveBeenCalledWith(
+      material.uri,
+      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
+      { headers: material.remoteHeaders },
+    );
+    expect(mockManipulateAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
+      [{ resize: { width: 2048, height: 1365 } }],
+      { compress: 0.84, format: 'jpeg' },
+    );
+    expect(mockDeleteAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
+      { idempotent: true },
+    );
+    expect(result[0]).toMatchObject({ photoId: 'material-1', mimeType: 'image/jpeg' });
+  });
+
+  test('rejects an unauthenticated or unrelated remote image URL', async () => {
+    const unrelated = photo('remote-1', {
+      localUri: undefined,
+      uri: 'https://images.example.test/remote-1.jpg',
+      remoteHeaders: { 'x-device-id': 'device-1' },
+    });
+
+    await expect(prepareDiaryPhotoUploads(['remote-1'], [unrelated])).rejects.toThrow(
+      '所选照片无法读取，请返回相册重新选择。',
+    );
+    expect(mockDownloadAsync).not.toHaveBeenCalled();
   });
 
   test('fails closed and cleans partial output when a selected image is unavailable', async () => {

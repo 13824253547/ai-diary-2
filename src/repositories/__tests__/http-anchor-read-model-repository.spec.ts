@@ -84,6 +84,65 @@ describe('HttpAnchorReadModelRepository', () => {
     }
   });
 
+  test('loads a mixed memory feed without a tag and validates the requested page', async () => {
+    const feed = {
+      items: [{
+        id: 'chat:batch-1',
+        anchorId: 'chat-anchor-1',
+        sourceType: 'chat',
+        tagId: 'friends',
+        title: '小橘的陪伴记忆',
+        displayDate: '2026-01-03T00:00:00.000Z',
+        excerpt: '小橘记得你提到老朋友时，语气里满是珍惜。',
+        chat: {
+          batchId: 'batch-1',
+          sourceDateStart: '2026-01-01',
+          sourceDateEnd: '2026-01-02',
+          sourceMessages: [{ conversationId: 'conversation-1', messageId: 'message-1' }],
+        },
+      }],
+      tagId: null,
+      page: 1,
+      pageSize: 20,
+      total: 1,
+    };
+    jest.mocked(client.request).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true, version: 'memory-anchor-v1', data: feed },
+    });
+
+    await expect(repository.listFeed()).resolves.toEqual(feed);
+    expect(client.request).toHaveBeenCalledWith('/anchors/feed?page=1&pageSize=20', { method: 'GET' }, undefined);
+    const filteredFeed = { ...feed, tagId: 'friends', page: 2, pageSize: 10 };
+    jest.mocked(client.request).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: {
+        ok: true,
+        version: 'memory-anchor-v1',
+        data: filteredFeed,
+      },
+    });
+    await expect(repository.listFeed({ tagId: 'friends', page: 2, pageSize: 10 })).resolves.toEqual(filteredFeed);
+    expect(client.request).toHaveBeenLastCalledWith(
+      '/anchors/feed?page=2&pageSize=10&tagId=friends',
+      { method: 'GET' },
+      undefined,
+    );
+  });
+
+  test('reads the real feed count without loading a fixed or mock total', async () => {
+    jest.mocked(client.request).mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true, version: 'memory-anchor-v1', data: { total: 7 } },
+    });
+
+    await expect(repository.getSummary()).resolves.toEqual({ total: 7 });
+    expect(client.request).toHaveBeenCalledWith('/anchors/summary', { method: 'GET' }, undefined);
+  });
+
   test('starts a request with diary source version and attempt', async () => {
     jest.mocked(client.request).mockResolvedValue({
       ok: true,

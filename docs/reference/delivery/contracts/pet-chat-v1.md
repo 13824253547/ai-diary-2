@@ -34,6 +34,8 @@ The Prisma schema and migration define device-owned conversations, turns, and or
 
 The controller validates query wire values after device identity and the service repeats pagination object/type/range validation before database access.
 
-Q-001 still determines retention duration, deletion/cleanup, and cross-device recovery. No TTL, cross-device transfer, or deletion policy is inferred here. Until Q-001 is confirmed, the migration/API are implementation artifacts and do not establish a user-facing retention promise.
+The client now calls `GET /chat/conversations?page=1&pageSize=10`, followed by a device-scoped detail GET for the first non-empty item on that page, when the pet page opens without an explicit conversation ID. Explicit anchor-linked IDs take precedence. A failed read does not mean an empty history or permit a new send; the existing input action retries the read. Only successfully persisted turns can be restored.
+
+Q-001 still determines retention duration, deletion/cleanup, and cross-device recovery. No TTL, cross-device transfer, or deletion policy is inferred here. The same-device reopen behavior does not establish a permanent user-facing retention promise.
 
 Q-002 remains open for model quality, comprehensive moderation, timeout/cancellation/retry policy, and other AI modules. The user-confirmed PET-001 boundary is implemented with deterministic checks and system instructions; it is not a guarantee against semantic evasion. Q-003 still determines the final message length and supported keyboard matrix. The API stores source (`mock`/`provider`) explicitly and never silently turns persistence/provider failure into a successful mock turn. The local `backend/.env` has an isolated Ark configuration and a provider smoke test was recorded in DEV-13; production credentials and provider quality remain unverified.

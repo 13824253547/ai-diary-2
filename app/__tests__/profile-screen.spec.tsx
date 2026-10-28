@@ -144,4 +144,11 @@ describe('Profile screen monthly entry', () => {
     expect(queryByText('橘子的日记本')).toBeNull();
     expect(queryByText('VIP')).toBeNull();
   });
+
+  test('does not render unused notifications and settings icons', async () => {
+    const { queryByText } = await render(<ProfileScreen />);
+
+    expect(queryByText('notifications-outline')).toBeNull();
+    expect(queryByText('settings-outline')).toBeNull();
+  });
 });

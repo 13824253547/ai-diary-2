@@ -1,7 +1,13 @@
 import type { PetChatConversation } from '../../contracts/pet-chat-contract';
 import type { PetChatRepository } from '../../repositories/pet-chat-repository';
 import { PetChatRepositoryError } from '../../repositories/pet-chat-repository';
+import { ensureDeviceIdentity } from '../../services/device-identity';
 import { createTestStore } from '../../test-utils/create-test-store';
+import type { AppStoreDeps } from '../create-app-store';
+
+jest.mock('../../services/device-identity', () => ({
+  ensureDeviceIdentity: jest.fn(async () => 'device-chat-test'),
+}));
 
 function buildConversation(input: {
   conversationId: string;
@@ -102,13 +108,32 @@ function createRepository(overrides: Partial<PetChatRepository> = {}): PetChatRe
   };
 }
 
+function createReadyChatTestStore(overrides: Partial<AppStoreDeps>) {
+  const result = createTestStore(overrides);
+  result.store.setState({ chatHistoryStatus: 'ready' });
+  return result;
+}
+
 describe('PET-001 Store/server integration', () => {
+  beforeEach(() => {
+    jest.mocked(ensureDeviceIdentity).mockReset();
+    jest.mocked(ensureDeviceIdentity).mockResolvedValue('device-chat-test');
+  });
+
   test('uses the device-scoped server repository instead of the local mock provider', async () => {
     const localMockReply = jest.fn(() => ({ text: '本地 mock', source: 'mock' as const }));
     const repository = createRepository();
-    const { store } = createTestStore({
+    const { store } = createReadyChatTestStore({
       adapters: { petChatRepository: repository },
       chatReplyProvider: { reply: localMockReply },
+    });
+    store.setState({
+      chatMessages: [{
+        id: 'chat-welcome',
+        role: 'assistant',
+        source: 'welcome',
+        text: '嘿，今天过得怎么样？',
+      }],
     });
     const get = () => store.getState();
 
@@ -122,6 +147,7 @@ describe('PET-001 Store/server integration', () => {
       requestId: request.id,
       userMessageId: request.userMessageId,
       text: '今天很开心。',
+      deviceLocalDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
     });
     expect(repository.generateReply).toHaveBeenCalledWith(expect.objectContaining({
       conversationId,
@@ -157,7 +183,7 @@ describe('PET-001 Store/server integration', () => {
         });
       }),
     });
-    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+    const { store } = createReadyChatTestStore({ adapters: { petChatRepository: repository } });
     const get = () => store.getState();
 
     get().sendChat('今天有点累。');
@@ -212,7 +238,7 @@ describe('PET-001 Store/server integration', () => {
         return serverConversation;
       }),
     });
-    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+    const { store } = createReadyChatTestStore({ adapters: { petChatRepository: repository } });
     const get = () => store.getState();
 
     get().sendChat('今天很开心。');
@@ -324,12 +350,20 @@ describe('PET-001 Store/server integration', () => {
         return snapshot();
       }),
     });
-    const { store } = createTestStore({
+    const { store } = createReadyChatTestStore({
       adapters: { petChatRepository: repository },
       now: (() => {
         let now = 1;
         return () => now++;
       })(),
+    });
+    store.setState({
+      chatMessages: [{
+        id: 'chat-welcome',
+        role: 'assistant',
+        source: 'welcome',
+        text: '嘿，今天过得怎么样？\n我一直在这里，想听听你的小故事。',
+      }],
     });
     const get = () => store.getState();
 
@@ -369,7 +403,7 @@ describe('PET-001 Store/server integration', () => {
         throw new PetChatRepositoryError('out_of_scope', 'blocked', false);
       }),
     });
-    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+    const { store } = createReadyChatTestStore({ adapters: { petChatRepository: repository } });
     const get = () => store.getState();
 
     get().sendChat('请帮我写一个 Python 脚本。');
@@ -405,7 +439,7 @@ describe('PET-001 Store/server integration', () => {
         attempt: input.attempt,
       })),
     });
-    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+    const { store } = createReadyChatTestStore({ adapters: { petChatRepository: repository } });
     const get = () => store.getState();
 
     get().sendChat('第一条消息');
@@ -418,5 +452,189 @@ describe('PET-001 Store/server integration', () => {
     releaseBegin();
     await flushAsyncWork();
     expect(get().chatTurnRequests[0].status).toBe('completed');
+  });
+
+  test('loads the source conversation selected by a chat memory anchor', async () => {
+    const repository = createRepository({
+      getConversation: jest.fn(async conversationId => buildConversation({
+        conversationId,
+        requestId: 'source-request',
+        userMessageId: 'source-user',
+        text: '那天我和老朋友聊了很久。',
+        status: 'completed',
+        reply: '听起来你们有很多共同回忆。',
+      })),
+    });
+    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+
+    await expect(store.getState().loadChatConversation('source-conversation')).resolves.toBe(true);
+
+    expect(repository.getConversation).toHaveBeenCalledWith('source-conversation');
+    expect(store.getState().chatConversationId).toBe('source-conversation');
+    expect(store.getState().chatMessages.map(message => message.text)).toEqual([
+      '那天我和老朋友聊了很久。',
+      '听起来你们有很多共同回忆。',
+    ]);
+  });
+
+  test('restores the latest persisted conversation after a store restart', async () => {
+    const repository = createRepository({
+      listConversations: jest.fn(async () => ({
+        items: [{ id: 'latest-conversation', updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 }],
+        page: 1, pageSize: 10 as const, total: 1,
+      })),
+      getConversation: jest.fn(async conversationId => buildConversation({
+        conversationId, requestId: 'old-request', userMessageId: 'old-user',
+        text: '今天看到夕阳了。', status: 'completed', reply: '我也想和你一起看。',
+      })),
+    });
+    const first = createTestStore({ adapters: { petChatRepository: repository } });
+    expect(first.store.getState().chatHistoryStatus).toBe('idle');
+    first.store.getState().sendChat('不要在恢复前发新会话');
+    expect(first.store.getState().chatMessages).toEqual([]);
+
+    await expect(first.store.getState().restoreLatestChatConversation()).resolves.toBe(true);
+    const restarted = createTestStore({ adapters: { petChatRepository: repository } });
+    await expect(restarted.store.getState().restoreLatestChatConversation()).resolves.toBe(true);
+
+    expect(repository.listConversations).toHaveBeenCalledWith({ page: 1, pageSize: 10 });
+    expect(repository.getConversation).toHaveBeenCalledWith('latest-conversation');
+    expect(restarted.store.getState()).toMatchObject({
+      chatConversationId: 'latest-conversation',
+      chatHistoryStatus: 'ready',
+    });
+    expect(restarted.store.getState().chatMessages.map(message => message.text)).toEqual([
+      '今天看到夕阳了。',
+      '我也想和你一起看。',
+    ]);
+  });
+
+  test('treats a successful empty list as a new conversation, not a load error', async () => {
+    const repository = createRepository();
+    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+
+    await expect(store.getState().restoreLatestChatConversation()).resolves.toBe(false);
+
+    expect(store.getState().chatHistoryStatus).toBe('ready');
+    expect(repository.getConversation).not.toHaveBeenCalled();
+  });
+
+  test('skips an empty conversation ahead of the latest saved messages', async () => {
+    const repository = createRepository({
+      listConversations: jest.fn(async () => ({
+        items: [
+          { id: 'empty', updatedAt: '2026-10-27T11:00:00.000Z', messageCount: 0 },
+          { id: 'saved', updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 },
+        ],
+        page: 1, pageSize: 10 as const, total: 2,
+      })),
+      getConversation: jest.fn(async conversationId => buildConversation({
+        conversationId, requestId: 'saved-request', userMessageId: 'saved-user',
+        text: '之前的聊天', status: 'completed',
+      })),
+    });
+    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+
+    await store.getState().restoreLatestChatConversation();
+
+    expect(repository.getConversation).toHaveBeenCalledWith('saved');
+    expect(store.getState().chatConversationId).toBe('saved');
+  });
+
+  test('keeps sending blocked on a failed history read and recovers on retry', async () => {
+    const repository = createRepository({
+      listConversations: jest.fn()
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockResolvedValueOnce({
+          items: [{ id: 'restored', updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 }],
+          page: 1, pageSize: 10, total: 1,
+        }),
+      getConversation: jest.fn(async conversationId => buildConversation({
+        conversationId, requestId: 'saved', userMessageId: 'saved-user',
+        text: '留下的消息', status: 'completed', reply: '留下的回复',
+      })),
+    });
+    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+
+    await expect(store.getState().restoreLatestChatConversation()).resolves.toBe(false);
+    expect(store.getState().chatHistoryStatus).toBe('error');
+    store.getState().sendChat('不能悄悄新开会话');
+    expect(store.getState().chatConversationId).toBeUndefined();
+
+    await expect(store.getState().restoreLatestChatConversation()).resolves.toBe(true);
+    expect(store.getState().chatHistoryStatus).toBe('ready');
+    expect(store.getState().chatMessages.map(message => message.text)).toEqual(['留下的消息', '留下的回复']);
+  });
+
+  test('does not let an older default restore overwrite a selected conversation', async () => {
+    let finishList!: (value: Awaited<ReturnType<PetChatRepository['listConversations']>>) => void;
+    const repository = createRepository({
+      listConversations: jest.fn(() => new Promise(resolve => { finishList = resolve; })),
+      getConversation: jest.fn(async conversationId => buildConversation({
+        conversationId, requestId: 'anchor-request', userMessageId: 'anchor-user',
+        text: '锚点中的消息', status: 'completed',
+      })),
+    });
+    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+    const restore = store.getState().restoreLatestChatConversation();
+    await flushAsyncWork();
+
+    await expect(store.getState().loadChatConversation('anchor-conversation')).resolves.toBe(true);
+    finishList({
+      items: [{ id: 'other-conversation', updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 }],
+      page: 1, pageSize: 10, total: 1,
+    });
+    await expect(restore).resolves.toBe(false);
+    expect(store.getState().chatConversationId).toBe('anchor-conversation');
+    expect(repository.getConversation).not.toHaveBeenCalledWith('other-conversation');
+  });
+
+  test('clears the prior device conversation before restoring another identity', async () => {
+    let activeDevice = 'device-A';
+    jest.mocked(ensureDeviceIdentity).mockImplementation(async () => activeDevice);
+    const repository = createRepository({
+      listConversations: jest.fn(async () => ({
+        items: [{ id: `conversation-${activeDevice}`, updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 }],
+        page: 1, pageSize: 10 as const, total: 1,
+      })),
+      getConversation: jest.fn(async conversationId => buildConversation({
+        conversationId, requestId: `request-${activeDevice}`, userMessageId: `user-${activeDevice}`,
+        text: `消息-${activeDevice}`, status: 'completed',
+      })),
+    });
+    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+    await store.getState().restoreLatestChatConversation();
+    activeDevice = 'device-B';
+
+    await store.getState().restoreLatestChatConversation();
+
+    expect(store.getState().chatConversationId).toBe('conversation-device-B');
+    expect(store.getState().chatMessages.map(message => message.text)).toEqual(['消息-device-B', '小橘收到啦。']);
+  });
+
+  test('discards a conversation response if the device identity changes in flight', async () => {
+    let activeDevice = 'device-A';
+    let finishGet!: (conversation: PetChatConversation) => void;
+    jest.mocked(ensureDeviceIdentity).mockImplementation(async () => activeDevice);
+    const repository = createRepository({
+      listConversations: jest.fn(async () => ({
+        items: [{ id: 'conversation-A', updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 }],
+        page: 1, pageSize: 10 as const, total: 1,
+      })),
+      getConversation: jest.fn(() => new Promise(resolve => { finishGet = resolve; })),
+    });
+    const { store } = createTestStore({ adapters: { petChatRepository: repository } });
+    const restore = store.getState().restoreLatestChatConversation();
+    await flushAsyncWork();
+    activeDevice = 'device-B';
+    finishGet(buildConversation({
+      conversationId: 'conversation-A', requestId: 'request-A', userMessageId: 'user-A',
+      text: 'A 的私密消息', status: 'completed',
+    }));
+
+    await expect(restore).resolves.toBe(false);
+    expect(store.getState().chatConversationId).toBeUndefined();
+    expect(store.getState().chatMessages).toEqual([]);
+    expect(store.getState().chatHistoryStatus).toBe('error');
   });
 });

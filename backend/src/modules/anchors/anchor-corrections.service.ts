@@ -25,6 +25,16 @@ export type SaveAnchorCorrectionInput = {
   idempotencyKey: string;
 };
 
+export type ChatAnchorCorrectionRecord = {
+  id: string;
+  anchorId: string;
+  anchorBatchId: string;
+  correction: string;
+  version: number;
+  source: 'user';
+  updatedAt: string;
+};
+
 export class AnchorCorrectionError extends Error {
   constructor(
     readonly code: 'not_found' | 'invalid_input' | 'version_conflict' | 'permission_denied',
@@ -110,6 +120,41 @@ function requestFingerprint(input: SaveAnchorCorrectionInput) {
     .digest('hex');
 }
 
+function chatCorrectionFingerprint(input: {
+  anchorId: string;
+  anchorBatchId: string;
+  correction: string;
+  expectedVersion: number;
+}) {
+  return createHash('sha256')
+    .update(JSON.stringify([
+      input.anchorId,
+      input.anchorBatchId,
+      input.correction,
+      input.expectedVersion,
+    ]))
+    .digest('hex');
+}
+
+function mapChatCorrection(record: {
+  id: string;
+  anchorId: string;
+  anchorBatchId: string;
+  correction: string;
+  version: number;
+  updatedAt: Date;
+}): ChatAnchorCorrectionRecord {
+  return {
+    id: record.id,
+    anchorId: record.anchorId,
+    anchorBatchId: record.anchorBatchId,
+    correction: record.correction,
+    version: record.version,
+    source: 'user',
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
 async function lockDiary(
   transaction: Prisma.TransactionClient,
   diaryId: string,
@@ -123,6 +168,199 @@ async function lockDiary(
 @Injectable()
 export class AnchorCorrectionsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async chatBatchIsAccessible(
+    transaction: Prisma.TransactionClient,
+    input: { anchorId: string; anchorBatchId: string; ownerDeviceId: string },
+  ) {
+    const batch = await transaction.chatDailyAnchor.findFirst({
+      where: {
+        id: input.anchorBatchId,
+        anchorId: input.anchorId,
+        ownerDeviceId: input.ownerDeviceId,
+        status: 'succeeded',
+      },
+    });
+    if (!batch) return false;
+    const sources = await transaction.chatDailyAnchorSource.findMany({
+      where: { anchorBatchId: batch.id, ownerDeviceId: input.ownerDeviceId },
+      include: { message: true, turn: true },
+    });
+    if (sources.length !== batch.sourceCount || sources.length === 0) return false;
+    const conversationIds = [...new Set(sources.map(source => source.conversationId))];
+    const conversations = await transaction.chatConversation.findMany({
+      where: { id: { in: conversationIds }, ownerDeviceId: input.ownerDeviceId },
+      select: { id: true },
+    });
+    const accessibleConversations = new Set(conversations.map(conversation => conversation.id));
+    return sources.every(source =>
+      accessibleConversations.has(source.conversationId)
+      && source.message.conversationId === source.conversationId
+      && source.turn.conversationId === source.conversationId
+      && source.turn.ownerDeviceId === input.ownerDeviceId
+      && source.turn.memoryAnchorBatchId === batch.id
+      && source.turn.memoryEligible
+      && source.turn.status === 'completed'
+      && source.turn.source === 'provider'
+      && source.turn.assistantMessageId !== null
+      && (source.message.id === source.turn.userMessageId
+        || source.message.id === source.turn.assistantMessageId)
+      && !!source.message.text.trim());
+  }
+
+  async getChatCorrection(input: unknown, ownerDeviceId: unknown): Promise<ChatAnchorCorrectionRecord | null> {
+    if (!isRecord(input)) throw new AnchorCorrectionError('invalid_input', '聊天锚点纠正查询无效。');
+    const anchorId = normalizeIdentifier(input.anchorId, 'anchorId');
+    const anchorBatchId = normalizeIdentifier(input.anchorBatchId, 'anchorBatchId');
+    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    return this.prisma.$transaction(async transaction => {
+      await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT \`id\` FROM \`ChatDailyAnchor\` WHERE \`id\` = ${anchorBatchId} FOR UPDATE
+      `);
+      if (!await this.chatBatchIsAccessible(transaction, { anchorId, anchorBatchId, ownerDeviceId: owner })) {
+        throw new AnchorCorrectionError('not_found', '聊天锚点或其来源记录已不可用。');
+      }
+      const correction = await transaction.chatAnchorCorrection.findUnique({
+        where: { ownerDeviceId_anchorId: { ownerDeviceId: owner, anchorId } },
+      });
+      if (correction && correction.anchorBatchId !== anchorBatchId) {
+        throw new AnchorCorrectionError('not_found', '聊天锚点纠正与来源批次不匹配。');
+      }
+      return correction ? mapChatCorrection(correction) : null;
+    });
+  }
+
+  async saveChatCorrection(input: unknown, ownerDeviceId: unknown): Promise<ChatAnchorCorrectionRecord> {
+    if (!isRecord(input)) throw new AnchorCorrectionError('invalid_input', '聊天锚点纠正请求无效。');
+    const normalized = {
+      anchorId: normalizeIdentifier(input.anchorId, 'anchorId'),
+      anchorBatchId: normalizeIdentifier(input.anchorBatchId, 'anchorBatchId'),
+      correction: typeof input.correction === 'string' ? input.correction.trim() : '',
+      expectedVersion: normalizeVersion(input.expectedVersion, 'expectedVersion', true),
+      idempotencyKey: normalizeIdentifier(input.idempotencyKey, 'idempotencyKey'),
+    };
+    if (!normalized.correction || Array.from(normalized.correction).length > 240) {
+      throw new AnchorCorrectionError('invalid_input', '纠正内容需为 1 至 240 字。');
+    }
+    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const requestHash = chatCorrectionFingerprint(normalized);
+
+    try {
+      return await this.prisma.$transaction(async transaction => {
+        const commandKey = {
+          ownerDeviceId_idempotencyKey: {
+            ownerDeviceId: owner,
+            idempotencyKey: normalized.idempotencyKey,
+          },
+        };
+        const previousCommand = await transaction.chatAnchorCorrectionCommand.findUnique({ where: commandKey });
+        if (previousCommand) {
+          if (previousCommand.requestHash !== requestHash) {
+            throw new AnchorCorrectionError('invalid_input', '同一请求标识不能用于不同的纠正内容。');
+          }
+          const previousCorrection = await transaction.chatAnchorCorrection.findUnique({
+            where: { id: previousCommand.correctionId },
+          });
+          if (!previousCorrection || previousCorrection.version !== previousCommand.correctionVersion) {
+            throw new AnchorCorrectionError('version_conflict', '该纠正请求已被后续版本取代。');
+          }
+          return mapChatCorrection(previousCorrection);
+        }
+
+        await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT \`id\` FROM \`ChatDailyAnchor\` WHERE \`id\` = ${normalized.anchorBatchId} FOR UPDATE
+        `);
+        if (!await this.chatBatchIsAccessible(transaction, {
+          anchorId: normalized.anchorId,
+          anchorBatchId: normalized.anchorBatchId,
+          ownerDeviceId: owner,
+        })) {
+          throw new AnchorCorrectionError('not_found', '聊天锚点或其来源记录已不可用。');
+        }
+
+        const uniqueCorrection = {
+          ownerDeviceId_anchorId: { ownerDeviceId: owner, anchorId: normalized.anchorId },
+        };
+        const existing = await transaction.chatAnchorCorrection.findUnique({ where: uniqueCorrection });
+        let correctionId: string;
+        let correctionVersion: number;
+        if (!existing) {
+          if (normalized.expectedVersion !== 0) {
+            throw new AnchorCorrectionError('version_conflict', '纠正内容已更新，请重新读取后再提交。');
+          }
+          const created = await transaction.chatAnchorCorrection.create({
+            data: {
+              ownerDeviceId: owner,
+              anchorId: normalized.anchorId,
+              anchorBatchId: normalized.anchorBatchId,
+              correction: normalized.correction,
+              version: 1,
+            },
+          });
+          correctionId = created.id;
+          correctionVersion = created.version;
+        } else {
+          if (existing.anchorBatchId !== normalized.anchorBatchId
+            || existing.version !== normalized.expectedVersion) {
+            throw new AnchorCorrectionError('version_conflict', '纠正内容已更新，请重新读取后再提交。');
+          }
+          const updated = await transaction.chatAnchorCorrection.updateMany({
+            where: {
+              id: existing.id,
+              ownerDeviceId: owner,
+              version: normalized.expectedVersion,
+            },
+            data: {
+              correction: normalized.correction,
+              version: normalized.expectedVersion + 1,
+            },
+          });
+          if (updated.count !== 1) {
+            throw new AnchorCorrectionError('version_conflict', '纠正内容已更新，请重新读取后再提交。');
+          }
+          correctionId = existing.id;
+          correctionVersion = normalized.expectedVersion + 1;
+        }
+        await transaction.chatAnchorCorrectionCommand.create({
+          data: {
+            ownerDeviceId: owner,
+            idempotencyKey: normalized.idempotencyKey,
+            requestHash,
+            correctionId,
+            correctionVersion,
+          },
+        });
+        return mapChatCorrection(await transaction.chatAnchorCorrection.findUniqueOrThrow({
+          where: { id: correctionId },
+        }));
+      });
+    } catch (error) {
+      if (error instanceof AnchorCorrectionError) throw error;
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const command = await this.prisma.chatAnchorCorrectionCommand.findUnique({
+          where: {
+            ownerDeviceId_idempotencyKey: {
+              ownerDeviceId: owner,
+              idempotencyKey: normalized.idempotencyKey,
+            },
+          },
+        });
+        if (command) {
+          if (command.requestHash !== requestHash) {
+            throw new AnchorCorrectionError('invalid_input', '同一请求标识不能用于不同的纠正内容。');
+          }
+          const previousCorrection = await this.prisma.chatAnchorCorrection.findUnique({
+            where: { id: command.correctionId },
+          });
+          if (previousCorrection && previousCorrection.version === command.correctionVersion) {
+            return mapChatCorrection(previousCorrection);
+          }
+        }
+        throw new AnchorCorrectionError('version_conflict', '纠正内容已被其他请求更新，请重新读取后再提交。');
+      }
+      throw error;
+    }
+  }
 
   async getCorrection(input: unknown, ownerDeviceId: unknown): Promise<AnchorCorrectionRecord | null> {
     if (!isRecord(input)) {
@@ -187,8 +425,8 @@ export class AnchorCorrectionsService {
       idempotencyKey: normalizeIdentifier(input.idempotencyKey, 'idempotencyKey'),
     };
     const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
-    if (!normalized.correction) {
-      throw new AnchorCorrectionError('invalid_input', '纠正内容不能为空。');
+    if (!normalized.correction || Array.from(normalized.correction).length > 240) {
+      throw new AnchorCorrectionError('invalid_input', '纠正内容需为 1 至 240 字。');
     }
     const requestHash = requestFingerprint(normalized);
 

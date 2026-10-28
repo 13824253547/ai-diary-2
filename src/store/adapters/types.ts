@@ -3,6 +3,7 @@ import type { DiscoveryRepository } from '../../repositories/discovery-repositor
 import type { AnchorCorrectionRepository } from '../../repositories/anchor-correction-repository';
 import type { AnchorReadRepository } from '../../repositories/anchor-read-model-repository';
 import type { PetChatRepository } from '../../repositories/pet-chat-repository';
+import type { GrowthInsightRepository } from '../../repositories/growth-insight-repository';
 import type { DiaryDraft } from '../../types/diary';
 
 export type PersistedDraftsSnapshot = {
@@ -24,5 +25,6 @@ export type AppStoreAdapters = {
   anchorCorrectionRepository?: AnchorCorrectionRepository;
   anchorReadRepository?: AnchorReadRepository;
   petChatRepository?: PetChatRepository;
+  growthInsightRepository?: GrowthInsightRepository;
   draftSnapshotStore?: DraftSnapshotStore;
 };

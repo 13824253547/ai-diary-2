@@ -116,6 +116,28 @@ describe('HTTP AI image generation provider', () => {
     });
   });
 
+  test('preserves the shared library capacity error from the server', async () => {
+    client.request.mockResolvedValue({
+      ok: false,
+      status: 409,
+      data: { ok: false, error: { code: 'limit_exceeded', message: 'server internals' } },
+    });
+    const provider = createProvider();
+    const request: AIImageGenerationRequestContract = {
+      version: AI_IMAGE_GENERATION_CONTRACT_VERSION,
+      requestId: 'image-request-full',
+      attempt: 1,
+      description: '雨后的老街',
+      generatedAt: '2026-10-23T12:00:00.000Z',
+    };
+
+    await expect(provider.generate(request)).rejects.toMatchObject({
+      code: 'limit_exceeded',
+      message: '素材库已满，请先删除部分照片。',
+    });
+    expect(imageModule.Image.prefetch).not.toHaveBeenCalled();
+  });
+
   test('rejects a response that does not match the submitted prompt and request ID', async () => {
     client.request.mockResolvedValue({
       ok: true,

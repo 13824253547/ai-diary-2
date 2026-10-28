@@ -77,6 +77,10 @@ function contentPath(kind: 'materials' | 'diaries' | 'diary-copies', id: string,
   return `/photos/diaries/${encodeURIComponent(id)}/photo-content?photoId=${encodeURIComponent(photoId ?? '')}`;
 }
 
+export function getMaterialPhotoContentUrl(photoId: string) {
+  return client.buildUrl(contentPath('materials', photoId));
+}
+
 function toDiaryPhoto(asset: PhotoAssetContract, headers: Record<string, string>, uri: string): DiaryPhoto {
   return {
     id: asset.id,
@@ -104,6 +108,7 @@ export async function listMaterialPhotosFromBackend(): Promise<
 > {
   if (process.env.JEST_WORKER_ID) return { ok: false, message: '测试环境不请求素材服务。' };
   try {
+    const requestedDeviceId = (await getDeviceIdentityHeaders())['x-device-id'];
     const response = await client.get<unknown>('/photos/materials');
     const envelope = readEnvelope<unknown>(response);
     if (!envelope || envelope.ok !== true || !Array.isArray(envelope.data)
@@ -111,8 +116,11 @@ export async function listMaterialPhotosFromBackend(): Promise<
       return { ok: false, message: '素材库返回的数据无法读取。' };
     }
     const headers = await getDeviceIdentityHeaders();
+    if (!requestedDeviceId || headers['x-device-id'] !== requestedDeviceId) {
+      return { ok: false, message: '设备身份已变化，请重新打开素材库。' };
+    }
     const photos = (envelope.data as PhotoAssetContract[]).map(asset =>
-      toDiaryPhoto(asset, headers, client.buildUrl(contentPath('materials', asset.id))),
+      toDiaryPhoto(asset, headers, getMaterialPhotoContentUrl(asset.id)),
     );
     return { ok: true, photos };
   } catch (error) {
@@ -167,7 +175,7 @@ export async function uploadMaterialPhotosToBackend(photos: DiaryPhoto[]): Promi
       const sourcePhoto = original ? { ...original, localUri: undefined } : {};
       return {
         ...sourcePhoto,
-        ...toDiaryPhoto(asset, headers, client.buildUrl(contentPath('materials', asset.id))),
+        ...toDiaryPhoto(asset, headers, getMaterialPhotoContentUrl(asset.id)),
       } as DiaryPhoto;
     });
     if (uploaded.length !== photos.length || uploaded.some(photo => !photo.id)) {

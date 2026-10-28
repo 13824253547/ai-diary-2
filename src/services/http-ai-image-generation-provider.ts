@@ -37,7 +37,7 @@ type GenerationEnvelope =
         photo: GeneratedAssetContract;
       };
     }
-  | { ok: false; error?: { message?: string } };
+  | { ok: false; error?: { code?: string; message?: string } };
 
 const client = new ApiClient({
   baseUrl: appConfig.backendBaseUrl,
@@ -98,6 +98,9 @@ export function createHttpAIImageGenerationProvider(): AIImageGenerationProvider
           || !isGeneratedAsset(envelope.data.photo)
           || envelope.data.photo.generationRequestId !== request.requestId
           || envelope.data.photo.generationPrompt !== request.description) {
+          if (envelope?.ok === false && envelope.error?.code === 'limit_exceeded') {
+            throw new AIImageGenerationError('limit_exceeded', '素材库已满，请先删除部分照片。');
+          }
           const message = envelope?.ok === false ? envelope.error?.message : undefined;
           throw new AIImageGenerationError('provider_failed', message || '配图暂时无法生成，请稍后重试。');
         }

@@ -174,6 +174,55 @@ describe('MAT-005 material image generation business', () => {
     expect(malformed.store.getState().materialPhotoIds.some(id => id.startsWith('generated-'))).toBe(false);
   });
 
+  test('rejects the shared material capacity error without adding a generated asset', async () => {
+    const provider = {
+      generate: jest.fn(async () => {
+        throw new AIImageGenerationError('limit_exceeded', 'server internals');
+      }),
+      isAssetReadable: jest.fn(async () => true),
+    };
+    const { store } = createTestStore({ aiImageGenerationProvider: provider });
+
+    const result = await store.getState().generateMaterialImage('海边日落');
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'invalid_input',
+      message: '素材库已满，请先删除部分照片。',
+    });
+    expect(store.getState().materialPhotoIds).toHaveLength(0);
+    expect(store.getState().issueLog.join('\n')).not.toContain('server internals');
+  });
+
+  test('counts a restored generated image toward the client material capacity', async () => {
+    const provider = {
+      generate: jest.fn(),
+      isAssetReadable: jest.fn(),
+    };
+    const { store } = createTestStore({ aiImageGenerationProvider: provider, photos: [], diaries: [] });
+    const generated: DiaryPhoto = {
+      ...generatedPhoto('image-request-saved', '之前的配图'),
+      sourceAssetId: 'image-request-saved',
+      generationSource: 'provider',
+      localUri: undefined,
+      uri: 'https://api.example.test/photos/materials/generated-saved/content',
+    };
+    const uploads: DiaryPhoto[] = Array.from({ length: 99 }, (_, index) => ({
+      ...generated,
+      id: `uploaded-${index}`,
+      source: 'device',
+      generationRequestId: undefined,
+      generationPrompt: undefined,
+      generationSource: undefined,
+    }));
+    expect(store.getState().syncMaterialPhotos([generated, ...uploads])).toBe(true);
+
+    await expect(store.getState().generateMaterialImage('第 101 张'))
+      .resolves.toMatchObject({ ok: false, reason: 'invalid_input' });
+    expect(provider.generate).not.toHaveBeenCalled();
+    expect(store.getState().materialPhotoIds).toHaveLength(100);
+  });
+
   test('does not register a provider result that fails its readability check', async () => {
     const provider = {
       generate: async (request: { requestId: string; description: string }) => ({

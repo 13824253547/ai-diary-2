@@ -7,9 +7,15 @@ import { Empty, Sheet } from '../../../src/components/common/design-ui';
 import { Button } from '../../../src/components/common/button';
 import { Photo } from '../../../src/components/diary/photo';
 import { useDraftRoute, leaveDraft } from '../../../src/hooks/use-diary-flow';
+import { getCurrentDeviceCity } from '../../../src/services/device-city';
 import { validateReadableDevicePhotoIds } from '../../../src/services/photo-library';
 import { useAppStore } from '../../../src/store/use-app-store';
 import { colors } from '../../../src/theme/tokens';
+
+function isUnknownDiaryLocation(location: string) {
+  const normalized = location.trim().toLocaleLowerCase();
+  return !normalized || ['未知', '未知地点', '地点未知', '未设置', 'unknown', 'unknown location'].includes(normalized);
+}
 
 function getRewriteFailureMessage(issue?: string) {
   if (!issue?.startsWith('段落重写失败：')) return undefined;
@@ -38,6 +44,7 @@ export default function Edit() {
   const [confirmingPhotoPick, setConfirmingPhotoPick] = useState(false);
   const photoCatalog = useAppStore(state => state.photos);
   const saveLockedRef = useRef(false);
+  const locationFallbackAttemptedRef = useRef(new Set<string>());
   const [saveLocked, setSaveLocked] = useState(false);
   const latestIssue = useAppStore(state => state.issueLog[state.issueLog.length - 1]);
   const issueLogCount = useAppStore(state => state.issueLog.length);
@@ -80,6 +87,41 @@ export default function Edit() {
     setSaveLocked(false);
     handledIssueCountRef.current = issueLogCount;
   }, [draft?.id]);
+
+  useEffect(() => {
+    if (
+      !draft
+      || draft.sourceDiaryId
+      || draft.savedDiaryId
+      || draft.generation.status !== 'complete'
+      || !isUnknownDiaryLocation(draft.diary.location)
+    ) return;
+    const requestKey = `${draft.id}:${draft.generation.round}`;
+    if (locationFallbackAttemptedRef.current.has(requestKey)) return;
+    locationFallbackAttemptedRef.current.add(requestKey);
+    let active = true;
+    void getCurrentDeviceCity().then(city => {
+      if (!active) return;
+      const current = useAppStore.getState().drafts[draft.id];
+      if (
+        !current
+        || current.sourceDiaryId
+        || current.savedDiaryId
+        || current.generation.round !== draft.generation.round
+        || current.generation.status !== 'complete'
+        || !isUnknownDiaryLocation(current.diary.location)
+      ) return;
+      useAppStore.getState().updateDraft(draft.id, { location: city });
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [
+    draft?.diary.location,
+    draft?.generation.round,
+    draft?.generation.status,
+    draft?.id,
+    draft?.savedDiaryId,
+    draft?.sourceDiaryId,
+  ]);
 
   useEffect(() => {
     if (!draft) return;

@@ -27,7 +27,6 @@ export default function CityStampCatalogScreen() {
   const [activeAreaId, setActiveAreaId] = useState<string>();
   const [search, setSearch] = useState('');
   const [previewCityId, setPreviewCityId] = useState<string>();
-  const [showSources, setShowSources] = useState(false);
   const unlockedIds = useMemo(() => getVisitedCityStampIds(diaries), [diaries]);
   const activeArea = cityStampCatalogAreas.find(area => area.id === activeAreaId);
   const previewCity = previewCityId
@@ -48,7 +47,10 @@ export default function CityStampCatalogScreen() {
     if (!activeAreaId) return [];
     const query = search.trim().toLocaleLowerCase();
     return getCityStampCitiesForArea(activeAreaId).filter(city => (
-      !query || `${city.cityName} ${city.latinName} ${city.aliases.join(' ')}`.toLocaleLowerCase().includes(query)
+      !query
+      || `${city.cityName} ${city.latinName} ${city.provinceName ?? ''} ${city.aliases.join(' ')}`
+        .toLocaleLowerCase()
+        .includes(query)
     ));
   }, [activeAreaId, search]);
 
@@ -83,6 +85,12 @@ export default function CityStampCatalogScreen() {
 
   const renderCity = ({ item }: { item: CityStampCatalogEntry }) => {
     const unlocked = isCityStampUnlocked(item.id, unlockedIds);
+    const qualityHints = [
+      ...(item.matchConfidence === 'approximate' ? ['近似匹配'] : []),
+      ...(item.matchConfidence === 'unmatched' ? ['未核实'] : []),
+      ...(item.nameSource === 'wup-original' ? ['原名回退'] : []),
+      ...(item.latinNameSource === 'hanyu-pinyin' ? ['汉语拼音'] : []),
+    ];
     return (
       <Pressable
         accessibilityRole="button"
@@ -94,7 +102,9 @@ export default function CityStampCatalogScreen() {
         <Text style={styles.serial}>{item.serial}</Text>
         <View style={styles.rowCopy}>
           <Text style={styles.primary}>{item.cityName}</Text>
-          <Text style={styles.secondary}>{item.latinName}</Text>
+          <Text style={styles.secondary}>
+            {`${item.latinName}${item.provinceName ? ` · ${item.provinceName}` : ''}${qualityHints.length ? ` · ${qualityHints.join(' · ')}` : ''}`}
+          </Text>
         </View>
         <Ionicons
           name={unlocked ? 'lock-open-outline' : 'lock-closed-outline'}
@@ -120,12 +130,14 @@ export default function CityStampCatalogScreen() {
       <View style={styles.intro}>
         <Text style={u.body}>
           {activeArea
-            ? `${activeArea.nameEn} · 按中文名拼音排序`
+            ? `${activeArea.nameEn} · 按名称排序`
             : '按国家或地区浏览全球城市'}
         </Text>
         <Text style={u.muted}>
           {activeArea
-            ? '城市可预览；只有日记地点与城市名称精确匹配后，才能用于明信片。'
+            ? activeArea.id === 'CN'
+              ? '仅含直辖市和地级市；不含县级市、县、区、镇、街道。'
+              : '城市可预览；近似匹配或未核实记录仅供浏览，不能用于明信片。'
             : `${visibleAreas.length} 个国家或地区`}
         </Text>
       </View>
@@ -165,52 +177,19 @@ export default function CityStampCatalogScreen() {
       ) : (
         <EmptyResult title="没有找到国家或地区" />
       )}
-      {cityStampCatalogSources.length ? (
+      {includesOpenStreetMap ? (
         <View style={styles.sourceFooter}>
-          {includesOpenStreetMap ? (
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel="OpenStreetMap 贡献者署名与 ODbL 许可"
-              onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
-            >
-              <Text style={styles.attributionText}>
-                © OpenStreetMap contributors · ODbL-1.0
-              </Text>
-            </Pressable>
-          ) : null}
           <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="查看城市目录数据来源与许可"
-            onPress={() => setShowSources(true)}
+            accessibilityRole="link"
+            accessibilityLabel="OpenStreetMap 贡献者署名与 ODbL 许可"
+            onPress={() => void Linking.openURL('https://www.openstreetmap.org/copyright')}
           >
-            <Text style={styles.sourceLink}>数据来源与许可</Text>
+            <Text style={styles.attributionText}>
+              © OpenStreetMap contributors · ODbL-1.0
+            </Text>
           </Pressable>
         </View>
       ) : null}
-      <BottomSheet
-        visible={showSources}
-        onClose={() => setShowSources(false)}
-        title="数据来源与许可"
-        scroll
-        maxHeight="85%"
-        sheetStyle={styles.sheet}
-        contentContainerStyle={styles.sheetContent}
-      >
-        {cityStampCatalogSources.map(source => (
-          <View key={source.name} style={styles.sourceItem}>
-            <Text style={u.body}>{source.name}</Text>
-            <Text style={u.muted}>许可：{source.license}</Text>
-            {source.citation ? <Text style={u.muted}>{source.citation}</Text> : null}
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel={`打开${source.name}来源链接`}
-              onPress={() => void Linking.openURL(source.url)}
-            >
-              <Text style={styles.sourceUrl}>{source.url}</Text>
-            </Pressable>
-          </View>
-        ))}
-      </BottomSheet>
       <BottomSheet
         visible={Boolean(previewCity && previewConfig)}
         onClose={() => setPreviewCityId(undefined)}
@@ -227,12 +206,36 @@ export default function CityStampCatalogScreen() {
               {previewCity.cityName} · {previewCity.latinName}
             </Text>
             <Text style={u.muted}>
-              {previewCity.areaNameZh} · {previewCity.areaNameEn} · {previewCity.serial}
+              {`${previewCity.provinceName ? `${previewCity.provinceName} · ` : ''}${previewCity.areaNameZh} · ${previewCity.areaNameEn} · ${previewCity.serial}`}
             </Text>
+            {previewCity.administrativeLevel ? (
+              <Text style={u.muted}>
+                {`${previewCity.administrativeLevel === 'municipality' ? '直辖市' : '地级市'} · 行政区划代码 ${previewCity.administrativeCode}`}
+              </Text>
+            ) : null}
+            {previewCity.latinNameSource === 'hanyu-pinyin' ? (
+              <Text style={u.muted}>拉丁字母为官方中文名称的无声调汉语拼音转写。</Text>
+            ) : null}
+            {previewCity.matchConfidence === 'approximate' ? (
+              <Text style={u.muted}>
+                根据附近地名自动匹配，城市对应关系可能有误；此印章仅供预览。
+              </Text>
+            ) : null}
+            {previewCity.matchConfidence === 'unmatched' ? (
+              <Text style={u.muted}>
+                未找到可靠的城市对应记录，当前显示联合国原始名称；此印章仅供预览。
+              </Text>
+            ) : null}
+            {previewCity.nameSource === 'wup-original' ? (
+              <Text style={u.muted}>未做译名补全，当前沿用联合国原始城市名称。</Text>
+            ) : null}
             <Text accessibilityLiveRegion="polite" style={isUnlocked ? styles.unlocked : styles.locked}>
               {isUnlocked
                 ? '已解锁，可用于明信片。'
-                : '尚未解锁。保存一篇地点与城市名称精确匹配的日记后即可应用。'}
+                : previewCity.matchConfidence === 'approximate'
+                  || previewCity.matchConfidence === 'unmatched'
+                  ? '此城市记录未达到解锁可信度要求。'
+                  : '尚未解锁。保存一篇地点与城市名称精确匹配的日记后即可应用。'}
             </Text>
             <Button
               label="用于明信片"
@@ -256,9 +259,6 @@ const styles = StyleSheet.create({
   list: { paddingBottom: 14 },
   sourceFooter: { alignItems: 'center', gap: 3, paddingVertical: 6 },
   attributionText: { color: colors.textMuted, fontSize: 10, lineHeight: 14, textAlign: 'center' },
-  sourceLink: { color: colors.textSecondary, fontSize: 11, textDecorationLine: 'underline' },
-  sourceItem: { gap: 4, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-  sourceUrl: { color: colors.brandStrong, fontSize: 11, lineHeight: 16 },
   row: {
     minHeight: 67,
     flexDirection: 'row',

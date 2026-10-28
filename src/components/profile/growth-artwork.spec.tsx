@@ -18,4 +18,75 @@ describe('GrowthArtwork stable tag navigation', () => {
 
     expect(onLabelPress).toHaveBeenCalledWith({ id, text });
   });
+
+  test('shows flower status text without lock icons or translucent veils', async () => {
+    const screen = await render(
+      <GrowthArtwork
+        kind="flowers"
+        width={462}
+        flowerStates={{
+          pathfinder: false,
+          'self-awareness': true,
+          healing: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('人生旷野的寻路者')).toBeTruthy();
+    expect(screen.getByText('觉察自我的思考者')).toBeTruthy();
+    expect(screen.getByText('压力迷茫的疗愈者')).toBeTruthy();
+    expect(screen.getAllByText('· 未解锁')).toHaveLength(2);
+    expect(screen.getByText('· 已绽放')).toBeTruthy();
+    expect(screen.queryByLabelText('pathfinder-locked')).toBeNull();
+    expect(screen.queryByLabelText('healing-locked')).toBeNull();
+  });
+
+  test('uses the gray-brown closed flower for disabled items', async () => {
+    const random = jest.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const screen = await render(
+        <GrowthArtwork
+          kind="flowers"
+          width={462}
+          flowerStates={{
+            pathfinder: false,
+            'self-awareness': true,
+            healing: false,
+          }}
+        />,
+      );
+
+      expect(screen.getByTestId('growth-flower-art-pathfinder').props.source)
+        .toEqual(require('../../../assets/restored/growth-flower-cutouts/locked-gray-brown-bud.png'));
+      expect(screen.getByTestId('growth-flower-art-self-awareness').props.source)
+        .toEqual(require('../../../assets/restored/growth-flower-cutouts/open-flower-a.png'));
+      expect(screen.getByTestId('growth-flower-art-healing').props.source)
+        .toEqual(require('../../../assets/restored/growth-flower-cutouts/locked-gray-brown-bud.png'));
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  test('randomly selects the second open flower asset for bloomed items', async () => {
+    const random = jest.spyOn(Math, 'random').mockReturnValue(0.9);
+    try {
+      const screen = await render(
+        <GrowthArtwork
+          kind="flowers"
+          width={462}
+          flowerStates={{
+            pathfinder: false,
+            'self-awareness': true,
+            healing: false,
+          }}
+        />,
+      );
+
+      expect(screen.getByTestId('growth-flower-art-self-awareness').props.source)
+        .toEqual(require('../../../assets/restored/growth-flower-cutouts/open-flower-b.png'));
+    } finally {
+      random.mockRestore();
+    }
+  });
+
 });

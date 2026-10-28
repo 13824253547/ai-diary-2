@@ -124,7 +124,6 @@ describe('Privacy screen entry flow', () => {
     ['private', '私密 · 仅自己可见'],
     ['anonymous', '匿名公开 · 独立马甲'],
     ['public-likes', '公开 · 仅点赞'],
-    ['public-comments', '公开 · 可评论'],
   ] as const)('reopens with the saved visibility for %s', async (privacy, label) => {
     const diary = useAppStore.getState().diaries.find(item => item.id === 'diary-1');
     if (!diary) {
@@ -158,6 +157,36 @@ describe('Privacy screen entry flow', () => {
     }
   });
 
+  test('hides comments and maps a legacy saved value to public likes', async () => {
+    const diary = useAppStore.getState().diaries.find(item => item.id === 'diary-1');
+    if (!diary) throw new Error('expected diary-1 to exist');
+    const selectedIds = publicParagraphs(diary).slice(0, 1).map(block => block.id);
+    useAppStore.setState({
+      diaries: useAppStore.getState().diaries.map(item =>
+        item.id === 'diary-1'
+          ? { ...item, privacy: 'public-comments', publicBlockIds: selectedIds }
+          : item,
+      ),
+    });
+    const setDiaryVisibility = jest.fn().mockResolvedValue({
+      ok: true as const,
+      privacy: 'public-likes' as const,
+      publicBlockIds: selectedIds,
+    });
+    useAppStore.setState({ setDiaryVisibility });
+
+    const screen = await render(<PrivacyScreen />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('公开 · 仅点赞').props.accessibilityState.selected).toBe(true);
+    });
+    expect(screen.queryByLabelText('公开 · 可评论')).toBeNull();
+
+    fireEvent.press(screen.getByText('完成'));
+    await waitFor(() => {
+      expect(setDiaryVisibility).toHaveBeenCalledWith('diary-1', 'public-likes', selectedIds);
+    });
+  });
+
   test('leaving before finishing keeps the saved privacy unchanged and does not submit', async () => {
     const setDiaryVisibility = jest.fn();
     useAppStore.setState({ setDiaryVisibility });
@@ -165,10 +194,10 @@ describe('Privacy screen entry flow', () => {
 
     const screen = await render(<PrivacyScreen />);
     await waitFor(() => {
-      expect(screen.getByLabelText('公开 · 可评论')).toBeTruthy();
+      expect(screen.getByLabelText('公开 · 仅点赞')).toBeTruthy();
     });
 
-    fireEvent.press(screen.getByLabelText('公开 · 可评论'));
+    fireEvent.press(screen.getByLabelText('公开 · 仅点赞'));
     fireEvent.press(screen.getByLabelText('返回'));
 
     expect(mockRouter.back).toHaveBeenCalledTimes(1);

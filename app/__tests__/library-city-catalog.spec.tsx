@@ -3,6 +3,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import CityStampCatalogScreen from '../library/cities';
 import { cityStampCatalogAreas, getCityStampCitiesForArea } from '../../src/components/library/city-stamp-catalog';
 import { createTestStore } from '../../src/test-utils/create-test-store';
+import { mockDiaries } from '../../src/mocks/diaries';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryItem } from '../../src/types/diary';
@@ -85,10 +86,18 @@ describe('city stamp country and region catalog', () => {
     if (!area || !taipei) return;
 
     const screen = await render(<CityStampCatalogScreen />);
-    fireEvent.changeText(screen.getByLabelText('搜索国家或地区'), area.nameZh);
-    fireEvent.press(screen.getByLabelText(`浏览${area.nameZh}城市，${area.cityCount}个`));
-    fireEvent.changeText(screen.getByLabelText('搜索中文名或英文名'), 'Taipei');
-    fireEvent.press(screen.getByLabelText(`预览${taipei.cityName}印章`));
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText('搜索国家或地区'), area.nameZh);
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(`浏览${area.nameZh}城市，${area.cityCount}个`));
+    });
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText('搜索中文名或英文名'), 'Taipei');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(`预览${taipei.cityName}印章`));
+    });
 
     await waitFor(() => expect(screen.getByTestId('catalog-city-stamp-preview')).toBeTruthy());
     expect(screen.getByLabelText('用于明信片').props.accessibilityState.disabled).toBe(true);
@@ -103,16 +112,25 @@ describe('city stamp country and region catalog', () => {
     if (!area || !taipei) return;
 
     resetAppStore([{
+      ...mockDiaries[0],
       id: 'saved-taipei',
       status: 'ready',
       location: `${taipei.latinName} · ${area.sourceNameEn}`,
       createdInSession: true,
-    } as DiaryItem]);
+    }]);
     const screen = await render(<CityStampCatalogScreen />);
-    fireEvent.changeText(screen.getByLabelText('搜索国家或地区'), area.nameZh);
-    fireEvent.press(screen.getByLabelText(`浏览${area.nameZh}城市，${area.cityCount}个`));
-    fireEvent.changeText(screen.getByLabelText('搜索中文名或英文名'), 'Taipei');
-    fireEvent.press(screen.getByLabelText(`预览${taipei.cityName}印章`));
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText('搜索国家或地区'), area.nameZh);
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(`浏览${area.nameZh}城市，${area.cityCount}个`));
+    });
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText('搜索中文名或英文名'), 'Taipei');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText(`预览${taipei.cityName}印章`));
+    });
 
     await waitFor(() => expect(screen.getByText('已解锁，可用于明信片。')).toBeTruthy());
     expect(screen.getByLabelText('用于明信片').props.accessibilityState.disabled).toBe(false);

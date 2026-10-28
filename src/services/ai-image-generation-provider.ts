@@ -19,7 +19,7 @@ export type AIImageGenerationProvider = {
 
 export class AIImageGenerationError extends Error {
   constructor(
-    readonly code: 'cancelled' | 'provider_failed',
+    readonly code: 'cancelled' | 'provider_failed' | 'limit_exceeded',
     message: string,
   ) {
     super(message);

@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor, within } from '@testing-library/react-
 import EditScreen from '../diary/[id]/edit';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
+import { getCurrentDeviceCity } from '../../src/services/device-city';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryDraft } from '../../src/types/diary';
 const { leaveDraft: actualLeaveDraft } = jest.requireActual('../../src/hooks/use-diary-flow');
@@ -24,6 +25,7 @@ const mockParams: { draftId?: string; id?: string; openPhotos?: string; openBloc
 let mockDraft: DiaryDraft | undefined;
 let mockLeaveDraft: typeof actualLeaveDraft = (_draftId: string, done: () => void) => done();
 const mockValidateReadableDevicePhotoIds = jest.fn();
+const mockGetCurrentDeviceCity = jest.mocked(getCurrentDeviceCity);
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
@@ -41,6 +43,10 @@ jest.mock('../../src/hooks/use-diary-flow', () => ({
 
 jest.mock('../../src/services/photo-library', () => ({
   validateReadableDevicePhotoIds: (...args: unknown[]) => mockValidateReadableDevicePhotoIds(...args),
+}));
+
+jest.mock('../../src/services/device-city', () => ({
+  getCurrentDeviceCity: jest.fn(),
 }));
 
 jest.mock('@expo/vector-icons', () => {
@@ -113,6 +119,7 @@ describe('Edit screen', () => {
     useAppStore.setState({ setDraftBlockPhotos: actualSetDraftBlockPhotos });
     mockValidateReadableDevicePhotoIds.mockResolvedValue({ validIds: [], invalidIds: [] });
     jest.clearAllMocks();
+    mockGetCurrentDeviceCity.mockRejectedValue(new Error('location unavailable'));
     mockParams.draftId = undefined;
     mockParams.id = undefined;
     mockParams.openPhotos = undefined;
@@ -150,11 +157,14 @@ describe('Edit screen', () => {
     return { draftId, ...screen };
   }
 
-  async function renderWithGeneratedNewDraft() {
+  async function renderWithGeneratedNewDraft(location?: string) {
     const draftId = useAppStore.getState().beginCreation();
     useAppStore.getState().setDraftPhotos(draftId, ['photo-1', 'photo-2', 'photo-3']);
     const round = useAppStore.getState().startGeneration(draftId)!;
     useAppStore.getState().finishGeneration(draftId, round);
+    if (location !== undefined) {
+      useAppStore.getState().updateDraft(draftId, { location });
+    }
     mockParams.draftId = draftId;
     mockDraft = useAppStore.getState().drafts[draftId];
     const screen = await render(<EditScreen />);
@@ -170,6 +180,58 @@ describe('Edit screen', () => {
     const screen = await render(<EditScreen />);
     return { draftId, ...screen };
   }
+
+  test('automatically fills the current city for an unknown generated draft location', async () => {
+    let resolveCity!: (city: string) => void;
+    const cityRequest = new Promise<string>(resolve => {
+      resolveCity = resolve;
+    });
+    mockGetCurrentDeviceCity.mockReturnValue(cityRequest);
+    const { draftId, getByText, rerender } = await renderWithGeneratedNewDraft('未知地点');
+
+    await waitFor(() => expect(mockGetCurrentDeviceCity).toHaveBeenCalledTimes(1));
+    expect(getByText(/未知地点/)).toBeTruthy();
+
+    await act(async () => {
+      resolveCity('台南市');
+      await cityRequest;
+    });
+    await waitFor(() => {
+      expect(useAppStore.getState().drafts[draftId].diary.location).toBe('台南市');
+    });
+
+    mockDraft = useAppStore.getState().drafts[draftId];
+    await act(async () => rerender(<EditScreen />));
+    expect(getByText(/台南市/)).toBeTruthy();
+  });
+
+  test('does not request location when a new generated draft already has a location', async () => {
+    await renderWithGeneratedNewDraft('厦门市');
+
+    expect(mockGetCurrentDeviceCity).not.toHaveBeenCalled();
+  });
+
+  test('keeps the unknown location and continues when foreground location fails', async () => {
+    const { draftId, getByText } = await renderWithGeneratedNewDraft('未知地点');
+
+    await waitFor(() => expect(mockGetCurrentDeviceCity).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(useAppStore.getState().drafts[draftId].diary.location).toBe('未知地点');
+    expect(getByText(/未知地点/)).toBeTruthy();
+    expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  test('does not request location for existing diary drafts even when their location is unknown', async () => {
+    await renderWithCustomExistingDraft(draft => ({
+      ...draft,
+      diary: { ...draft.diary, location: '未知地点' },
+    }));
+
+    expect(mockGetCurrentDeviceCity).not.toHaveBeenCalled();
+  });
 
   function pressTextParent(node: any) {
     if (!node?.parent) throw new Error('target text has no parent pressable');

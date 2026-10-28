@@ -15,7 +15,9 @@ import {
 } from '@nestjs/common';
 import type { ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
 import { resolveDeviceId } from '../../common/device-identity';
+import { ChatDailyAnchorService } from '../anchors/chat-daily-anchor.service';
 import { ArkPetChatProvider, PetChatProviderError } from './ark-pet-chat-provider';
 import {
   classifyPetChatInput,
@@ -33,6 +35,7 @@ type BeginTurnBody = {
   requestId?: unknown;
   userMessageId?: unknown;
   text?: unknown;
+  deviceLocalDate?: unknown;
 };
 
 type CompleteTurnBody = {
@@ -84,6 +87,8 @@ export class ChatSessionsController {
   constructor(
     private readonly service: ChatSessionsService,
     private readonly provider: ArkPetChatProvider,
+    private readonly taskCoordinator: DeviceAiTaskCoordinator,
+    private readonly dailyAnchors: ChatDailyAnchorService,
   ) {}
 
   @Get('conversations')
@@ -231,17 +236,26 @@ export class ChatSessionsController {
     if (active && active.flightKey !== flightKey) {
       throw new ChatSessionError('chat_busy', '该设备已有一条小橘回复正在生成，请稍后再试。');
     }
-    const flight = this.generateReplyOnce(conversationId, requestId, attempt, ownerDeviceId, onTextDelta);
+    const flight = this.taskCoordinator.runInteractive(
+      ownerDeviceId,
+      () => this.generateReplyOnce(conversationId, requestId, attempt, ownerDeviceId, onTextDelta),
+    );
     this.generatingTurns.set(flightKey, flight);
     this.activeDeviceGenerations.set(ownerDeviceId, { flightKey, conversationId, requestId });
+    let completed: ChatConversationSnapshot | undefined;
     try {
-      return await flight;
+      completed = await flight;
+      return completed;
     } finally {
       if (this.generatingTurns.get(flightKey) === flight) {
         this.generatingTurns.delete(flightKey);
       }
       if (this.activeDeviceGenerations.get(ownerDeviceId)?.flightKey === flightKey) {
         this.activeDeviceGenerations.delete(ownerDeviceId);
+      }
+      const turn = completed?.turns.find(item => item.requestId === requestId);
+      if (turn?.status === 'completed' && turn.source === 'provider' && turn.deviceLocalDate) {
+        this.dailyAnchors.enqueueAfterCompletedTurn(ownerDeviceId, turn.deviceLocalDate);
       }
     }
   }
@@ -339,7 +353,8 @@ export class ChatSessionsController {
     const ownerDeviceId = resolveDeviceId(deviceId);
     if (typeof body?.requestId !== 'string'
       || typeof body.userMessageId !== 'string'
-      || typeof body.text !== 'string') {
+      || typeof body.text !== 'string'
+      || (body.deviceLocalDate !== undefined && typeof body.deviceLocalDate !== 'string')) {
       throw this.invalidInput('消息请求信息不完整。');
     }
     try {
@@ -352,6 +367,7 @@ export class ChatSessionsController {
           requestId: body.requestId,
           userMessageId: body.userMessageId,
           text: body.text,
+          deviceLocalDate: body.deviceLocalDate as string | undefined,
         }, ownerDeviceId),
       };
     } catch (error) {

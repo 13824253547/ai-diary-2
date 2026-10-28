@@ -228,6 +228,16 @@ describe('AnchorCorrectionsService', () => {
     expect(harness.commands.size).toBe(0);
   });
 
+  test('rejects diary correction text longer than the confirmed 240 characters', async () => {
+    const harness = createHarness();
+
+    await expect(harness.service.saveCorrection({
+      ...saveInput,
+      correction: '字'.repeat(241),
+    }, 'device-1')).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test('rejects another device and stale correction versions without overwriting', async () => {
     const harness = createHarness();
     await harness.service.saveCorrection(saveInput, 'device-1');

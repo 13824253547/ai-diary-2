@@ -120,4 +120,26 @@ describe('Diary paper layout', () => {
       StyleSheet.flatten(brownScreen.getByTestId('diary-hero-frame-diary-paper-brown').props.style).transform,
     ).toEqual([{ rotate: '0deg' }]);
   });
+
+  test('renders the stamp for a reliably matched diary city', async () => {
+    const diary = { ...buildDiary('character-blue', 'diary-paper-hangzhou'), status: 'ready' as const, location: '杭州市' };
+    const screen = await render(<DiaryPaper diary={diary} />);
+
+    expect(screen.getByTestId('diary-city-stamp-diary-paper-hangzhou')).toBeTruthy();
+    expect(screen.getByLabelText('杭州市城市邮戳')).toBeTruthy();
+  });
+
+  test.each(['未知地点', '没有对应邮戳的城市'])(
+    'does not render a city stamp when the diary location has no catalog match: %s',
+    async location => {
+      const diary = {
+        ...buildDiary('character-blue', 'diary-paper-no-city'),
+        location,
+      };
+      const screen = await render(<DiaryPaper diary={diary} />);
+
+      expect(screen.queryByTestId('diary-city-stamp-diary-paper-no-city')).toBeNull();
+      expect(screen.queryByLabelText(/城市邮戳/)).toBeNull();
+    },
+  );
 });

@@ -13,6 +13,7 @@ import { SharingModule } from './modules/sharing/sharing.module';
 import { AnchorCorrectionsModule } from './modules/anchors/anchor-corrections.module';
 import { ChatSessionsModule } from './modules/chat/chat-sessions.module';
 import { AIImageGenerationModule } from './modules/ai-images/ai-image-generation.module';
+import { GrowthInsightsModule } from './modules/growth/growth-insights.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { AIImageGenerationModule } from './modules/ai-images/ai-image-generation
     AnchorCorrectionsModule,
     ChatSessionsModule,
     AIImageGenerationModule,
+    GrowthInsightsModule,
   ],
   controllers: [HealthController],
 })

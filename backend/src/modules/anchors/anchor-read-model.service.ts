@@ -4,12 +4,15 @@ import { createHash } from 'node:crypto';
 import { PrismaService } from '../../common/prisma.service';
 
 export const ANCHOR_PAGE_SIZES = [10, 20, 50, 100] as const;
+export const SERVER_ANCHOR_PROVIDER_ACCESS = Symbol('server-anchor-provider-access');
+type TrustedAnchorProviderAccess = typeof SERVER_ANCHOR_PROVIDER_ACCESS;
 
 export type PersistedAnchor = {
   id: string;
   anchorId: string;
   tagId: string;
   sourceBlockId: string;
+  sourceBlockIds: string[];
   excerpt: string;
   source: 'provider';
 };
@@ -41,6 +44,39 @@ export type AnchorsByTagPage = {
   total: number;
 };
 
+export type MemoryAnchorFeedItem = {
+  id: string;
+  anchorId: string;
+  sourceType: 'diary' | 'chat';
+  tagId: string;
+  title: string;
+  displayDate: string;
+  excerpt: string;
+  correction?: string;
+  correctionVersion?: number;
+  diary?: {
+    id: string;
+    version: number;
+    coverPhotoId: string;
+  };
+  chat?: {
+    batchId: string;
+    sourceDateStart: string;
+    sourceDateEnd: string;
+    sourceMessages: Array<{ conversationId: string; messageId: string }>;
+  };
+  sourceBlockId?: string;
+  sourceBlockIds?: string[];
+};
+
+export type MemoryAnchorFeedPage = {
+  items: MemoryAnchorFeedItem[];
+  tagId: string | null;
+  page: number;
+  pageSize: typeof ANCHOR_PAGE_SIZES[number];
+  total: number;
+};
+
 export type ProviderAnchorResult = {
   requestId: string;
   diaryId: string;
@@ -50,6 +86,7 @@ export type ProviderAnchorResult = {
     id: string;
     tagId: string;
     sourceBlockId: string;
+    sourceBlockIds?: string[];
     excerpt: string;
   }>;
 };
@@ -117,6 +154,7 @@ function resultHash(result: ProviderAnchorResult) {
       id: anchor.id,
       tagId: anchor.tagId,
       sourceBlockId: anchor.sourceBlockId,
+      sourceBlockIds: anchor.sourceBlockIds ?? [anchor.sourceBlockId],
       excerpt: anchor.excerpt,
     }));
   return createHash('sha256')
@@ -146,6 +184,11 @@ function validateProviderResult(value: unknown): asserts value is ProviderAnchor
       || !anchor.tagId.trim()
       || typeof anchor.sourceBlockId !== 'string'
       || !anchor.sourceBlockId.trim()
+    || (anchor.sourceBlockIds !== undefined
+      && (!Array.isArray(anchor.sourceBlockIds)
+        || anchor.sourceBlockIds.length === 0
+        || anchor.sourceBlockIds.some(id => typeof id !== 'string' || !id.trim())
+        || new Set(anchor.sourceBlockIds).size !== anchor.sourceBlockIds.length))
       || typeof anchor.excerpt !== 'string'
       || !anchor.excerpt.trim()) {
       throw new AnchorReadModelError('invalid_input', '锚点提取结果包含无效或重复记录。');
@@ -154,8 +197,8 @@ function validateProviderResult(value: unknown): asserts value is ProviderAnchor
   }
 }
 
-function assertTrustedProviderRuntime() {
-  if (process.env.NODE_ENV !== 'test') {
+function assertTrustedProviderRuntime(access?: TrustedAnchorProviderAccess) {
+  if (process.env.NODE_ENV !== 'test' && access !== SERVER_ANCHOR_PROVIDER_ACCESS) {
     throw new AnchorReadModelError('provider_failed', '当前运行环境尚未配置可信的锚点提取服务。');
   }
 }
@@ -172,14 +215,19 @@ function mapAnchor(record: {
   anchorId: string;
   tagId: string;
   sourceBlockId: string;
+  sourceBlockIds?: unknown;
   excerpt: string;
   source: string;
 }): PersistedAnchor {
+  const sourceBlockIds = Array.isArray(record.sourceBlockIds)
+    ? record.sourceBlockIds.filter((id): id is string => typeof id === 'string' && !!id.trim())
+    : [];
   return {
     id: record.id,
     anchorId: record.anchorId,
     tagId: record.tagId,
     sourceBlockId: record.sourceBlockId,
+    sourceBlockIds: sourceBlockIds.length ? sourceBlockIds : [record.sourceBlockId],
     excerpt: record.excerpt,
     source: record.source as 'provider',
   };
@@ -194,8 +242,8 @@ export class AnchorReadModelService {
     diaryVersion: number;
     requestId: string;
     attempt: number;
-  }, ownerDeviceId: string): Promise<AnchorExtractionRun> {
-    assertTrustedProviderRuntime();
+  }, ownerDeviceId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
+    assertTrustedProviderRuntime(access);
     const diaryId = normalizeIdentifier(input.diaryId, 'diaryId');
     const diaryVersion = normalizePositiveInteger(input.diaryVersion, 'diaryVersion');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
@@ -275,8 +323,8 @@ export class AnchorReadModelService {
   async completeExtraction(input: {
     attempt: number;
     result: unknown;
-  }, ownerDeviceId: string): Promise<AnchorExtractionRun> {
-    assertTrustedProviderRuntime();
+  }, ownerDeviceId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
+    assertTrustedProviderRuntime(access);
     const attempt = normalizePositiveInteger(input.attempt, 'attempt');
     validateProviderResult(input.result);
     const result = input.result;
@@ -288,6 +336,8 @@ export class AnchorReadModelService {
       id: normalizeIdentifier(anchor.id, 'anchorId'),
       tagId: normalizeIdentifier(anchor.tagId, 'tagId'),
       sourceBlockId: normalizeIdentifier(anchor.sourceBlockId, 'sourceBlockId'),
+      sourceBlockIds: [...new Set((anchor.sourceBlockIds ?? [anchor.sourceBlockId])
+        .map(blockId => normalizeIdentifier(blockId, 'sourceBlockId')))],
       excerpt: anchor.excerpt.trim(),
     }));
     const hash = resultHash({ ...result, anchors: normalizedAnchors });
@@ -303,7 +353,9 @@ export class AnchorReadModelService {
       }
       const sourceBlocks = currentSourceBlocks(diary.contentSnapshot);
       const sourceBlockIds = new Set(sourceBlocks.map(block => String(block.id)));
-      if (normalizedAnchors.some(anchor => !sourceBlockIds.has(anchor.sourceBlockId))) {
+      if (normalizedAnchors.some(anchor =>
+        anchor.sourceBlockIds.some(sourceBlockId => !sourceBlockIds.has(sourceBlockId))
+        || !anchor.sourceBlockIds.includes(anchor.sourceBlockId))) {
         throw new AnchorReadModelError('invalid_input', '锚点引用了当前日记中不存在的正文段落。');
       }
       const run = await transaction.diaryAnchorExtraction.findUnique({
@@ -342,6 +394,7 @@ export class AnchorReadModelService {
             extractionId: run.id,
             tagId: anchor.tagId,
             sourceBlockId: anchor.sourceBlockId,
+            sourceBlockIds: anchor.sourceBlockIds,
             excerpt: anchor.excerpt,
             source: 'provider',
           },
@@ -367,8 +420,8 @@ export class AnchorReadModelService {
     requestId: string;
     attempt: number;
     failureCode: 'timeout' | 'cancelled' | 'provider_failed';
-  }, ownerDeviceId: string): Promise<AnchorExtractionRun> {
-    assertTrustedProviderRuntime();
+  }, ownerDeviceId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
+    assertTrustedProviderRuntime(access);
     const diaryId = normalizeIdentifier(input.diaryId, 'diaryId');
     const diaryVersion = normalizePositiveInteger(input.diaryVersion, 'diaryVersion');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
@@ -468,6 +521,7 @@ export class AnchorReadModelService {
         anchorId: string;
         tagId: string;
         sourceBlockId: string;
+        sourceBlockIds: unknown;
         excerpt: string;
         source: string;
         diaryId: string;
@@ -481,6 +535,7 @@ export class AnchorReadModelService {
           a.\`anchorId\`,
           a.\`tagId\`,
           a.\`sourceBlockId\`,
+          a.\`sourceBlockIds\`,
           a.\`excerpt\`,
           a.\`source\`,
           d.\`id\` AS \`diaryId\`,
@@ -511,6 +566,251 @@ export class AnchorReadModelService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
+  async listFeed(input: unknown, ownerDeviceId: string): Promise<MemoryAnchorFeedPage> {
+    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    if (!isRecord(input)) throw new AnchorReadModelError('invalid_input', '锚点查询条件无效。');
+    const tagId = input.tagId === undefined ? null : normalizeIdentifier(input.tagId, 'tagId');
+    if (typeof input.page !== 'number'
+      || !Number.isSafeInteger(input.page)
+      || input.page < 1
+      || typeof input.pageSize !== 'number'
+      || !ANCHOR_PAGE_SIZES.includes(input.pageSize as typeof ANCHOR_PAGE_SIZES[number])) {
+      throw new AnchorReadModelError('invalid_input', '锚点分页条件无效。');
+    }
+    const page = input.page;
+    const pageSize = input.pageSize as typeof ANCHOR_PAGE_SIZES[number];
+    const offset = (page - 1) * pageSize;
+    if (!Number.isSafeInteger(offset)) throw new AnchorReadModelError('invalid_input', '锚点页码超出范围。');
+
+    const diaryTagFilter = tagId ? Prisma.sql`AND a.\`tagId\` = ${tagId}` : Prisma.empty;
+    const chatTagFilter = tagId ? Prisma.sql`AND ca.\`tagId\` = ${tagId}` : Prisma.empty;
+    const validDiarySources = Prisma.sql`
+      SELECT checked_anchor.\`id\`
+      FROM \`DiaryAnchor\` AS checked_anchor
+      INNER JOIN \`Diary\` AS checked_diary
+        ON checked_diary.\`id\` = checked_anchor.\`diaryId\`
+        AND checked_diary.\`ownerDeviceId\` = checked_anchor.\`ownerDeviceId\`
+        AND checked_diary.\`version\` = checked_anchor.\`diaryVersion\`
+      INNER JOIN JSON_TABLE(
+        COALESCE(checked_anchor.\`sourceBlockIds\`, JSON_ARRAY(checked_anchor.\`sourceBlockId\`)),
+        '$[*]' COLUMNS (\`blockId\` VARCHAR(191) PATH '$' NULL ON EMPTY)
+      ) AS checked_source
+        ON checked_source.\`blockId\` IS NOT NULL
+      INNER JOIN JSON_TABLE(
+        checked_diary.\`contentSnapshot\`,
+        '$.blocks[*]' COLUMNS (
+          \`blockId\` VARCHAR(191) PATH '$.id' NULL ON EMPTY,
+          \`blockType\` VARCHAR(32) PATH '$.type' NULL ON EMPTY,
+          \`blockContent\` LONGTEXT PATH '$.content' NULL ON EMPTY
+        )
+      ) AS current_source
+        ON current_source.\`blockId\` COLLATE utf8mb4_unicode_ci
+          = checked_source.\`blockId\` COLLATE utf8mb4_unicode_ci
+        AND current_source.\`blockType\` IN ('text', 'quote')
+        AND current_source.\`blockContent\` IS NOT NULL
+        AND CHAR_LENGTH(TRIM(current_source.\`blockContent\`)) > 0
+      WHERE checked_anchor.\`ownerDeviceId\` = ${owner}
+      GROUP BY checked_anchor.\`id\`, checked_anchor.\`sourceBlockIds\`, checked_anchor.\`sourceBlockId\`
+      HAVING COUNT(DISTINCT checked_source.\`blockId\`)
+        = JSON_LENGTH(COALESCE(checked_anchor.\`sourceBlockIds\`, JSON_ARRAY(checked_anchor.\`sourceBlockId\`)))
+    `;
+    const validChatSources = Prisma.sql`
+      SELECT source_batch.\`id\`
+      FROM \`ChatDailyAnchor\` AS source_batch
+      INNER JOIN \`ChatDailyAnchorSource\` AS source_link
+        ON source_link.\`anchorBatchId\` = source_batch.\`id\`
+        AND source_link.\`ownerDeviceId\` = source_batch.\`ownerDeviceId\`
+      INNER JOIN \`ChatMessage\` AS source_message
+        ON source_message.\`id\` = source_link.\`messageId\`
+        AND source_message.\`conversationId\` = source_link.\`conversationId\`
+      INNER JOIN \`ChatTurn\` AS source_turn
+        ON source_turn.\`id\` = source_link.\`turnId\`
+        AND source_turn.\`ownerDeviceId\` = source_batch.\`ownerDeviceId\`
+        AND source_turn.\`memoryAnchorBatchId\` = source_batch.\`id\`
+        AND source_turn.\`memoryEligible\` = 1
+        AND source_turn.\`status\` = 'completed'
+        AND source_turn.\`source\` = 'provider'
+      INNER JOIN \`ChatConversation\` AS source_conversation
+        ON source_conversation.\`id\` = source_link.\`conversationId\`
+        AND source_conversation.\`ownerDeviceId\` = source_batch.\`ownerDeviceId\`
+      WHERE source_batch.\`ownerDeviceId\` = ${owner}
+        AND source_batch.\`status\` = 'succeeded'
+      GROUP BY source_batch.\`id\`, source_batch.\`sourceCount\`
+      HAVING COUNT(DISTINCT source_link.\`messageId\`) = source_batch.\`sourceCount\`
+    `;
+    const union = Prisma.sql`
+      SELECT
+        CONCAT('diary:', a.\`id\`) AS \`id\`,
+        a.\`anchorId\`,
+        'diary' AS \`sourceType\`,
+        a.\`tagId\`,
+        d.\`title\`,
+        d.\`createdAt\` AS \`displayDate\`,
+        a.\`excerpt\`,
+        correction.\`correction\`,
+        correction.\`version\` AS \`correctionVersion\`,
+        d.\`id\` AS \`diaryId\`,
+        d.\`version\` AS \`diaryVersion\`,
+        JSON_UNQUOTE(JSON_EXTRACT(d.\`contentSnapshot\`, '$.coverPhotoId')) AS \`coverPhotoId\`,
+        a.\`sourceBlockId\`,
+        COALESCE(a.\`sourceBlockIds\`, JSON_ARRAY(a.\`sourceBlockId\`)) AS \`sourceBlockIds\`,
+        NULL AS \`chatBatchId\`,
+        NULL AS \`sourceDateStart\`,
+        NULL AS \`sourceDateEnd\`
+      FROM \`DiaryAnchor\` AS a
+      INNER JOIN \`DiaryAnchorExtraction\` AS extraction
+        ON extraction.\`id\` = a.\`extractionId\`
+        AND extraction.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        AND extraction.\`status\` = 'succeeded'
+        AND extraction.\`source\` = 'provider'
+      INNER JOIN \`Diary\` AS d
+        ON d.\`id\` = a.\`diaryId\`
+        AND d.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        AND d.\`version\` = a.\`diaryVersion\`
+      INNER JOIN (${validDiarySources}) AS valid_source
+        ON valid_source.\`id\` = a.\`id\`
+      LEFT JOIN \`AnchorCorrection\` AS correction
+        ON correction.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        AND correction.\`diaryId\` = a.\`diaryId\`
+        AND correction.\`anchorId\` = a.\`anchorId\`
+        AND correction.\`sourceDiaryVersion\` = a.\`diaryVersion\`
+      WHERE a.\`ownerDeviceId\` = ${owner}
+        AND a.\`source\` = 'provider'
+        ${diaryTagFilter}
+
+      UNION ALL
+
+      SELECT
+        CONCAT('chat:', ca.\`id\`) AS \`id\`,
+        ca.\`anchorId\`,
+        'chat' AS \`sourceType\`,
+        ca.\`tagId\`,
+        '小橘的陪伴记忆' AS \`title\`,
+        ca.\`generatedAt\` AS \`displayDate\`,
+        ca.\`excerpt\`,
+        chat_correction.\`correction\`,
+        chat_correction.\`version\` AS \`correctionVersion\`,
+        NULL AS \`diaryId\`,
+        NULL AS \`diaryVersion\`,
+        NULL AS \`coverPhotoId\`,
+        NULL AS \`sourceBlockId\`,
+        NULL AS \`sourceBlockIds\`,
+        ca.\`id\` AS \`chatBatchId\`,
+        ca.\`sourceDateStart\`,
+        ca.\`sourceDateEnd\`
+      FROM \`ChatDailyAnchor\` AS ca
+      INNER JOIN (${validChatSources}) AS valid_chat_source
+        ON valid_chat_source.\`id\` = ca.\`id\`
+      LEFT JOIN \`ChatAnchorCorrection\` AS chat_correction
+        ON chat_correction.\`ownerDeviceId\` = ca.\`ownerDeviceId\`
+        AND chat_correction.\`anchorId\` = ca.\`anchorId\`
+        AND chat_correction.\`anchorBatchId\` = ca.\`id\`
+      WHERE ca.\`ownerDeviceId\` = ${owner}
+        AND ca.\`status\` = 'succeeded'
+        AND ca.\`tagId\` IS NOT NULL
+        AND ca.\`excerpt\` IS NOT NULL
+        ${chatTagFilter}
+    `;
+
+    return this.prisma.$transaction(async transaction => {
+      const counts = await transaction.$queryRaw<Array<{ total: bigint | number }>>(Prisma.sql`
+        SELECT COUNT(*) AS total FROM (${union}) AS memory_feed
+      `);
+      const rows = await transaction.$queryRaw<Array<{
+        id: string;
+        anchorId: string;
+        sourceType: 'diary' | 'chat';
+        tagId: string;
+        title: string;
+        displayDate: Date;
+        excerpt: string;
+        correction: string | null;
+        correctionVersion: number | null;
+        diaryId: string | null;
+        diaryVersion: number | null;
+        coverPhotoId: string | null;
+        sourceBlockId: string | null;
+        sourceBlockIds: unknown;
+        chatBatchId: string | null;
+        sourceDateStart: string | null;
+        sourceDateEnd: string | null;
+      }>>(Prisma.sql`
+        SELECT * FROM (${union}) AS memory_feed
+        ORDER BY \`displayDate\` DESC, \`sourceType\` ASC, \`anchorId\` ASC, \`id\` ASC
+        LIMIT ${pageSize} OFFSET ${offset}
+      `);
+      const chatBatchIds = rows
+        .filter(row => row.sourceType === 'chat' && row.chatBatchId)
+        .map(row => row.chatBatchId!);
+      const sourceRows = chatBatchIds.length
+        ? await transaction.chatDailyAnchorSource.findMany({
+          where: { ownerDeviceId: owner, anchorBatchId: { in: chatBatchIds } },
+          orderBy: [
+            { localDate: 'asc' },
+            { conversationId: 'asc' },
+            { turn: { sequence: 'asc' } },
+            { message: { order: 'asc' } },
+            { messageId: 'asc' },
+          ],
+          select: { anchorBatchId: true, conversationId: true, messageId: true },
+        })
+        : [];
+      const sourcesByBatch = new Map<string, Array<{ conversationId: string; messageId: string }>>();
+      for (const source of sourceRows) {
+        const items = sourcesByBatch.get(source.anchorBatchId) ?? [];
+        items.push({ conversationId: source.conversationId, messageId: source.messageId });
+        sourcesByBatch.set(source.anchorBatchId, items);
+      }
+      return {
+        items: rows.map(row => ({
+          id: row.id,
+          anchorId: row.anchorId,
+          sourceType: row.sourceType,
+          tagId: row.tagId,
+          title: row.title,
+          displayDate: row.displayDate.toISOString(),
+          excerpt: row.excerpt,
+          ...(row.correction ? {
+            correction: row.correction,
+            correctionVersion: row.correctionVersion ?? undefined,
+          } : {}),
+          ...(row.sourceType === 'diary' && row.diaryId && row.diaryVersion !== null
+            ? {
+              diary: {
+                id: row.diaryId,
+                version: row.diaryVersion,
+                coverPhotoId: row.coverPhotoId ?? '',
+              },
+              sourceBlockId: row.sourceBlockId ?? undefined,
+              sourceBlockIds: Array.isArray(row.sourceBlockIds)
+                ? row.sourceBlockIds.filter((id): id is string => typeof id === 'string')
+                : (row.sourceBlockId ? [row.sourceBlockId] : []),
+            }
+            : {}),
+          ...(row.sourceType === 'chat' && row.chatBatchId && row.sourceDateStart && row.sourceDateEnd
+            ? {
+              chat: {
+                batchId: row.chatBatchId,
+                sourceDateStart: row.sourceDateStart,
+                sourceDateEnd: row.sourceDateEnd,
+                sourceMessages: sourcesByBatch.get(row.chatBatchId) ?? [],
+              },
+            }
+            : {}),
+        })),
+        tagId,
+        page,
+        pageSize,
+        total: Number(counts[0]?.total ?? 0),
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async countFeed(ownerDeviceId: string): Promise<number> {
+    const page = await this.listFeed({ page: 1, pageSize: ANCHOR_PAGE_SIZES[0] }, ownerDeviceId);
+    return page.total;
+  }
+
   private mapRun(record: {
     diaryId: string;
     diaryVersion: number;
@@ -524,6 +824,7 @@ export class AnchorReadModelService {
       anchorId: string;
       tagId: string;
       sourceBlockId: string;
+      sourceBlockIds?: unknown;
       excerpt: string;
       source: string;
     }>;

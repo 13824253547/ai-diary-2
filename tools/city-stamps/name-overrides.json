@@ -5,8 +5,9 @@
     "note": "WUP uses Tamar (Hong Kong) for the Hong Kong urban-area record."
   },
   "MAC-11460": {
-    "cityName": "澳门-珠海",
+    "cityName": "澳门",
+    "latinName": "Macau",
     "aliases": [],
-    "note": "Cross-border WUP urban-area record; constituent city names must not unlock it."
+    "note": "Display as Macau only by product decision; do not include Zhuhai or use constituent-city aliases."
   }
 }

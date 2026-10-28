@@ -1,6 +1,28 @@
+import React from 'react';
+import TestRenderer from 'react-test-renderer';
+import { Text as SvgText, TextPath } from 'react-native-svg';
+import { CityStamp, cityStampOptions } from '../city-stamp';
 import { estimateSvgTextWidth, fitSvgText } from '../city-stamp';
 
 describe('city stamp SVG text fitting', () => {
+  test('centers the upper arc label around the top of the stamp', async () => {
+    const stamp = cityStampOptions.find(item => item.id === 'stampKamakura');
+    if (!stamp) throw new Error('missing Kamakura stamp fixture');
+
+    let tree!: TestRenderer.ReactTestRenderer;
+    await TestRenderer.act(async () => {
+      tree = TestRenderer.create(React.createElement(CityStamp, { ...stamp, width: 75, height: 75 }));
+    });
+    const upperArcText = tree.root.findAllByType(SvgText).find(node =>
+      React.isValidElement(node.props.children) && node.props.children.type === TextPath,
+    );
+
+    expect(upperArcText?.props.textAnchor).toBe('middle');
+    await TestRenderer.act(async () => {
+      tree.unmount();
+    });
+  });
+
   test('keeps short city names at the intended maximum font size', () => {
     expect(fitSvgText('台南', 47, 17, 3.2, 1.2)).toEqual({
       text: '台南',

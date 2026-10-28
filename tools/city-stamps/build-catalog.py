@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the bundled city stamp catalog from WUP and GeoNames source files."""
+"""Build the bundled catalog from WUP and official Mainland city units."""
 
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ SPECIAL_AREAS = {
     },
     "CN": {
         "id": "CN",
-        "nameZh": "中国",
-        "nameEn": "CHINA",
+        "nameZh": "中国大陆",
+        "nameEn": "MAINLAND CHINA",
     },
 }
 
@@ -126,6 +126,72 @@ def read_wup_cities(path: Path) -> list[dict[str, str]]:
         return cities
 
 
+def read_mainland_city_units(path: Path) -> list[dict[str, str]]:
+    source_data = json.loads(path.read_text(encoding="utf-8"))
+    cities = source_data.get("cities")
+    if (
+        source_data.get("source") != "https://dmfw.mca.gov.cn/XzqhVersionPublish.html"
+        or source_data.get("sourceDataAsOf") != "2025-12-31"
+        or not isinstance(cities, list)
+    ):
+        raise ValueError("Mainland city input must be the reviewed MCA 2025-12-31 snapshot")
+
+    records = []
+    for city in cities:
+        code = str(city.get("code", ""))
+        name = str(city.get("cityName", "")).strip()
+        level = city.get("administrativeLevel")
+        code_prefix = code[2:4] if len(code) == 6 else ""
+        is_city_code = (
+            code_prefix.isdigit()
+            and (
+                1 <= int(code_prefix) <= 20
+                or 51 <= int(code_prefix) <= 70
+            )
+            and code.endswith("00")
+        )
+        is_municipality_code = code in {"110000", "120000", "310000", "500000"}
+        if (
+            not re.fullmatch(r"\d{6}", code)
+            or not (
+                (level == "municipality" and is_municipality_code)
+                or (level == "prefecture-level-city" and is_city_code)
+            )
+            or not name.endswith("市")
+            or level not in {"municipality", "prefecture-level-city"}
+            or not city.get("provinceName")
+            or not city.get("provinceCode", "").startswith(code[:2])
+            or not city.get("latinName")
+            or city.get("latinNameSource") != "Hanyu Pinyin, toneless transliteration"
+        ):
+            raise ValueError(f"Invalid mainland municipal unit in MCA snapshot: {city!r}")
+        records.append(
+            {
+                **city,
+                "catalogKey": f"mca-{code}",
+                "catalogId": f"cn-admin-{code}",
+                "ISO2_Code": "CN",
+                "ISO3_Code": "CHN",
+                "Location": "China",
+                "City_Code": code,
+                "City_Name": name,
+            }
+        )
+
+    codes = [city["City_Code"] for city in records]
+    if (
+        len(records) != 297
+        or len(codes) != len(set(codes))
+        or sum(city["administrativeLevel"] == "municipality" for city in records) != 4
+        or sum(city["administrativeLevel"] == "prefecture-level-city" for city in records) != 293
+    ):
+        raise ValueError("MCA snapshot must contain 4 municipalities and 293 prefecture-level cities")
+    required_city_names = {"汕头市", "揭阳市"}
+    if not required_city_names.issubset({city["City_Name"] for city in records}):
+        raise ValueError("MCA snapshot is missing Shantou or Jieyang")
+    return records
+
+
 def normalize_name(value: str) -> str:
     value = re.sub(r"\([^)]*\)", "", value)
     folded = unicodedata.normalize("NFKD", value).casefold()
@@ -134,6 +200,11 @@ def normalize_name(value: str) -> str:
         for character in folded
         if not unicodedata.combining(character) and character.isalnum()
     )
+
+
+def strip_language_tag(value: str) -> str:
+    value = re.sub(r"@[A-Za-z]+(?:-[A-Za-z0-9]+)*$", "", value.strip())
+    return value.strip('"')
 
 
 def name_variants(value: str) -> set[str]:
@@ -319,6 +390,32 @@ def match_geoname(
     return scored[0][2], "exact-name" if exact_candidates else "nearby-name"
 
 
+def nearest_geoname_candidate(
+    city: dict[str, str],
+    grids: dict[str, dict[tuple[int, int], list[dict]]],
+) -> dict | None:
+    try:
+        latitude = float(city["PWCent_Latitude"])
+        longitude = float(city["PWCent_Longitude"])
+    except (KeyError, ValueError):
+        return None
+
+    scored = []
+    for record in nearby_candidates(city.get("ISO2_Code", ""), city, grids):
+        distance = distance_km(
+            latitude,
+            longitude,
+            record["latitude"],
+            record["longitude"],
+        )
+        if distance <= 50:
+            scored.append((distance, record["geonameId"], record))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: (item[0], item[1]))
+    return scored[0][2]
+
+
 def read_geonames_alternates(
     directory: Path,
     wanted_ids: set[str],
@@ -446,8 +543,8 @@ def read_wikidata_wup_candidates(path: Path) -> dict[str, list[dict]]:
     by_english_name: dict[str, list[dict]] = defaultdict(list)
     with path.open(encoding="utf-8", newline="") as stream:
         for row in csv.DictReader(stream, delimiter="\t"):
-            english = row.get("?en", "").removesuffix("@en").strip('"')
-            chinese = row.get("?zh", "").removesuffix("@zh").strip('"')
+            english = strip_language_tag(row.get("?en", ""))
+            chinese = strip_language_tag(row.get("?zh", ""))
             point = row.get("?coord", "")
             if not english or not chinese or not point:
                 continue
@@ -666,6 +763,17 @@ def stable_area(area_code: str) -> dict[str, str]:
     }
 
 
+def sort_areas_for_display(areas: list[dict]) -> list[dict]:
+    def sort_key(area: dict) -> tuple[str, int, str]:
+        if area["id"] == "CN":
+            return "中国台湾", 0, area["id"]
+        if area["id"] == "CN-TW":
+            return "中国台湾", 1, area["id"]
+        return area["nameZh"], 0, area["id"]
+
+    return sorted(areas, key=sort_key)
+
+
 def choose_chinese_name(candidates: list[dict[str, str]]) -> str:
     if not candidates:
         return ""
@@ -683,16 +791,19 @@ def choose_chinese_name(candidates: list[dict[str, str]]) -> str:
 
 
 def validate_catalog(wup_cities: list[dict[str, str]], areas: list[dict], cities: list[dict]) -> None:
-    expected_keys = {city["wupKey"] for city in wup_cities}
+    expected_keys = {
+        city.get("catalogKey", city.get("wupKey", ""))
+        for city in wup_cities
+    }
     if len(expected_keys) != len(wup_cities):
-        raise ValueError("WUP source contains duplicate area/city keys")
+        raise ValueError("Catalog source contains duplicate administrative/city keys")
     if len(cities) != len(wup_cities):
         raise ValueError(f"Expected {len(wup_cities)} cities, found {len(cities)}")
     city_ids = [city["id"] for city in cities]
     if len(city_ids) != len(set(city_ids)):
         raise ValueError("Catalog contains duplicate city IDs")
     expected_ids = {
-        f"wup-{city['ISO3_Code'].lower()}-{city['City_Code']}"
+        city.get("catalogId") or f"wup-{city['ISO3_Code'].lower()}-{city['City_Code']}"
         for city in wup_cities
     }
     if set(city_ids) != expected_ids:
@@ -702,20 +813,35 @@ def validate_catalog(wup_cities: list[dict[str, str]], areas: list[dict], cities
     for city in cities:
         if city["areaId"] not in area_ids:
             raise ValueError(f"City {city['id']} references an unknown area")
-        if not city["cityName"].strip() or not any(
-            "\u4e00" <= character <= "\u9fff" for character in city["cityName"]
-        ):
-            raise ValueError(f"City {city['id']} has no Chinese display name")
+        if not city["cityName"].strip():
+            raise ValueError(f"City {city['id']} has no display name")
         if not city["latinName"].strip() or not city["areaNameZh"] or not city["areaNameEn"]:
             raise ValueError(f"City {city['id']} is missing a required display field")
         if city["nameSource"] not in {
             "geonames",
+            "geonames-nearest",
             "ungegn",
             "wikidata",
             "openstreetmap",
             "reviewed-override",
+            "wup-original",
+            "mca-administrative-code",
         }:
             raise ValueError(f"City {city['id']} has an unsupported name source")
+        if city["matchConfidence"] not in {"verified", "approximate", "unmatched"}:
+            raise ValueError(f"City {city['id']} has an unsupported match confidence")
+        if city["areaId"] == "CN":
+            if (
+                city["nameSource"] != "mca-administrative-code"
+                or city["matchConfidence"] != "verified"
+                or city.get("administrativeLevel")
+                not in {"municipality", "prefecture-level-city"}
+                or not re.fullmatch(r"\d{4}00", city.get("administrativeCode", ""))
+                or not city["cityName"].endswith("市")
+                or not city.get("provinceName")
+                or city.get("latinNameSource") != "hanyu-pinyin"
+            ):
+                raise ValueError(f"Mainland city {city['id']} is not a verified municipal unit")
         grouped[city["areaId"]].append(city)
     for group in grouped.values():
         group.sort(key=lambda city: int(city["serial"]))
@@ -724,6 +850,7 @@ def validate_catalog(wup_cities: list[dict[str, str]], areas: list[dict], cities
                 raise ValueError(f"City {city['id']} has an invalid area sequence")
 
     expected_political_labels = {
+        "CN": ("中国大陆", "MAINLAND CHINA"),
         "CN-HK": ("中国香港", "HONG KONG · CHINA"),
         "CN-MO": ("中国澳门", "MACAO · CHINA"),
         "CN-TW": ("中国台湾", "TAIWAN · CHINA"),
@@ -738,6 +865,7 @@ def validate_catalog(wup_cities: list[dict[str, str]], areas: list[dict], cities
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--wup-xlsx", required=True, type=Path)
+    parser.add_argument("--mainland-city-units-json", required=True, type=Path)
     parser.add_argument("--geonames-cities-zip", required=True, action="append", type=Path)
     parser.add_argument("--geonames-alternates-dir", required=True, type=Path)
     parser.add_argument("--ungegn-cities-json", type=Path)
@@ -746,14 +874,17 @@ def main() -> int:
     parser.add_argument("--osm-wup-zh-tsv", type=Path)
     parser.add_argument("--name-overrides", type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--unresolved", type=Path)
+    parser.add_argument("--quality-report", "--unresolved", dest="quality_report", type=Path)
     args = parser.parse_args()
 
     overrides = {}
     if args.name_overrides and args.name_overrides.exists():
         overrides = json.loads(args.name_overrides.read_text(encoding="utf-8"))
 
-    wup_cities = read_wup_cities(args.wup_xlsx)
+    all_wup_cities = read_wup_cities(args.wup_xlsx)
+    mainland_city_units = read_mainland_city_units(args.mainland_city_units_json)
+    wup_cities = [city for city in all_wup_cities if city["ISO2_Code"] != "CN"]
+    catalog_source_cities = [*wup_cities, *mainland_city_units]
     by_country_name, grids, geonames_records = read_geonames_cities(
         args.geonames_cities_zip,
         wup_cities,
@@ -836,9 +967,9 @@ def main() -> int:
         if candidate and len(osm_candidate_owners[candidate["osmId"]]) > 1:
             osm_wup_matches[wup_key] = None
 
-    area_codes = sorted({city["ISO2_Code"] for city in wup_cities})
+    area_codes = sorted({city["ISO2_Code"] for city in catalog_source_cities})
     translated_names = localized_area_names(area_codes)
-    unresolved: list[dict[str, str]] = []
+    quality_issues: list[dict[str, str]] = []
     cities_by_area: dict[str, list[dict]] = defaultdict(list)
     area_metadata: dict[str, dict[str, str]] = {}
 
@@ -853,17 +984,7 @@ def main() -> int:
             area_name_zh = translated_names.get(area_code, "")
             area_name_en = city["Location"].upper()
             if not area_name_zh or area_name_zh == area_code:
-                unresolved.append(
-                    {
-                        "wupKey": city["wupKey"],
-                        "country": city["Location"],
-                        "cityNameEn": city["City_Name"],
-                        "reason": "missing-localized-area-name",
-                        "geonameId": "",
-                        "matchMethod": "",
-                    }
-                )
-                continue
+                area_name_zh = city["Location"]
         area_metadata[area_id] = {
             "id": area_id,
             "nameZh": area_name_zh,
@@ -872,6 +993,14 @@ def main() -> int:
         }
 
         match, match_method = matches[city["wupKey"]]
+        match_confidence = (
+            "verified" if match_method == "exact-name" else "approximate" if match else "unmatched"
+        )
+        if not match:
+            match = nearest_geoname_candidate(city, grids)
+            if match:
+                match_method = "nearest-geoname"
+                match_confidence = "approximate"
         ungegn_match = match_ungegn_city(city, ungegn_cities) if ungegn_cities else None
         wikidata_wup_match = wikidata_wup_matches[city["wupKey"]]
         osm_wup_match = osm_wup_matches[city["wupKey"]]
@@ -895,7 +1024,11 @@ def main() -> int:
             city_name_source = "ungegn"
         elif geonames_name:
             city_name = geonames_name
-            city_name_source = "geonames"
+            city_name_source = (
+                "geonames-nearest"
+                if match_method == "nearest-geoname"
+                else "geonames"
+            )
         elif wikidata_name:
             city_name = wikidata_name
             city_name_source = "wikidata"
@@ -906,38 +1039,42 @@ def main() -> int:
             city_name = osm_wup_match["cityName"]
             city_name_source = "openstreetmap"
         else:
-            city_name = ""
-            city_name_source = ""
-        if not city_name or not any("\u4e00" <= character <= "\u9fff" for character in city_name):
-            unresolved.append(
-                {
-                    "wupKey": city["wupKey"],
-                    "country": city["Location"],
-                    "cityNameEn": city["City_Name"],
-                    "reason": "missing-reviewed-chinese-name",
-                    "geonameId": match["geonameId"] if match else "",
-                    "matchMethod": match_method,
-                }
-            )
-            continue
+            city_name = city["City_Name"]
+            city_name_source = "wup-original"
+
         if (
-            match is None
-            and not ungegn_match
-            and not wikidata_wup_match
-            and not osm_wup_match
-            and not override.get("cityName")
+            override.get("cityName")
+            or ungegn_match
+            or wikidata_wup_match
+            or osm_wup_match
         ):
-            unresolved.append(
+            match_confidence = "verified"
+        if city_name_source == "wup-original":
+            quality_issues.append(
                 {
                     "wupKey": city["wupKey"],
                     "country": city["Location"],
-                    "cityNameEn": city["City_Name"],
-                    "reason": match_method,
-                    "geonameId": "",
+                    "cityName": city_name,
+                    "issue": (
+                        "original-wup-name-used-without-chinese-translation"
+                        if not any("\u4e00" <= character <= "\u9fff" for character in city_name)
+                        else "original-wup-name-used"
+                    ),
                     "matchMethod": match_method,
+                    "matchConfidence": match_confidence,
                 }
             )
-            continue
+        elif match_confidence != "verified":
+            quality_issues.append(
+                {
+                    "wupKey": city["wupKey"],
+                    "country": city["Location"],
+                    "cityName": city_name,
+                    "issue": "approximate-city-entity-match",
+                    "matchMethod": match_method,
+                    "matchConfidence": match_confidence,
+                }
+            )
 
         aliases = {
             alias
@@ -953,24 +1090,43 @@ def main() -> int:
             "areaNameEn": area_name_en,
             "serial": "",
             "aliases": sorted(aliases),
+            "matchConfidence": match_confidence,
         }
         record["nameSource"] = city_name_source
         cities_by_area[area_id].append(record)
 
-    if args.unresolved:
-        args.unresolved.parent.mkdir(parents=True, exist_ok=True)
-        args.unresolved.write_text(
-            json.dumps(unresolved, ensure_ascii=False, indent=2) + "\n",
+    mainland_area = stable_area("CN")
+    area_metadata[mainland_area["id"]] = {
+        **mainland_area,
+        "sourceNameEn": "China",
+    }
+    for city in mainland_city_units:
+        cities_by_area["CN"].append(
+            {
+                "id": city["catalogId"],
+                "cityName": city["City_Name"],
+                "latinName": city["latinName"],
+                "areaId": "CN",
+                "areaNameZh": mainland_area["nameZh"],
+                "areaNameEn": mainland_area["nameEn"],
+                "serial": "",
+                "aliases": [],
+                "nameSource": "mca-administrative-code",
+                "matchConfidence": "verified",
+                "latinNameSource": "hanyu-pinyin",
+                "administrativeCode": city["City_Code"],
+                "administrativeLevel": city["administrativeLevel"],
+                "provinceCode": city["provinceCode"],
+                "provinceName": city["provinceName"],
+            }
+        )
+
+    if args.quality_report:
+        args.quality_report.parent.mkdir(parents=True, exist_ok=True)
+        args.quality_report.write_text(
+            json.dumps(quality_issues, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-    if unresolved:
-        print(
-            f"Catalog not written: {len(unresolved)} of {len(wup_cities)} WUP cities need review. "
-            f"See {args.unresolved or 'the printed unresolved records'}."
-        )
-        if not args.unresolved:
-            print(json.dumps(unresolved[:20], ensure_ascii=False, indent=2))
-        return 1
 
     records: list[dict] = []
     for area_id, group in cities_by_area.items():
@@ -979,19 +1135,18 @@ def main() -> int:
             record["serial"] = str(index).zfill(2)
             records.append(record)
     records.sort(key=lambda item: (item["areaNameZh"], item["areaId"], int(item["serial"])))
-    validate_catalog(wup_cities, sorted(area_metadata.values(), key=lambda area: (area["nameZh"], area["id"])), records)
+    areas = sort_areas_for_display(list(area_metadata.values()))
+    validate_catalog(catalog_source_cities, areas, records)
 
     catalog = {
-        "version": (
-            "wup-2025-f21-multisource-v2"
-            if args.wikidata_wup_zh_tsv
-            else "wup-2025-f21-multisource-v2"
-            if args.wikidata_geonames_zh_tsv
-            else "wup-2025-f21-geonames-ungegn-v1"
-            if args.ungegn_cities_json
-            else "wup-2025-f21-geonames-v1"
-        ),
+        "version": "wup-2025-f21-mca-mainland-v4",
         "sources": [
+            {
+                "name": "Ministry of Civil Affairs administrative division codes, mainland municipalities and prefecture-level cities",
+                "url": "https://dmfw.mca.gov.cn/XzqhVersionPublish.html",
+                "license": "Official administrative-code database; no separate license statement",
+                "citation": "Data cutoff 2025-12-31. Mainland China includes only 4 municipalities and 293 units whose official administrative type is 地级市. Latin display names are toneless Hanyu Pinyin transliterations of the official Chinese names.",
+            },
             {
                 "name": "United Nations World Urbanization Prospects 2025, Cities table F21",
                 "url": "https://population.un.org/wup/assets/Download/Cities/WUP2025-F21-DEGURBA-Cities_Pop.xlsx",
@@ -1060,7 +1215,7 @@ def main() -> int:
                 else []
             ),
         ],
-        "areas": sorted(area_metadata.values(), key=lambda area: (area["nameZh"], area["id"])),
+        "areas": areas,
         "cities": records,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -1069,7 +1224,8 @@ def main() -> int:
         encoding="utf-8",
     )
     print(
-        f"Wrote {len(records)} cities in {len(catalog['areas'])} areas to {args.output}"
+        f"Wrote {len(records)} cities in {len(catalog['areas'])} areas to {args.output}; "
+        f"{len(quality_issues)} quality warnings"
     )
     return 0
 

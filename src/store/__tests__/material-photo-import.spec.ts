@@ -17,6 +17,46 @@ const devicePhoto: DiaryPhoto = {
 };
 
 describe('Store device photo import', () => {
+  test('restores uploaded and server-generated photos together without accepting mock assets', () => {
+    const generated: DiaryPhoto = {
+      ...devicePhoto,
+      id: 'generated-remote-1',
+      sourceAssetId: 'image-request-1',
+      source: 'generated',
+      generationRequestId: 'image-request-1',
+      generationPrompt: '雨后的老街',
+      generationSource: 'provider',
+      uri: 'https://api.example.test/photos/materials/generated-remote-1/content',
+      localUri: undefined,
+      remoteHeaders: { 'x-device-id': 'device-1' },
+    };
+    const uploaded: DiaryPhoto = {
+      ...devicePhoto,
+      id: 'uploaded-remote-1',
+      uri: 'https://api.example.test/photos/materials/uploaded-remote-1/content',
+      localUri: undefined,
+      remoteHeaders: { 'x-device-id': 'device-1' },
+    };
+    const store = createAppStore(createDefaultAppStoreDeps({ photos: [], diaries: [] }));
+
+    expect(store.getState().syncMaterialPhotos([generated, uploaded])).toBe(true);
+    expect(store.getState().materialPhotoIds).toEqual([generated.id, uploaded.id]);
+    expect(store.getState().photos.find(photo => photo.id === generated.id))
+      .toMatchObject({ source: 'generated', generationPrompt: '雨后的老街' });
+    const previousPhotos = store.getState().photos;
+    const previousIds = store.getState().materialPhotoIds;
+    expect(store.getState().syncMaterialPhotos([
+      generated,
+      { ...uploaded, source: 'generated', generationSource: 'mock' },
+    ])).toBe(false);
+    expect(store.getState().photos).toBe(previousPhotos);
+    expect(store.getState().materialPhotoIds).toBe(previousIds);
+
+    const restarted = createAppStore(createDefaultAppStoreDeps({ photos: [], diaries: [] }));
+    expect(restarted.getState().syncMaterialPhotos([generated, uploaded])).toBe(true);
+    expect(restarted.getState().materialPhotoIds).toEqual([generated.id, uploaded.id]);
+  });
+
   test('registers readable device assets and deduplicates concurrent results', async () => {
     const importer = jest.fn(async () => ({ ok: true as const, photos: [devicePhoto] }));
     const store = createAppStore(createDefaultAppStoreDeps({

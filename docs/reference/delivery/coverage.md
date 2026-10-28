@@ -34,6 +34,7 @@
 | [CRE-005-AC03](../business-spec/modules/diary-creation.md) | [T-CRE-005-A03](tasks/CRE-005.md) | [CASE-CRE-005-003](test-cases/CRE-005.md) |
 | [CRE-005-AC04](../business-spec/modules/diary-creation.md) | [T-CRE-005-A04](tasks/CRE-005.md) | [CASE-CRE-005-004](test-cases/CRE-005.md) |
 | [CRE-005-AC05](../business-spec/modules/diary-creation.md) | [T-CRE-005-A05](tasks/CRE-005.md) | [CASE-CRE-005-005](test-cases/CRE-005.md)；[CASE-CRE-005-009](test-cases/CRE-005.md) |
+| [CRE-005-AC06](../business-spec/modules/diary-creation.md) | [T-CRE-005-A07](tasks/CRE-005.md) | [CASE-CRE-005-013](test-cases/CRE-005.md) |
 | [CRE-006-AC01](../business-spec/modules/diary-creation.md) | [T-CRE-006-A01](tasks/CRE-006.md) | [CASE-CRE-006-001](test-cases/CRE-006.md)；[CASE-CRE-006-007](test-cases/CRE-006.md) |
 | [CRE-006-AC02](../business-spec/modules/diary-creation.md) | [T-CRE-006-A02](tasks/CRE-006.md) | [CASE-CRE-006-002](test-cases/CRE-006.md)；[CASE-CRE-006-003](test-cases/CRE-006.md) |
 | [CRE-006-AC03](../business-spec/modules/diary-creation.md) | [T-CRE-006-A03](tasks/CRE-006.md) | [CASE-CRE-006-002](test-cases/CRE-006.md)；[CASE-CRE-006-007](test-cases/CRE-006.md)；[CASE-CRE-006-008](test-cases/CRE-006.md) |
@@ -85,6 +86,7 @@
 | [SHR-001-AC01](../business-spec/modules/sharing-and-privacy.md) | [T-SHR-001-A01](tasks/SHR-001.md) | [CASE-SHR-001-001](test-cases/SHR-001.md) |
 | [SHR-001-AC02](../business-spec/modules/sharing-and-privacy.md) | [T-SHR-001-A02](tasks/SHR-001.md)；[T-SHR-001-A03](tasks/SHR-001.md)；[T-SHR-001-A05](tasks/SHR-001.md) | [CASE-SHR-001-002](test-cases/SHR-001.md)；[CASE-SHR-001-003](test-cases/SHR-001.md)；[CASE-SHR-001-005](test-cases/SHR-001.md)；[CASE-SHR-001-006](test-cases/SHR-001.md)；[CASE-SHR-001-007](test-cases/SHR-001.md)；[CASE-SHR-001-008](test-cases/SHR-001.md) |
 | [SHR-001-AC03](../business-spec/modules/sharing-and-privacy.md) | [T-NAV-001-A04](tasks/NAV-001.md)；[T-SHR-001-A04](tasks/SHR-001.md) | [CASE-NAV-001-004](test-cases/NAV-001.md)；[CASE-SHR-001-004](test-cases/SHR-001.md)；[CASE-SHR-001-005](test-cases/SHR-001.md) |
+| [SHR-001-AC04](../business-spec/modules/sharing-and-privacy.md) | [T-SHR-001-A06](tasks/SHR-001.md)；[T-SHR-001-A07](tasks/SHR-001.md) | [CASE-SHR-001-009](test-cases/SHR-001.md)；[CASE-SHR-001-010](test-cases/SHR-001.md) |
 | [SHR-002-AC01](../business-spec/modules/sharing-and-privacy.md) | [T-SHR-002-A01](tasks/SHR-002.md)；[T-SHR-002-A05](tasks/SHR-002.md) | [CASE-SHR-002-001](test-cases/SHR-002.md)；[CASE-SHR-002-005](test-cases/SHR-002.md)；[CASE-SHR-002-006](test-cases/SHR-002.md)；[CASE-SHR-002-007](test-cases/SHR-002.md) |
 | [SHR-002-AC02](../business-spec/modules/sharing-and-privacy.md) | [T-SHR-002-A02](tasks/SHR-002.md)；[T-SHR-002-A05](tasks/SHR-002.md) | [CASE-SHR-002-002](test-cases/SHR-002.md)；[CASE-SHR-002-005](test-cases/SHR-002.md)；[CASE-SHR-002-006](test-cases/SHR-002.md)；[CASE-SHR-002-007](test-cases/SHR-002.md) |
 | [SHR-002-AC03](../business-spec/modules/sharing-and-privacy.md) | [T-SHR-002-A03](tasks/SHR-002.md) | [CASE-SHR-002-003](test-cases/SHR-002.md) |
@@ -112,6 +114,8 @@
 | [MAT-002-AC04](../business-spec/modules/material-library.md) | [T-MAT-002-A04](tasks/MAT-002.md) | [CASE-MAT-002-004](test-cases/MAT-002.md)；[CASE-MAT-002-007](test-cases/MAT-002.md) |
 | [MAT-003-AC01](../business-spec/modules/material-library.md) | [T-MAT-003-A01](tasks/MAT-003.md)；[T-MAT-003-A02](tasks/MAT-003.md)；[T-MAT-003-A04](tasks/MAT-003.md) | [CASE-MAT-003-001](test-cases/MAT-003.md)；[CASE-MAT-003-002](test-cases/MAT-003.md)；[CASE-MAT-003-004](test-cases/MAT-003.md)；[CASE-MAT-003-005](test-cases/MAT-003.md) |
 | [MAT-003-AC02](../business-spec/modules/material-library.md) | [T-MAT-003-A03](tasks/MAT-003.md) | [CASE-MAT-003-003](test-cases/MAT-003.md) |
+| [MAT-003-AC03](../business-spec/modules/material-library.md) | [T-MAT-003-A08](tasks/MAT-003.md) | [CASE-MAT-003-009](test-cases/MAT-003.md) |
+| [MAT-003-AC04](../business-spec/modules/material-library.md) | [T-MAT-003-A09](tasks/MAT-003.md) | [CASE-MAT-003-010](test-cases/MAT-003.md) |
 | [MAT-004-AC01](../business-spec/modules/material-library.md) | [T-MAT-004-A01](tasks/MAT-004.md)；[T-MAT-004-A04](tasks/MAT-004.md) | [CASE-MAT-004-001](test-cases/MAT-004.md)；[CASE-MAT-004-006](test-cases/MAT-004.md) |
 | [MAT-004-AC02](../business-spec/modules/material-library.md) | [T-MAT-004-A02](tasks/MAT-004.md)；[T-MAT-004-A03](tasks/MAT-004.md)；[T-MAT-004-A04](tasks/MAT-004.md) | [CASE-MAT-004-002](test-cases/MAT-004.md)；[CASE-MAT-004-003](test-cases/MAT-004.md)；[CASE-MAT-004-004](test-cases/MAT-004.md)；[CASE-MAT-004-005](test-cases/MAT-004.md)；[CASE-MAT-004-006](test-cases/MAT-004.md)；[CASE-MAT-004-007](test-cases/MAT-004.md) |
 | [MAT-005-AC01](../business-spec/modules/material-library.md) | [T-MAT-005-A01](tasks/MAT-005.md) | [CASE-MAT-005-001](test-cases/MAT-005.md)；[CASE-MAT-005-007](test-cases/MAT-005.md) |

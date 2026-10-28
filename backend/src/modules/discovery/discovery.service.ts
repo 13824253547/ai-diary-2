@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { normalizeDiscoveryCity } from '../../common/discovery-publication';
 import { PrismaService } from '../../common/prisma.service';
 
 export const DISCOVERY_PAGE_SIZES = [10, 20, 50, 100] as const;
@@ -8,7 +9,8 @@ export type DiscoveryListQuery = {
   keyword?: string;
   page: number;
   pageSize: number;
-  category: 'latest';
+  category: 'latest' | 'same-city';
+  city?: string;
 };
 
 export class DiscoveryStoryError extends Error {
@@ -20,12 +22,19 @@ export class DiscoveryStoryError extends Error {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function toStoryResponse(
   story: {
     id: string;
     title: string;
     authorDisplayName: string;
     coverUri: string;
+    coverPhotoId: string | null;
+    sourceDiaryId: string | null;
+    publicContent: Prisma.JsonValue | null;
     date: Date;
     location: string;
     body: string;
@@ -35,14 +44,46 @@ function toStoryResponse(
   },
   ownerDeviceId: string,
 ) {
+  const photoUri = (photoId: string) =>
+    `/photos/discovery/${encodeURIComponent(story.id)}/photo-content?photoId=${encodeURIComponent(photoId)}`;
+  const content = story.publicContent;
+  const publishedBlocks = Array.isArray(content)
+    ? content
+    : isRecord(content) && Array.isArray(content.blocks) ? content.blocks : [];
+  const characterId = isRecord(content) && typeof content.characterId === 'string'
+    ? content.characterId
+    : 'character-blue';
+  const blocks = publishedBlocks.flatMap(block => {
+    if (!isRecord(block)
+      || typeof block.id !== 'string'
+      || (block.type !== 'text' && block.type !== 'quote')
+      || typeof block.content !== 'string') return [];
+    const photos = Array.isArray(block.photos)
+      ? block.photos.flatMap(photo =>
+          isRecord(photo) && typeof photo.photoId === 'string' && typeof photo.caption === 'string'
+            ? [{ photoId: photo.photoId, caption: photo.caption, uri: photoUri(photo.photoId) }]
+            : [])
+      : [];
+    return [{
+      id: block.id,
+      type: block.type,
+      ...(typeof block.title === 'string' ? { title: block.title } : {}),
+      content: block.content,
+      photos,
+    }];
+  });
   return {
     id: story.id,
     title: story.title,
     author: story.authorDisplayName,
-    coverUri: story.coverUri,
+    coverUri: story.sourceDiaryId && story.coverPhotoId
+      ? photoUri(story.coverPhotoId)
+      : story.coverUri,
     date: story.date.toISOString(),
     location: story.location,
     body: story.body,
+    blocks,
+    characterId,
     likesEnabled: story.likesEnabled,
     likeCount: story._count?.likes ?? 0,
     liked: story.likes?.some(like => like.ownerDeviceId === ownerDeviceId) ?? false,
@@ -63,11 +104,15 @@ export class DiscoveryService {
     if (!DISCOVERY_PAGE_SIZES.includes(query.pageSize as typeof DISCOVERY_PAGE_SIZES[number])) {
       throw new DiscoveryStoryError('invalid_input', 'unsupported discovery page size');
     }
-    if (query.category !== 'latest') {
+    if (query.category !== 'latest' && query.category !== 'same-city') {
       throw new DiscoveryStoryError('invalid_input', 'discovery category is not available');
     }
     if (query.keyword !== undefined && typeof query.keyword !== 'string') {
       throw new DiscoveryStoryError('invalid_input', 'keyword must be a string');
+    }
+    const cityKey = query.category === 'same-city' ? normalizeDiscoveryCity(query.city) : '';
+    if (query.category === 'same-city' && !cityKey) {
+      throw new DiscoveryStoryError('invalid_input', 'a valid city is required for same-city stories');
     }
 
     const keyword = query.keyword?.trim();
@@ -75,6 +120,7 @@ export class DiscoveryService {
       publicationStatus: 'published',
       publishedAt: { not: null },
       withdrawnAt: null,
+      ...(query.category === 'same-city' ? { cityKey } : {}),
       ...(keyword
         ? {
             OR: [

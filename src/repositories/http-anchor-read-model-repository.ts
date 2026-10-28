@@ -1,10 +1,15 @@
 import {
   ANCHOR_READ_MODEL_CONTRACT_VERSION,
   ANCHOR_READ_PAGE_SIZES,
+  MEMORY_ANCHOR_FEED_VERSION,
   isAnchorExtractionRunRecord,
   isAnchorsByTagPage,
+  isMemoryAnchorFeedPage,
+  isMemoryAnchorSummary,
   type AnchorExtractionRunRecord,
   type AnchorsByTagPage,
+  type MemoryAnchorFeedPage,
+  type MemoryAnchorSummary,
   type ProviderAnchorResult,
 } from '../contracts/anchor-read-model-contract';
 import { ApiClient, ApiRequestError, type ApiRequestOptions, type ApiResponse } from '../services/api-client';
@@ -38,6 +43,13 @@ function isOkEnvelope(value: unknown): value is OkEnvelope<unknown> {
   return isRecord(value)
     && value.ok === true
     && value.version === ANCHOR_READ_MODEL_CONTRACT_VERSION
+    && 'data' in value;
+}
+
+function isMemoryAnchorEnvelope(value: unknown): value is OkEnvelope<unknown> {
+  return isRecord(value)
+    && value.ok === true
+    && value.version === MEMORY_ANCHOR_FEED_VERSION
     && 'data' in value;
 }
 
@@ -167,6 +179,40 @@ export class HttpAnchorReadModelRepository implements AnchorReadRepository {
     );
   }
 
+  async listFeed(input: {
+    tagId?: string;
+    page?: number;
+    pageSize?: 10 | 20 | 50 | 100;
+  } = {}, options?: ApiRequestOptions): Promise<MemoryAnchorFeedPage> {
+    const page = input.page ?? 1;
+    const pageSize = input.pageSize ?? 20;
+    if ((input.tagId !== undefined && !input.tagId.trim())
+      || !Number.isSafeInteger(page)
+      || page < 1
+      || !ANCHOR_READ_PAGE_SIZES.includes(pageSize)) {
+      throw new AnchorReadRepositoryError('invalid_input', '锚点查询条件无效。', false);
+    }
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (input.tagId) params.set('tagId', input.tagId);
+    return this.requestMemoryData(
+      `/anchors/feed?${params.toString()}`,
+      isMemoryAnchorFeedPage,
+      (value): value is MemoryAnchorFeedPage =>
+        isMemoryAnchorFeedPage(value)
+        && value.tagId === (input.tagId ?? null)
+        && value.page === page
+        && value.pageSize === pageSize,
+      options,
+    );
+  }
+
+  async getSummary(options?: ApiRequestOptions): Promise<MemoryAnchorSummary> {
+    return this.requestMemoryData('/anchors/summary', isMemoryAnchorSummary, isMemoryAnchorSummary, options);
+  }
+
   private async requestData<T>(
     path: string,
     init: RequestInit,
@@ -196,6 +242,39 @@ export class HttpAnchorReadModelRepository implements AnchorReadRepository {
       );
     }
     if (!isData(envelope.data)) {
+      throw new AnchorReadRepositoryError('provider_failed', '锚点服务返回的数据格式异常。', false);
+    }
+    return envelope.data;
+  }
+
+  private async requestMemoryData<T>(
+    path: string,
+    isData: (value: unknown) => value is T,
+    matchesRequest: (value: unknown) => value is T,
+    options?: ApiRequestOptions,
+  ): Promise<T> {
+    let response: ApiResponse<unknown>;
+    try {
+      response = await this.client.request<unknown>(path, { method: 'GET' }, options);
+    } catch (error) {
+      throw requestError(error);
+    }
+    const envelope = response.data;
+    if (!response.ok || !isMemoryAnchorEnvelope(envelope)) {
+      if (isErrorEnvelope(envelope)) {
+        throw new AnchorReadRepositoryError(
+          envelope.error.code as AnchorReadRepositoryError['code'],
+          envelope.error.message,
+          envelope.error.retryable,
+        );
+      }
+      throw new AnchorReadRepositoryError(
+        'provider_failed',
+        response.ok ? '锚点服务返回的数据格式异常。' : `请求失败（HTTP ${response.status}）。`,
+        response.status >= 500,
+      );
+    }
+    if (!isData(envelope.data) || !matchesRequest(envelope.data)) {
       throw new AnchorReadRepositoryError('provider_failed', '锚点服务返回的数据格式异常。', false);
     }
     return envelope.data;

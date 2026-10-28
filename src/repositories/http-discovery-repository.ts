@@ -61,11 +61,13 @@ export class HttpDiscoveryRepository implements DiscoveryRepository {
   constructor(private readonly client: ApiClient) {}
 
   async listStories(query: DiscoveryStoriesQuery, options?: ApiRequestOptions): Promise<DiscoveryStoriesPage> {
-    if (query.category !== 'latest'
+    if ((query.category !== 'latest' && query.category !== 'same-city')
       || !Number.isSafeInteger(query.page)
       || query.page < 1
       || !DISCOVERY_PAGE_SIZES.includes(query.pageSize)
-      || (query.keyword !== undefined && typeof query.keyword !== 'string')) {
+      || (query.keyword !== undefined && typeof query.keyword !== 'string')
+      || (query.category === 'same-city'
+        && (typeof query.city !== 'string' || !query.city.trim() || query.city.length > 191))) {
       throw new DiscoveryRepositoryError('invalid_input', '发现列表查询条件无效。', false);
     }
     const params = new URLSearchParams({
@@ -73,6 +75,7 @@ export class HttpDiscoveryRepository implements DiscoveryRepository {
       page: String(query.page),
       pageSize: String(query.pageSize),
     });
+    if (query.category === 'same-city') params.set('city', query.city!.trim());
     if (query.keyword !== undefined) params.set('keyword', query.keyword);
     return this.requestData(`/discovery/stories?${params.toString()}`, { method: 'GET' }, isDiscoveryStoriesPage, options);
   }

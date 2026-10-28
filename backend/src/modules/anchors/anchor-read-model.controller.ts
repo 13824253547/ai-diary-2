@@ -75,6 +75,52 @@ export class AnchorReadModelController {
     }
   }
 
+  @Get('feed')
+  async listFeed(
+    @Query('tagId') tagId: unknown,
+    @Query('page') pageParam: unknown,
+    @Query('pageSize') pageSizeParam: unknown,
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    const page = parseDecimalIntegerParam(pageParam, 1);
+    const pageSize = parseDecimalIntegerParam(pageSizeParam, 20);
+    if (tagId !== undefined && (typeof tagId !== 'string' || !tagId.trim())) {
+      throw this.invalidInput('锚点主题标识无效。');
+    }
+    if (page === null || page < 1 || pageSize === null
+      || !ANCHOR_PAGE_SIZES.includes(pageSize as typeof ANCHOR_PAGE_SIZES[number])) {
+      throw this.invalidInput('锚点分页条件无效。');
+    }
+    try {
+      return {
+        ok: true,
+        version: 'memory-anchor-v1',
+        data: await this.service.listFeed({
+          ...(tagId === undefined ? {} : { tagId }),
+          page,
+          pageSize,
+        }, ownerDeviceId),
+      };
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  @Get('summary')
+  async getSummary(@Headers('x-device-id') deviceId?: string) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    try {
+      return {
+        ok: true,
+        version: 'memory-anchor-v1',
+        data: { total: await this.service.countFeed(ownerDeviceId) },
+      };
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
   @Post('extractions/begin')
   async beginExtraction(
     @Body() body: BeginExtractionBody,

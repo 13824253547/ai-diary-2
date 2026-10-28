@@ -1,6 +1,7 @@
 import type { AnchorExtractionResult } from './anchor-contract';
 
 export const ANCHOR_READ_MODEL_CONTRACT_VERSION = 'anchor-extraction-v1';
+export const MEMORY_ANCHOR_FEED_VERSION = 'memory-anchor-v1';
 export const ANCHOR_READ_PAGE_SIZES = [10, 20, 50, 100] as const;
 
 export type ProviderAnchorResult = Omit<AnchorExtractionResult, 'source'> & {
@@ -48,6 +49,41 @@ export type AnchorsByTagPage = {
   pageSize: typeof ANCHOR_READ_PAGE_SIZES[number];
   total: number;
 };
+
+export type MemoryAnchorFeedRecord = {
+  id: string;
+  anchorId: string;
+  sourceType: 'diary' | 'chat';
+  tagId: string;
+  title: string;
+  displayDate: string;
+  excerpt: string;
+  correction?: string;
+  correctionVersion?: number;
+  diary?: {
+    id: string;
+    version: number;
+    coverPhotoId: string;
+  };
+  chat?: {
+    batchId: string;
+    sourceDateStart: string;
+    sourceDateEnd: string;
+    sourceMessages: Array<{ conversationId: string; messageId: string }>;
+  };
+  sourceBlockId?: string;
+  sourceBlockIds?: string[];
+};
+
+export type MemoryAnchorFeedPage = {
+  items: MemoryAnchorFeedRecord[];
+  tagId: string | null;
+  page: number;
+  pageSize: typeof ANCHOR_READ_PAGE_SIZES[number];
+  total: number;
+};
+
+export type MemoryAnchorSummary = { total: number };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -118,6 +154,60 @@ export function isAnchorsByTagPage(value: unknown): value is AnchorsByTagPage {
     && isPositiveInteger(value.page)
     && ANCHOR_READ_PAGE_SIZES.includes(value.pageSize as typeof ANCHOR_READ_PAGE_SIZES[number])
     && value.items.length <= (value.pageSize as number)
+    && Number.isSafeInteger(value.total)
+    && (value.total as number) >= 0;
+}
+
+function isMemoryAnchorFeedRecord(value: unknown): value is MemoryAnchorFeedRecord {
+  if (!isRecord(value)
+    || !isNonEmptyString(value.id)
+    || !isNonEmptyString(value.anchorId)
+    || (value.sourceType !== 'diary' && value.sourceType !== 'chat')
+    || !isNonEmptyString(value.tagId)
+    || typeof value.title !== 'string'
+    || !isDate(value.displayDate)
+    || !isNonEmptyString(value.excerpt)
+    || (value.correction !== undefined
+      && (typeof value.correction !== 'string' || !value.correction.trim()))
+    || (value.correctionVersion !== undefined && !isPositiveInteger(value.correctionVersion))) {
+    return false;
+  }
+  if (value.sourceType === 'diary') {
+    return isRecord(value.diary)
+      && isNonEmptyString(value.diary.id)
+      && isPositiveInteger(value.diary.version)
+      && typeof value.diary.coverPhotoId === 'string'
+      && isNonEmptyString(value.sourceBlockId)
+      && Array.isArray(value.sourceBlockIds)
+      && value.sourceBlockIds.length > 0
+      && value.sourceBlockIds.every(isNonEmptyString);
+  }
+  return isRecord(value.chat)
+    && isNonEmptyString(value.chat.batchId)
+    && isDate(value.chat.sourceDateStart)
+    && isDate(value.chat.sourceDateEnd)
+    && Array.isArray(value.chat.sourceMessages)
+    && value.chat.sourceMessages.length > 0
+    && value.chat.sourceMessages.every(message =>
+      isRecord(message)
+      && isNonEmptyString(message.conversationId)
+      && isNonEmptyString(message.messageId));
+}
+
+export function isMemoryAnchorFeedPage(value: unknown): value is MemoryAnchorFeedPage {
+  return isRecord(value)
+    && Array.isArray(value.items)
+    && value.items.every(isMemoryAnchorFeedRecord)
+    && (value.tagId === null || isNonEmptyString(value.tagId))
+    && isPositiveInteger(value.page)
+    && ANCHOR_READ_PAGE_SIZES.includes(value.pageSize as typeof ANCHOR_READ_PAGE_SIZES[number])
+    && value.items.length <= (value.pageSize as number)
+    && Number.isSafeInteger(value.total)
+    && (value.total as number) >= 0;
+}
+
+export function isMemoryAnchorSummary(value: unknown): value is MemoryAnchorSummary {
+  return isRecord(value)
     && Number.isSafeInteger(value.total)
     && (value.total as number) >= 0;
 }

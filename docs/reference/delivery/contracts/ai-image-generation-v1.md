@@ -47,6 +47,8 @@ This contract defines the versioned boundary between MAT-005 and a replaceable i
 
 The device-authenticated server endpoint is `POST /api/photos/materials/ai`. In the production path it calls the configured Ark Seedream image endpoint, validates returned image bytes, persists the image through the material-photo asset service, and only then returns the asset envelope. The client constructs an authenticated content URL rather than trusting a provider-returned temporary URL.
 
+This server-side write is the asset upload: the client must not POST the returned image again. Generated and device-uploaded images share the device-scoped 100-item material quota (the 12-item per-request limit applies to album uploads only). A full library returns `409` with `limit_exceeded` before calling the paid provider; the final transactional write still checks quota for concurrent changes. The same authenticated material-list endpoint returns both sources on restart.
+
 ## Provider Prompt Policy
 
 The request `description` and persisted `generationPrompt` remain the user's original text. Before calling the image provider, the server wraps that text with a fixed, higher-priority style instruction: output must use realistic photography / photorealism, and must not use anime, cartoon, illustration, comics, painting, sketch, 3D render, CGI, game-art, or other non-photographic styles. The user description controls scene content but cannot override this style rule. Provider prompt policy is server-owned and is not supplied by the client.
@@ -57,7 +59,7 @@ Before registration, the consumer requires the supported contract version, match
 
 - A pending local request may be deduplicated with another in-flight request for the same normalized description. This is an in-process optimization, not durable or cross-device idempotency.
 - Only a current pending request may register its result. Cancellation races the provider and readability check; a late result cannot be registered.
-- The adapter may report `cancelled` or `provider_failed`. Raw provider details are not exposed as successful asset metadata.
+- The adapter may report `cancelled`, `provider_failed`, or `limit_exceeded`. Raw provider details are not exposed as successful asset metadata; capacity errors use a fixed user-facing message.
 - A development adapter must mark its result `source: mock`; mock success is not provider quality, durable asset storage, or a CASE pass. A real provider failure must not silently fall back to mock success.
 - No timeout or automatic retry semantics are selected by this version.
 

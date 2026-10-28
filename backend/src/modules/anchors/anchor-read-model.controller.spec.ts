@@ -8,6 +8,8 @@ import {
 describe('AnchorReadModelController', () => {
   const service = {
     listByTag: jest.fn(),
+    listFeed: jest.fn(),
+    countFeed: jest.fn(),
     beginExtraction: jest.fn(),
     completeExtraction: jest.fn(),
     failExtraction: jest.fn(),
@@ -42,6 +44,33 @@ describe('AnchorReadModelController', () => {
       page: 1,
       pageSize: 20,
     }, 'device-1');
+  });
+
+  test('returns the mixed feed for an optional tag and protects the real count', async () => {
+    jest.mocked(service.listFeed).mockResolvedValue({
+      items: [],
+      tagId: null,
+      page: 1,
+      pageSize: 20,
+      total: 3,
+    });
+    jest.mocked(service.countFeed).mockResolvedValue(3);
+
+    await expect(controller.listFeed(undefined, undefined, undefined, undefined))
+      .rejects.toMatchObject({ response: { error: { code: 'device_identity_required' } } });
+    await expect(controller.listFeed(undefined, undefined, undefined, 'device-1'))
+      .resolves.toMatchObject({
+        ok: true,
+        version: 'memory-anchor-v1',
+        data: { tagId: null, total: 3 },
+      });
+    expect(service.listFeed).toHaveBeenCalledWith({ page: 1, pageSize: 20 }, 'device-1');
+    await expect(controller.getSummary('device-1')).resolves.toEqual({
+      ok: true,
+      version: 'memory-anchor-v1',
+      data: { total: 3 },
+    });
+    expect(service.countFeed).toHaveBeenCalledWith('device-1');
   });
 
   test('requires device identity before validating malformed queries and extraction bodies', async () => {

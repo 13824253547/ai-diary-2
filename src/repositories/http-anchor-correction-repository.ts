@@ -1,7 +1,11 @@
 import {
   ANCHOR_CORRECTION_CONTRACT_VERSION,
   isAnchorCorrectionRecord,
+  isChatAnchorCorrectionRecord,
+  type ChatAnchorCorrectionRecord,
   type AnchorCorrectionRecord,
+  type ChatAnchorCorrectionQuery,
+  type SaveChatAnchorCorrectionInput,
 } from '../contracts/anchor-correction-contract';
 import { ApiClient, ApiRequestError, type ApiRequestOptions, type ApiResponse } from '../services/api-client';
 import {
@@ -37,6 +41,13 @@ function isOkEnvelope(value: unknown): value is OkEnvelope<unknown> {
     && 'data' in value;
 }
 
+function isChatCorrectionEnvelope(value: unknown): value is OkEnvelope<unknown> {
+  return isRecord(value)
+    && value.ok === true
+    && value.version === 'chat-anchor-correction-v1'
+    && 'data' in value;
+}
+
 function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
   if (!isRecord(value) || value.ok !== false || !isRecord(value.error)) return false;
   return typeof value.error.code === 'string'
@@ -55,6 +66,63 @@ function requestError(error: unknown) {
 
 export class HttpAnchorCorrectionRepository implements AnchorCorrectionRepository {
   constructor(private readonly client: ApiClient) {}
+
+  async getChatCorrection(
+    query: ChatAnchorCorrectionQuery,
+    options?: ApiRequestOptions,
+  ): Promise<ChatAnchorCorrectionRecord | null> {
+    if (!query.anchorId.trim() || !query.anchorBatchId.trim()) {
+      throw new AnchorCorrectionRepositoryError('invalid_input', '聊天锚点来源无效。', false);
+    }
+    const params = new URLSearchParams({ anchorBatchId: query.anchorBatchId });
+    return this.requestChatCorrectionData(
+      `/anchors/${encodeURIComponent(query.anchorId)}/chat-correction?${params.toString()}`,
+      { method: 'GET' },
+      (value): value is ChatAnchorCorrectionRecord | null =>
+        value === null
+        || (isChatAnchorCorrectionRecord(value)
+          && value.anchorId === query.anchorId
+          && value.anchorBatchId === query.anchorBatchId),
+      options,
+    );
+  }
+
+  async saveChatCorrection(
+    input: SaveChatAnchorCorrectionInput,
+    options?: ApiRequestOptions,
+  ): Promise<ChatAnchorCorrectionRecord> {
+    const correction = input.correction.trim();
+    const charCount = Array.from(correction).length;
+    if (!input.anchorId.trim()
+      || !input.anchorBatchId.trim()
+      || !correction
+      || charCount > 240
+      || !input.idempotencyKey.trim()
+      || !Number.isSafeInteger(input.expectedVersion)
+      || input.expectedVersion < 0) {
+      throw new AnchorCorrectionRepositoryError('invalid_input', '锚点纠正内容无效。', false);
+    }
+    return this.requestChatCorrectionData(
+      `/anchors/${encodeURIComponent(input.anchorId)}/chat-correction`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          anchorBatchId: input.anchorBatchId,
+          correction,
+          expectedVersion: input.expectedVersion,
+          idempotencyKey: input.idempotencyKey,
+        }),
+      },
+      (value): value is ChatAnchorCorrectionRecord =>
+        isChatAnchorCorrectionRecord(value)
+        && value.anchorId === input.anchorId
+        && value.anchorBatchId === input.anchorBatchId
+        && value.correction === correction
+        && value.version === input.expectedVersion + 1,
+      options,
+    );
+  }
 
   async getCorrection(
     query: unknown,
@@ -101,6 +169,7 @@ export class HttpAnchorCorrectionRepository implements AnchorCorrectionRepositor
       || !input.sourceBlockId.trim()
       || typeof input.correction !== 'string'
       || !input.correction.trim()
+      || Array.from(input.correction.trim()).length > 240
       || typeof input.idempotencyKey !== 'string'
       || !input.idempotencyKey.trim()
       || typeof input.diaryVersion !== 'number'
@@ -154,6 +223,39 @@ export class HttpAnchorCorrectionRepository implements AnchorCorrectionRepositor
 
     const envelope = response.data;
     if (!response.ok || !isOkEnvelope(envelope)) {
+      if (isErrorEnvelope(envelope)) {
+        throw new AnchorCorrectionRepositoryError(
+          envelope.error.code as AnchorCorrectionRepositoryError['code'],
+          envelope.error.message,
+          envelope.error.retryable,
+        );
+      }
+      throw new AnchorCorrectionRepositoryError(
+        'provider_failed',
+        response.ok ? '服务器返回的数据格式异常。' : `请求失败（HTTP ${response.status}）。`,
+        response.status >= 500,
+      );
+    }
+    if (!isData(envelope.data)) {
+      throw new AnchorCorrectionRepositoryError('provider_failed', '服务器返回的数据格式异常。', false);
+    }
+    return envelope.data;
+  }
+
+  private async requestChatCorrectionData<T>(
+    path: string,
+    init: RequestInit,
+    isData: (value: unknown) => value is T,
+    options?: ApiRequestOptions,
+  ): Promise<T> {
+    let response: ApiResponse<unknown>;
+    try {
+      response = await this.client.request<unknown>(path, init, options);
+    } catch (error) {
+      throw requestError(error);
+    }
+    const envelope = response.data;
+    if (!response.ok || !isChatCorrectionEnvelope(envelope)) {
       if (isErrorEnvelope(envelope)) {
         throw new AnchorCorrectionRepositoryError(
           envelope.error.code as AnchorCorrectionRepositoryError['code'],

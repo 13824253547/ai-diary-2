@@ -18,7 +18,22 @@ export type CityStampCatalogEntry = {
   areaNameEn: string;
   serial: string;
   aliases: string[];
-  nameSource?: 'geonames' | 'ungegn' | 'wikidata' | 'openstreetmap' | 'reviewed-override';
+  nameSource?: (
+    | 'geonames'
+    | 'geonames-nearest'
+    | 'ungegn'
+    | 'wikidata'
+    | 'openstreetmap'
+    | 'reviewed-override'
+    | 'wup-original'
+    | 'mca-administrative-code'
+  );
+  latinNameSource?: 'hanyu-pinyin';
+  matchConfidence?: 'verified' | 'approximate' | 'unmatched';
+  administrativeCode?: string;
+  administrativeLevel?: 'municipality' | 'prefecture-level-city';
+  provinceCode?: string;
+  provinceName?: string;
 };
 
 export type CityStampConfig = CityStampCatalogEntry & {
@@ -87,25 +102,88 @@ const legacyFallbacks: Record<string, CityStampConfig> = {
   },
 };
 
-const areaPalette = [
-  { inkColor: '#A84E62', accentColor: '#D49AA4' },
-  { inkColor: '#55758D', accentColor: '#9DB2C2' },
-  { inkColor: '#C27B3C', accentColor: '#D9AE7F' },
-  { inkColor: '#65754F', accentColor: '#AEBB91' },
-  { inkColor: '#765D88', accentColor: '#B9A7C8' },
-];
+type StampPalette = Pick<CityStampConfig, 'inkColor' | 'accentColor'>;
 
-const legacyPalette: Record<string, { inkColor: string; accentColor: string }> = {
-  stampKyoto: areaPalette[0],
-  stampKamakura: areaPalette[1],
-  stamp: areaPalette[2],
-};
-
-function paletteFor(areaId: string) {
+function hashString(value: string) {
   let hash = 0;
-  for (const character of areaId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return areaPalette[hash % areaPalette.length];
+  for (const character of value) {
+    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
+  }
+  return hash || 0x9e3779b9;
 }
+
+function nextRandom(value: number) {
+  let next = value;
+  next ^= next << 13;
+  next ^= next >>> 17;
+  next ^= next << 5;
+  return next >>> 0;
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number) {
+  const normalizedSaturation = saturation / 100;
+  const normalizedLightness = lightness / 100;
+  const chroma = (1 - Math.abs(2 * normalizedLightness - 1)) * normalizedSaturation;
+  const hueSection = hue / 60;
+  const secondary = chroma * (1 - Math.abs((hueSection % 2) - 1));
+  const offset = normalizedLightness - chroma / 2;
+  const [red, green, blue] = hueSection < 1
+    ? [chroma, secondary, 0]
+    : hueSection < 2
+      ? [secondary, chroma, 0]
+      : hueSection < 3
+        ? [0, chroma, secondary]
+        : hueSection < 4
+          ? [0, secondary, chroma]
+          : hueSection < 5
+            ? [secondary, 0, chroma]
+            : [chroma, 0, secondary];
+  const toHex = (channel: number) =>
+    Math.round((channel + offset) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(red)}${toHex(green)}${toHex(blue)}`;
+}
+
+function createCityPalettes() {
+  const palettes = new Map<string, StampPalette>();
+  const usedInkColors = new Set(
+    Object.values(legacyFallbacks).map(palette => palette.inkColor.toLowerCase()),
+  );
+
+  for (const city of catalog.cities) {
+    let seed = hashString(city.id);
+    let palette: StampPalette | undefined;
+    for (let attempt = 0; attempt < 250_000; attempt += 1) {
+      seed = nextRandom(seed);
+      const hue = seed % 360;
+      seed = nextRandom(seed);
+      const saturation = 54 + (seed % 23);
+      seed = nextRandom(seed);
+      const lightness = 31 + (seed % 24);
+      const inkColor = hslToHex(hue, saturation, lightness);
+      if (usedInkColors.has(inkColor)) continue;
+
+      palette = {
+        inkColor,
+        accentColor: hslToHex(
+          (hue + 14) % 360,
+          Math.max(32, saturation - 14),
+          Math.min(78, lightness + 24),
+        ),
+      };
+      usedInkColors.add(inkColor);
+      break;
+    }
+
+    if (!palette) {
+      throw new Error(`Unable to assign a unique city-stamp color to ${city.id}`);
+    }
+    palettes.set(city.id, palette);
+  }
+
+  return palettes;
+}
+
+const cityPalettes = createCityPalettes();
 
 const cityById = new Map(catalog.cities.map(city => [city.id, city]));
 const legacyTargets = new Map<string, string>();
@@ -161,7 +239,8 @@ export function getCityStampConfig(id?: string): CityStampConfig | undefined {
   const canonicalId = legacyTargets.get(id) ?? id;
   const city = cityById.get(canonicalId);
   if (!city) return legacyFallbacks[id];
-  const palette = legacyPalette[id] ?? paletteFor(city.areaId);
+  const palette = cityPalettes.get(city.id);
+  if (!palette) return legacyFallbacks[id];
   return {
     ...city,
     id,
@@ -196,7 +275,9 @@ export function resolveCityStampLocationMatch(
 ) {
   const normalizedParts = new Set(locationParts.map(normalizeLocationPart));
   const matches = candidates.filter(city => (
-    [city.cityName, city.latinName, ...city.aliases]
+    city.matchConfidence !== 'approximate'
+      && city.matchConfidence !== 'unmatched'
+      && [city.cityName, city.latinName, ...city.aliases]
       .some(candidate => normalizedParts.has(normalizeLocationPart(candidate)))
   ));
   if (matches.length <= 1) return matches;
@@ -210,7 +291,13 @@ export function resolveCityStampLocationMatch(
         )
       : false;
   });
-  return areaMatches.length === 1 ? areaMatches : [];
+  if (areaMatches.length === 1) return areaMatches;
+
+  const provinceMatches = matches.filter(city => (
+    city.provinceName
+    && normalizedParts.has(normalizeLocationPart(city.provinceName))
+  ));
+  return provinceMatches.length === 1 ? provinceMatches : [];
 }
 
 export function getVisitedCityStampIds(diaries: readonly DiaryItem[]) {

@@ -4,6 +4,7 @@ import LibraryScreen from '../library';
 import { art } from '../../src/theme/assets';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
+import { getVisitedCityStampIds } from '../../src/components/library/city-stamp-catalog';
 import type { AppStore } from '../../src/store/use-app-store';
 
 const mockRouter = {
@@ -19,9 +20,9 @@ const decorations = [
   { title: '喜欢你', label: '预览喜欢你', artKey: 'stickerLove' },
 ] as const;
 const cityStamps = [
-  { title: '京都', label: '预览京都印章', id: 'stampKyoto' },
-  { title: '镰仓', label: '预览镰仓印章', id: 'stampKamakura' },
-  { title: '台南', label: '预览台南印章', id: 'stamp' },
+  { title: '京都', label: '预览京都印章', location: '京都' },
+  { title: '镰仓', label: '预览镰仓印章', location: '镰仓' },
+  { title: '臺南市', label: '预览臺南市印章', location: '台南' },
 ] as const;
 
 jest.mock('expo-router', () => ({
@@ -29,9 +30,9 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/components/layout/screen', () => ({
-  Screen: ({ children, header }: { children: React.ReactNode; header?: React.ReactNode }) => {
+  Screen: ({ children, header, footer }: { children: React.ReactNode; header?: React.ReactNode; footer?: React.ReactNode }) => {
     const { View } = require('react-native');
-    return <View>{header}{children}</View>;
+    return <View>{header}{children}{footer}</View>;
   },
 }));
 
@@ -135,6 +136,11 @@ describe('Library screen decoration previews', () => {
   });
 
   test.each(cityStamps)('previews the SVG city stamp with configurable city text: $title', async item => {
+    const diary = useAppStore.getState().diaries[0];
+    if (!diary) throw new Error('expected a saved diary fixture');
+    useAppStore.setState({
+      diaries: [{ ...diary, status: 'ready', location: item.location }],
+    });
     const screen = await render(<LibraryScreen />);
     await act(async () => {
       fireEvent.press(screen.getByLabelText(item.label));
@@ -147,36 +153,85 @@ describe('Library screen decoration previews', () => {
     });
   });
 
-  test('passes the selected stable decoration ID to the postcard route', async () => {
-    useAppStore.setState(state => ({
-      diaries: state.diaries.map(diary => (
-        diary.id === 'diary-1' ? { ...diary, location: '京都', status: 'ready' as const } : diary
-      )),
-    }));
+  test('opens the separate postcard application page with the selected material', async () => {
+    const diary = useAppStore.getState().diaries[0];
+    if (!diary) throw new Error('expected a saved diary fixture');
+    const visitedDiary = { ...diary, status: 'ready' as const, location: '京都' };
+    useAppStore.setState({ diaries: [visitedDiary] });
+    const [cityStampId] = [...getVisitedCityStampIds([visitedDiary])];
+    const photo = {
+      id: 'postcard-photo',
+      title: 'postcard-photo',
+      location: '京都',
+      emoji: '📷',
+      color: '#EFE3D5',
+      date: '2026.10.15',
+      localUri: 'file:///postcard-photo.jpg',
+      uri: 'file:///postcard-photo.jpg',
+      width: 100,
+      height: 120,
+      source: 'device' as const,
+    };
+    useAppStore.getState().registerPhotos([photo]);
+    useAppStore.setState({ materialPhotoIds: [photo.id] });
     const screen = await render(<LibraryScreen />);
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('预览postcard-photo'));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('用于明信片'));
+    });
+    expect(mockRouter.push).toHaveBeenLastCalledWith({
+      pathname: '/postcard/apply',
+      params: { photoId: photo.id },
+    });
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('预览开心的小橘'));
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('用于明信片'));
+    });
+    expect(mockRouter.push).toHaveBeenLastCalledWith({
+      pathname: '/postcard/apply',
+      params: { stickerId: 'stickerHappy' },
+    });
+
     await act(async () => {
       fireEvent.press(screen.getByLabelText('预览京都印章'));
     });
-
-    await waitFor(() => expect(screen.getByTestId('city-stamp-preview')).toBeTruthy());
-    fireEvent.press(screen.getByLabelText('用于明信片'));
-
-    expect(mockRouter.push).toHaveBeenCalledWith({
-      pathname: '/postcard',
-      params: { decoration: 'stampKyoto' },
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('用于明信片'));
+    });
+    expect(mockRouter.push).toHaveBeenLastCalledWith({
+      pathname: '/postcard/apply',
+      params: { cityStampId },
     });
   });
 
-  test('allows locked stamps to be previewed but prevents applying them', async () => {
+  test('shows an empty state instead of catalog samples when there are no visited cities', async () => {
+    useAppStore.setState({ diaries: [] });
     const screen = await render(<LibraryScreen />);
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('预览京都印章'));
-    });
 
-    const applyButton = screen.getByLabelText('用于明信片');
-    expect(applyButton.props.accessibilityState.disabled).toBe(true);
-    expect(screen.getByText('记录地点与城市名称精确匹配的已保存日记后解锁应用。')).toBeTruthy();
-    fireEvent.press(applyButton);
-    expect(mockRouter.push).not.toHaveBeenCalled();
+    expect(screen.getByTestId('city-stamp-empty')).toBeTruthy();
+    expect(screen.getByText('暂无城市印章')).toBeTruthy();
+    expect(screen.queryByLabelText('预览京都印章')).toBeNull();
+    expect(screen.queryByLabelText('预览镰仓印章')).toBeNull();
+    expect(screen.queryByLabelText('预览臺南市印章')).toBeNull();
+  });
+
+  test('shows only stamps unlocked by saved diary locations', async () => {
+    const diary = useAppStore.getState().diaries[0];
+    if (!diary) throw new Error('expected a saved diary fixture');
+    useAppStore.setState({
+      diaries: [{ ...diary, status: 'ready', location: '京都' }],
+    });
+    const screen = await render(<LibraryScreen />);
+
+    expect(screen.getByLabelText('预览京都印章')).toBeTruthy();
+    expect(screen.queryByLabelText('预览镰仓印章')).toBeNull();
+    expect(screen.queryByLabelText('预览臺南市印章')).toBeNull();
+    expect(screen.queryByTestId('city-stamp-empty')).toBeNull();
   });
 });

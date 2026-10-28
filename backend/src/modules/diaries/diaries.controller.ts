@@ -2,8 +2,10 @@ import { BadRequestException, Body, ConflictException, Controller, ForbiddenExce
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { resolveDeviceId } from '../../common/device-identity';
 import { MemoryStoreService, PermissionDeniedError, SaveDiaryError, type DiaryContentSnapshotRecord } from '../../common/memory-store.service';
+import { DiaryAnchorGenerationService } from '../anchors/diary-anchor-generation.service';
 import { PhotoAssetError, PhotoAssetService, type DiaryPhotoUpload } from '../photos/photo-asset.service';
 import { BoundedMemoryUploadStorage } from '../generation/bounded-memory-upload-storage';
+import { GrowthInsightsService } from '../growth/growth-insights.service';
 
 const diaryPhotoUploadStorage = new BoundedMemoryUploadStorage(48 * 1024 * 1024);
 
@@ -17,6 +19,7 @@ type SaveDiaryBody = {
   summary: string;
   location: string;
   date: string;
+  publishedLocalDate?: string;
   privacy: string;
   photoIds: string[];
   publicBlockIds?: string[];
@@ -97,6 +100,8 @@ export class DiariesController {
   constructor(
     private readonly store: MemoryStoreService,
     private readonly photoAssets: PhotoAssetService,
+    private readonly diaryAnchors: DiaryAnchorGenerationService,
+    private readonly growthInsights: GrowthInsightsService,
   ) {}
 
   @Post('save')
@@ -129,6 +134,8 @@ export class DiariesController {
       const assetHook = this.photoAssets.createDiaryPhotoSaveHook(ownerDeviceId, photoIds, uploads);
       const saved = await this.store.saveDiaryWithCommand(body, ownerDeviceId, assetHook);
       await this.photoAssets.ensureDiaryPhotoCopies(ownerDeviceId, saved.diaryId, photoIds);
+      this.diaryAnchors.enqueue(ownerDeviceId, saved.diaryId, saved.savedVersion);
+      this.growthInsights.enqueueAfterDiarySaved(ownerDeviceId, saved.diaryId, saved.savedVersion);
       return {
         ok: true,
         data: {

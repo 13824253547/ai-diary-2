@@ -81,7 +81,7 @@
 | `type` | `travel \| work \| emotion` | 当前仅 `travel` 真正可用 |
 | `characterId` | `string` | 排版师 ID |
 | `selectedPhotoIds` | `string[]` | 当前选中照片 |
-| `privacy` | `private \| anonymous \| public-likes \| public-comments` | 当前草稿隐私 |
+| `privacy` | `private \| anonymous \| public-likes \| public-comments` | 当前草稿隐私；`public-comments` 仅兼容旧记录，分享设置将其映射为 `public-likes` |
 | `version` | `number` | 草稿版本号 |
 | `editRevision` | `number` | 本地草稿快照修订号；每次有效状态修改递增，用于区分保存命令并在重启后稳定重试 |
 

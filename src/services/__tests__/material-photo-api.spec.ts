@@ -136,6 +136,64 @@ describe('material photo API', () => {
     expect(client.request).not.toHaveBeenCalled();
   });
 
+  test('maps uploaded and generated assets from the same authenticated material list', async () => {
+    client.get.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'generated-1',
+          sourceAssetId: 'request-1',
+          title: '雨后的老街',
+          date: '2026.10.23',
+          filename: 'generated-1.jpg',
+          mimeType: 'image/jpeg',
+          size: 5,
+          generationRequestId: 'request-1',
+          generationPrompt: '雨后的老街',
+          generationSource: 'ark-seedream',
+        },
+        {
+          id: 'uploaded-1',
+          sourceAssetId: 'device-1',
+          title: '河岸',
+          date: '2026.10.23',
+          filename: 'uploaded-1.jpg',
+          mimeType: 'image/jpeg',
+          size: 5,
+        },
+      ],
+    });
+
+    const result = await api.listMaterialPhotosFromBackend();
+
+    expect(client.get).toHaveBeenCalledWith('/photos/materials');
+    expect(result).toMatchObject({
+      ok: true,
+      photos: [
+        {
+          id: 'generated-1',
+          source: 'generated',
+          generationSource: 'provider',
+          generationRequestId: 'request-1',
+          uri: 'https://api.example.test/photos/materials/generated-1/content',
+          remoteHeaders: { 'x-device-id': 'device-1' },
+        },
+        { id: 'uploaded-1', source: 'device' },
+      ],
+    });
+  });
+
+  test('rejects a material list when device identity changes during the request', async () => {
+    const identity = require('../device-identity') as { getDeviceIdentityHeaders: jest.Mock };
+    identity.getDeviceIdentityHeaders
+      .mockResolvedValueOnce({ 'x-device-id': 'device-1' })
+      .mockResolvedValueOnce({ 'x-device-id': 'device-2' });
+    client.get.mockResolvedValue({ ok: true, data: [] });
+
+    await expect(api.listMaterialPhotosFromBackend())
+      .resolves.toMatchObject({ ok: false });
+  });
+
   test('builds a diary-scoped photo URL while preserving each diary-copy pair', async () => {
     client.get.mockResolvedValue({
       ok: true,

@@ -7,7 +7,7 @@ type OkEnvelope<T> = { ok: true; data: T };
 type ErrorEnvelope = {
   ok: false;
   error: {
-    code: 'permission_denied' | 'device_identity_required' | 'timeout' | 'cancelled' | 'not_found' | 'invalid_input' | 'version_conflict' | 'asset_unreadable' | 'provider_failed';
+    code: 'permission_denied' | 'device_identity_required' | 'timeout' | 'cancelled' | 'not_found' | 'invalid_input' | 'version_conflict' | 'asset_unreadable' | 'publication_blocked' | 'provider_failed';
     message: string;
     retryable: boolean;
   };
@@ -22,6 +22,7 @@ const ERROR_CODES = new Set<ErrorEnvelope['error']['code']>([
   'invalid_input',
   'version_conflict',
   'asset_unreadable',
+  'publication_blocked',
   'provider_failed',
 ]);
 

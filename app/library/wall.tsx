@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BottomSheet } from '../../src/components/common/bottom-sheet';
 import { EmptyResult, IconAction, SearchField } from '../../src/components/common/support-ui';
@@ -25,6 +25,7 @@ export default function MaterialPhotoWallScreen() {
   const [search, setSearch] = useState(typeof params.search === 'string' ? params.search : '');
   const [searching, setSearching] = useState(Boolean(params.search));
   const [previewPhotoId, setPreviewPhotoId] = useState<string>();
+  const [materialLoadError, setMaterialLoadError] = useState(false);
   const photoById = new Map(photoCatalog.map(photo => [photo.id, photo]));
   const materialPhotos = materialIds
     .map(id => photoById.get(id))
@@ -36,7 +37,8 @@ export default function MaterialPhotoWallScreen() {
     if (process.env.JEST_WORKER_ID) return;
     let active = true;
     void listMaterialPhotosFromBackend().then(result => {
-      if (active && result.ok) useAppStore.getState().syncMaterialPhotos(result.photos);
+      if (!active) return;
+      setMaterialLoadError(!result.ok || !useAppStore.getState().syncMaterialPhotos(result.photos));
     });
     return () => { active = false; };
   }, []);
@@ -78,7 +80,9 @@ export default function MaterialPhotoWallScreen() {
           ))}
         </View>
       ) : (
-        <EmptyResult title={search ? '没有找到匹配日记的照片' : '还没有照片素材'} />
+        <EmptyResult title={materialLoadError && !materialPhotos.length ? '素材暂时无法加载' : search ? '没有找到匹配日记的照片' : '还没有照片素材'}>
+          {materialLoadError && !materialPhotos.length ? <Text style={styles.loadHint}>请稍后重新打开页面重试。</Text> : undefined}
+        </EmptyResult>
       )}
       <BottomSheet
         visible={Boolean(previewPhoto)}
@@ -98,4 +102,5 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: '100%' },
   sheet: { paddingHorizontal: 20, paddingBottom: 38, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   preview: { width: '100%', height: 360, borderRadius: 12 },
+  loadHint: { color: colors.textMuted, fontSize: 13 },
 });

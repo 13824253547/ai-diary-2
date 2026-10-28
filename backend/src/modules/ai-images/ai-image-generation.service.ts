@@ -44,7 +44,8 @@ export class AIImageGenerationService {
       return pending.promise;
     }
 
-    const operation = this.generateAndStore(ownerDeviceId, request, signal);
+    const operation = this.assets.assertMaterialCapacity(ownerDeviceId)
+      .then(() => this.generateAndStore(ownerDeviceId, request, signal));
     const entry = { description: request.description, promise: operation };
     this.pending.set(key, entry);
     try {

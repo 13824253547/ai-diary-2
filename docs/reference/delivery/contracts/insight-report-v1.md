@@ -2,7 +2,7 @@
 
 Version: `insight-report-v1`
 
-This contract defines the application-side request/result boundary for GRW-006. It does not authorize generation, define report retention, or set AI quality/safety thresholds.
+This remains the legacy application-side request/result validator. Production report generation is now server-owned and uses the `growth-insight-v1` read contract from `src/contracts/growth-insight-contract.ts`; diary text is never sent in this client request shape.
 
 ## Request
 
@@ -24,7 +24,7 @@ This contract defines the application-side request/result boundary for GRW-006. 
 
 - `requestId` identifies one generation operation.
 - `sourceVersion` binds the result to the caller's deterministic source snapshot.
-- `sourceDiaries` contains unique diary IDs and non-negative saved versions. The provider cannot add source IDs that were not submitted.
+- `sourceDiaries` contains unique diary IDs and saved versions. The provider cannot add source IDs that were not submitted.
 - An optional local `AbortSignal` is passed to the provider adapter for cancellation and is not serialized.
 
 ## Result
@@ -39,16 +39,29 @@ The consumer rejects unknown/duplicate dimensions, blank content, foreign source
 
 ## State and failures
 
-- Callers control attempt/retry policy; this contract does not select automatic retry count, delay, timeout, or overwrite behavior.
 - A result is accepted only for the active request and unchanged source version. A stale result cannot replace a newer report.
-- Development output is marked `source: mock`; it is not a real report, persisted report, unlock, or CASE pass. Provider failure does not silently fall back to mock success.
+- This contract remains useful for isolated legacy adapter tests only; its `source: mock` fixtures are never used to unlock or render the production report.
 
-## Deferred decisions
+## Production Growth API
 
-- Q-002: trusted provider, quality/safety evaluation, timeout, cancellation, and retry policy.
-- Q-005: source statistics and count semantics.
-- Q-006: unlock, first-generation, and refresh timing.
-- Q-016: anchor correction/source-change impact.
-- Q-001: durable report retention, deletion, and recovery.
+All production requests require the device identity header. The server derives eligible diaries from the authenticated device and does not accept client-supplied diary text, source IDs, or unlock flags.
 
-The provider boundary is implemented in `src/services/insight-report-provider.ts`; the runtime schema is in `src/contracts/insight-report-contract.ts`. The formal report page remains on its existing demo path; no provider credentials or persistence service are configured.
+- `GET /growth/state` returns flower status, analysis progress, first-trip evidence, the current continuous record-date streak, anchor count availability, and report authorization/status.
+- `POST /growth/flowers/initialize` starts the device's one-time full-history recognition. New/edited diary versions enter the same service incrementally after a successful save.
+- `POST /growth/flowers/retry` is the only way to retry failed recognition batches.
+- `POST /growth/reports/ensure-current` checks the server-side three-flower gate and starts/reuses an analysis for the current diary source version.
+- `GET /growth/reports/current` returns the last successful report (when unlocked) and whether it is stale/updating.
+- `POST /growth/reports/retry` creates an explicit retry for the current failed report version.
+
+Reports contain `reportId`, `sourceVersion`, source diary IDs/versions and count, generation time, and exactly one entry for each fixed dimension. Each dimension carries only source diary IDs that appeared in that report's server-created evidence input. Insufficient evidence may produce a cautious explanation with no dimension-level source IDs.
+
+Flower/report jobs and results are persisted per device. A source change never overwrites the last successful report until the replacement is complete. The server uses `PET_CHAT_*` configuration with separate prompts and no chat history/SSE. Each batch receives one automatic attempt; user action is required to retry.
+
+## Remaining Scope
+
+- Q-002: global AI quality thresholds and human content evaluation remain open. Both synthetic provider smoke workflows recorded `invalid_response`; the first serial workflow did not record which stage failed, so the actual HTTP request count may be 2 or 3 and it is not possible to confirm whether the original two-request authorization limit was exceeded. Neither workflow is a quality pass, no business data was written, and no further request was made.
+- Q-005: unrelated global profile statistics remain open; this feature uses its locally confirmed source count and milestone rules.
+- Q-006: leaf growth outside this three-flower/report flow remains open.
+- Q-001: general work/session retention remains open; this feature's growth/report rows are device-scoped and do not sync across devices.
+
+Implementation: server provider/service in `backend/src/modules/growth/`, runtime client DTO in `src/contracts/growth-insight-contract.ts`, and the report UI at `app/profile/report.tsx`.

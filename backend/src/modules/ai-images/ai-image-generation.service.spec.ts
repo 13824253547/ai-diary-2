@@ -1,4 +1,4 @@
-import { PhotoAssetService } from '../photos/photo-asset.service';
+import { PhotoAssetError, PhotoAssetService } from '../photos/photo-asset.service';
 import { AIImageProviderError, ArkSeedreamImageProvider } from './ark-seedream-image-provider';
 import {
   AI_IMAGE_GENERATION_CONTRACT_VERSION,
@@ -26,6 +26,7 @@ describe('AIImageGenerationService', () => {
       findGeneratedMaterial: jest.fn()
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(asset),
+      assertMaterialCapacity: jest.fn().mockResolvedValue(undefined),
       saveGeneratedMaterial: jest.fn().mockResolvedValue(asset),
     };
     const service = new AIImageGenerationService(
@@ -53,6 +54,7 @@ describe('AIImageGenerationService', () => {
     };
     const assets = {
       findGeneratedMaterial: jest.fn().mockResolvedValue(undefined),
+      assertMaterialCapacity: jest.fn().mockResolvedValue(undefined),
       saveGeneratedMaterial: jest.fn().mockImplementation(async (ownerDeviceId: string) => ({
         id: `material-${ownerDeviceId}`,
         generationRequestId: request.requestId,
@@ -86,6 +88,7 @@ describe('AIImageGenerationService', () => {
         generationRequestId: request.requestId,
         generationPrompt: request.description,
       }),
+      assertMaterialCapacity: jest.fn(),
       saveGeneratedMaterial: jest.fn(),
     };
     const service = new AIImageGenerationService(
@@ -96,5 +99,26 @@ describe('AIImageGenerationService', () => {
     await expect(service.generate('device-1', { ...request, description: '海边日落' }))
       .rejects.toBeInstanceOf(AIImageProviderError);
     expect(provider.generate).not.toHaveBeenCalled();
+  });
+
+  test('rejects a full material library before invoking the paid image provider', async () => {
+    const provider = { generate: jest.fn() };
+    const assets = {
+      findGeneratedMaterial: jest.fn().mockResolvedValue(undefined),
+      assertMaterialCapacity: jest.fn().mockRejectedValue(
+        new PhotoAssetError('limit_exceeded', '素材库最多保存 100 张照片，请先删除部分素材。'),
+      ),
+      saveGeneratedMaterial: jest.fn(),
+    };
+    const service = new AIImageGenerationService(
+      provider as unknown as ArkSeedreamImageProvider,
+      assets as unknown as PhotoAssetService,
+    );
+
+    await expect(service.generate('device-1', request))
+      .rejects.toMatchObject({ code: 'limit_exceeded' });
+    expect(assets.assertMaterialCapacity).toHaveBeenCalledWith('device-1');
+    expect(provider.generate).not.toHaveBeenCalled();
+    expect(assets.saveGeneratedMaterial).not.toHaveBeenCalled();
   });
 });

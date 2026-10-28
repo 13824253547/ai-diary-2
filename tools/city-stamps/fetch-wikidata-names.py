@@ -7,6 +7,7 @@ import argparse
 import csv
 import importlib.util
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -16,6 +17,12 @@ from pathlib import Path
 
 ENDPOINT = "https://qlever.dev/api/wikidata"
 USER_AGENT = "OrangeGlowCityCatalog/1.0 (local data research)"
+
+
+def literal_value(value: str) -> str:
+    value = value.strip()
+    value = re.sub(r"@[A-Za-z]+(?:-[A-Za-z0-9]+)*$", "", value)
+    return value.strip('"')
 
 
 def load_builder(path: Path):
@@ -44,7 +51,7 @@ def build_query(names: list[str]) -> str:
         "{ ?item <http://www.w3.org/2000/01/rdf-schema#label> ?en } UNION "
         "{ ?item <http://www.w3.org/2004/02/skos/core#altLabel> ?en } "
         "OPTIONAL { ?item <http://www.wikidata.org/prop/direct/P1566> ?geonameId } "
-        'FILTER(LANG(?en) = "en" && LANG(?zh) = "zh") }'
+        'FILTER(LANG(?en) = "en" && LANGMATCHES(LANG(?zh), "zh")) }'
     )
 
 
@@ -102,8 +109,8 @@ def read_existing_candidates(path: Path) -> set[tuple[str, str, str, str]]:
     records: set[tuple[str, str, str, str]] = set()
     with path.open(encoding="utf-8", newline="") as stream:
         for row in csv.DictReader(stream, delimiter="\t"):
-            english = row.get("?en", "").removesuffix("@en").strip('"')
-            chinese = row.get("?zh", "").removesuffix("@zh").strip('"')
+            english = literal_value(row.get("?en", "").removesuffix("@en"))
+            chinese = literal_value(row.get("?zh", ""))
             point = row.get("?coord", "")
             geoname_id = row.get("?geonameId", "").strip('"')
             if english and chinese and point:
@@ -118,8 +125,8 @@ def read_query_candidates(response: str) -> set[tuple[str, str, str, str]]:
     ] = {}
     for row in csv.DictReader(response.splitlines(), delimiter="\t"):
         item = row.get("?item", "").strip("<>")
-        english = row.get("?en", "").removesuffix("@en").strip('"')
-        chinese = row.get("?zh", "").removesuffix("@zh").strip('"')
+        english = literal_value(row.get("?en", "").removesuffix("@en"))
+        chinese = literal_value(row.get("?zh", ""))
         point = row.get("?coord", "")
         geoname_id = row.get("?geonameId", "").strip('"')
         kind = row.get("?zhKind", "").strip('"')

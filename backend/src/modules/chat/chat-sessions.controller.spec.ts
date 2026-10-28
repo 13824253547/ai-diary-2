@@ -1,4 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
+import { ChatDailyAnchorService } from '../anchors/chat-daily-anchor.service';
 import { ArkPetChatProvider, PetChatProviderError } from './ark-pet-chat-provider';
 import {
   ChatSessionError,
@@ -18,7 +20,13 @@ describe('ChatSessionsController', () => {
     discardPolicyBlockedTurn: jest.fn(),
   } as unknown as ChatSessionsService;
   const provider = { reply: jest.fn() } as unknown as ArkPetChatProvider;
-  const controller = new ChatSessionsController(service, provider);
+  const taskCoordinator = {
+    runInteractive: (_ownerDeviceId: string, task: () => Promise<unknown>) => task(),
+  } as DeviceAiTaskCoordinator;
+  const dailyAnchors = {
+    enqueueAfterCompletedTurn: jest.fn(),
+  } as unknown as ChatDailyAnchorService;
+  const controller = new ChatSessionsController(service, provider, taskCoordinator, dailyAnchors);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -117,6 +125,7 @@ describe('ChatSessionsController', () => {
         requestId: 'request-1',
         sequence: 1,
         userMessageId: 'user-1',
+        deviceLocalDate: '2026-10-20',
         attempt: 1,
         status: 'pending' as const,
       }],
@@ -168,6 +177,7 @@ describe('ChatSessionsController', () => {
       providerRequestId: 'ark-request-1',
     }), 'device-1');
     expect(result.data.turns[0].source).toBe('provider');
+    expect(dailyAnchors.enqueueAfterCompletedTurn).toHaveBeenCalledWith('device-1', '2026-10-20');
   });
 
   test('omits legacy policy-blocked history from provider context', async () => {
