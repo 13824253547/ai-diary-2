@@ -51,7 +51,7 @@ export default function FlowersScreen() {
       router.push('/profile/report');
       return;
     }
-    Alert.alert('再等几朵花盛开', `已识别 ${bloomedCount}/3 朵记忆花，集齐三类花朵后即可查看专属洞察报告。`);
+    Alert.alert('继续完成成长记录', `已完成 ${bloomedCount}/3 项，完成首次旅行、连续记录 30 天和 100 个锚点后即可查看专属洞察报告。`);
   };
 
   return <GrowthScreen header={<View style={s.header}><TopBar title="记忆花朵" onBackPress={() => router.canGoBack() ? router.back() : router.replace('/profile/insights')} /></View>} contentStyle={s.content}>
@@ -77,22 +77,32 @@ export default function FlowersScreen() {
           : null}
         {state ? <View style={s.milestones}>
           <Milestone title="首次旅行" detail={state.milestones.firstTrip.achieved ? '已从日记中找到旅行回忆' : '等待旅行日记线索'} complete={state.milestones.firstTrip.achieved} />
-          <Milestone title="连续记录30天" detail={`${state.milestones.streak30.currentDays}/30 天`} complete={state.milestones.streak30.achieved} />
+          <Milestone
+            title="连续记录30天"
+            detail={state.milestones.streak30.achieved && state.milestones.streak30.currentDays < 30
+              ? `已达成 · 当前 ${state.milestones.streak30.currentDays}/30 天`
+              : `${state.milestones.streak30.currentDays}/30 天`}
+            complete={state.milestones.streak30.achieved}
+          />
           <Milestone
             title="100个锚点"
-            detail={state.milestones.anchors100.unavailable ? '暂时无法读取' : `${state.milestones.anchors100.count ?? '—'}/100`}
+            detail={state.milestones.anchors100.unavailable
+              ? '暂时无法读取'
+              : state.milestones.anchors100.achieved && (state.milestones.anchors100.count ?? 0) < 100
+                ? `已达成 · 当前 ${state.milestones.anchors100.count ?? '—'}/100`
+                : `${state.milestones.anchors100.count ?? '—'}/100`}
             complete={state.milestones.anchors100.achieved ?? false}
           />
         </View> : null}
       </View>
       {state ? <LinearGradient colors={['#FF9908', '#FFAB34']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.progress}>
-        <Text style={s.progressTitle}>集满 3 朵花可解锁专属洞察报告（{bloomedCount}/3）</Text>
+        <Text style={s.progressTitle}>完成 3 项成长记录可解锁专属洞察报告（{bloomedCount}/3）</Text>
         <View style={s.progressTrack}><View style={[s.progressValue, { width: `${Math.round((bloomedCount / 3) * 100)}%` }]} /></View>
         <Pressable accessibilityRole="button" accessibilityLabel={state.report.unlocked ? '查看专属洞察报告' : '查看报告解锁条件'} onPress={onReportPress} style={({ pressed }) => [s.reportAction, pressed && { opacity: 0.78 }]}>
           <Text style={s.reportActionText}>{state.report.unlocked ? '查看专属洞察报告' : '了解解锁条件'}</Text>
         </Pressable>
       </LinearGradient> : null}
-      {state?.flowers.filter(flower => flower.status === 'bloomed').map(flower => (
+      {state?.flowers.filter(flower => flower.status === 'bloomed' && flower.summary).map(flower => (
         <View key={flower.flowerId} style={s.flowerSummary}>
           <Text style={s.flowerSummaryTitle}>{flower.title}</Text>
           <Text style={s.flowerSummaryText}>{flower.summary}</Text>

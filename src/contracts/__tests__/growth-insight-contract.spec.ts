@@ -41,6 +41,11 @@ describe('growth insight runtime contract', () => {
         sourceDiaries: [{ id: 'diary-1', version: 2 }],
         awardedAt: '2026-10-26T00:00:00.000Z',
       })),
+      milestones: {
+        firstTrip: { achieved: true, sourceDiaryIds: ['diary-1'] },
+        streak30: { currentDays: 30, targetDays: 30, achieved: true },
+        anchors100: { count: 100, target: 100, achieved: true },
+      },
       report: {
         unlocked: true,
         status: 'succeeded',
@@ -78,6 +83,11 @@ describe('growth insight runtime contract', () => {
         sourceDiaries: [{ id: 'diary-1', version: 1 }],
         awardedAt: '2026-10-26T00:00:00.000Z',
       })),
+      milestones: {
+        firstTrip: { achieved: true, sourceDiaryIds: ['diary-1'] },
+        streak30: { currentDays: 30, targetDays: 30, achieved: true },
+        anchors100: { count: 100, target: 100, achieved: true },
+      },
       report: {
         unlocked: true,
         status: 'succeeded',
@@ -99,5 +109,41 @@ describe('growth insight runtime contract', () => {
       },
     });
     expect(isGrowthInsightState(invalid)).toBe(false);
+  });
+
+  test('requires each flower and report unlock to match its mapped milestone', () => {
+    const mismatched = state({
+      flowers: GROWTH_FLOWER_IDS.map((flowerId, index) => ({
+        flowerId,
+        title: ['人生旷野的寻路者', '觉察自我的思考者', '压力迷茫的疗愈者'][index],
+        status: flowerId === 'pathfinder' ? 'bloomed' : 'locked',
+        ...(flowerId === 'pathfinder' ? { awardedAt: '2026-10-26T00:00:00.000Z' } : {}),
+      })),
+      milestones: {
+        firstTrip: { achieved: false, sourceDiaryIds: [] },
+        streak30: { currentDays: 12, targetDays: 30, achieved: false },
+        anchors100: { count: 9, target: 100, achieved: false },
+      },
+    });
+
+    expect(isGrowthInsightState(mismatched)).toBe(false);
+  });
+
+  test('allows completed milestones to remain awarded after current progress drops', () => {
+    const retained = state({
+      flowers: GROWTH_FLOWER_IDS.map((flowerId, index) => ({
+        flowerId,
+        title: ['人生旷野的寻路者', '觉察自我的思考者', '压力迷茫的疗愈者'][index],
+        status: flowerId === 'self-awareness' ? 'bloomed' : 'locked',
+        ...(flowerId === 'self-awareness' ? { awardedAt: '2026-10-26T00:00:00.000Z' } : {}),
+      })),
+      milestones: {
+        firstTrip: { achieved: false, sourceDiaryIds: [] },
+        streak30: { currentDays: 1, targetDays: 30, achieved: true },
+        anchors100: { count: 9, target: 100, achieved: false },
+      },
+    });
+
+    expect(isGrowthInsightState(retained)).toBe(true);
   });
 });

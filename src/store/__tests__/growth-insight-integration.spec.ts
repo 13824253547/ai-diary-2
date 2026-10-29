@@ -21,9 +21,17 @@ function makeState(bloomed: readonly string[] = []): GrowthInsightState {
     })),
     flowerAnalysis: { status: 'succeeded', completedBatches: 1, totalBatches: 1 },
     milestones: {
-      firstTrip: { achieved: false, sourceDiaryIds: [] },
-      streak30: { currentDays: 4, targetDays: 30, achieved: false },
-      anchors100: { count: 4, target: 100, achieved: false },
+      firstTrip: { achieved: bloomed.includes('pathfinder'), sourceDiaryIds: bloomed.includes('pathfinder') ? ['diary-1'] : [] },
+      streak30: {
+        currentDays: bloomed.includes('self-awareness') ? 30 : 4,
+        targetDays: 30,
+        achieved: bloomed.includes('self-awareness'),
+      },
+      anchors100: {
+        count: bloomed.includes('healing') ? 100 : 4,
+        target: 100,
+        achieved: bloomed.includes('healing'),
+      },
     },
     report: { unlocked: bloomed.length === 3, status: bloomed.length === 3 ? 'idle' : 'locked', stale: false },
   };

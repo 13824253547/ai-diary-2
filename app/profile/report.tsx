@@ -52,7 +52,7 @@ export default function ReportScreen() {
           ? <Text style={s.status}>正在读取报告授权状态…</Text>
           : !state.report.unlocked
         ? <EmptyResult title="专属洞察报告尚未解锁">
-            <Text style={s.body}>集齐三类记忆花朵后，小橘就会为你整理专属洞察。</Text>
+            <Text style={s.body}>完成首次旅行、连续记录 30 天和 100 个锚点后，小橘就会为你整理专属洞察。</Text>
             <Button label="返回记忆花朵" onPress={() => router.replace('/profile/flowers')} />
           </EmptyResult>
         : <>

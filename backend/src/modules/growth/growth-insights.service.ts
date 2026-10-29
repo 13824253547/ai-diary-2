@@ -24,6 +24,11 @@ const FLOWER_TITLES: Record<GrowthFlowerId, string> = {
 const MAX_BATCH_CHARS = 10_000;
 const MAX_BATCH_DIARIES = 10;
 const BASELINE_RUN_KEY = 'baseline-v1';
+const FLOWER_MILESTONE_RECORD_IDS: Record<GrowthFlowerId, string> = {
+  pathfinder: 'first-trip',
+  'self-awareness': 'streak-30',
+  healing: 'anchors-100',
+};
 
 type SourceDiaryRef = { id: string; version: number };
 type DiarySnapshotRow = {
@@ -63,14 +68,52 @@ function dateDistanceInDays(previous: string, current: string) {
   return Math.round((currentTime - previousTime) / 86_400_000);
 }
 
+function uniqueSortedGrowthDates(values: string[]) {
+  return [...new Set(values.filter(validLocalDate))].sort();
+}
+
 export function computeCurrentConsecutiveDays(values: string[]) {
-  const dates = [...new Set(values.filter(validLocalDate))].sort();
+  const dates = uniqueSortedGrowthDates(values);
   if (!dates.length) return 0;
   let streak = 1;
   for (let index = 1; index < dates.length; index += 1) {
     streak = dateDistanceInDays(dates[index - 1], dates[index]) === 1 ? streak + 1 : 1;
   }
   return streak;
+}
+
+export function computeLongestConsecutiveDays(values: string[]) {
+  const dates = uniqueSortedGrowthDates(values);
+  if (!dates.length) return 0;
+  let streak = 1;
+  let longest = 1;
+  for (let index = 1; index < dates.length; index += 1) {
+    streak = dateDistanceInDays(dates[index - 1], dates[index]) === 1 ? streak + 1 : 1;
+    longest = Math.max(longest, streak);
+  }
+  return longest;
+}
+
+function findStreakEvidence(diaries: DiarySnapshotRow[], targetDays: number) {
+  const diaryByDate = new Map<string, string>();
+  for (const diary of diaries) {
+    const date = resolveGrowthDiaryDate(diary);
+    if (date && !diaryByDate.has(date)) diaryByDate.set(date, diary.id);
+  }
+  const dates = [...diaryByDate.keys()].sort();
+  let streakStart = 0;
+  for (let index = 1; index <= dates.length; index += 1) {
+    if (index < dates.length && dateDistanceInDays(dates[index - 1], dates[index]) === 1) continue;
+    if (index - streakStart >= targetDays) {
+      const evidence = dates.slice(index - targetDays, index);
+      return {
+        sourceDiaryIds: evidence.map(date => diaryByDate.get(date)!),
+        achievedAt: new Date(`${evidence[evidence.length - 1]}T00:00:00.000Z`),
+      };
+    }
+    streakStart = index;
+  }
+  return undefined;
 }
 
 function sourceBlocks(snapshot: unknown): GrowthSourceDiary['blocks'] {
@@ -360,9 +403,7 @@ export class GrowthInsightsService implements OnModuleInit {
       this.prisma.growthRecognitionRun.findUnique({
         where: { ownerDeviceId_runKey: { ownerDeviceId, runKey: BASELINE_RUN_KEY } },
       }),
-      this.prisma.growthMilestone.findUnique({
-        where: { ownerDeviceId_milestoneId: { ownerDeviceId, milestoneId: 'first-trip' } },
-      }),
+      this.prisma.growthMilestone.findMany({ where: { ownerDeviceId } }),
       this.prisma.diary.findMany({
         where: { ownerDeviceId },
         select: { id: true, version: true, date: true, publishedLocalDate: true, createdAt: true },
@@ -380,8 +421,30 @@ export class GrowthInsightsService implements OnModuleInit {
     } catch {
       anchorCountUnavailable = true;
     }
+    const validDates = diaries.map(resolveGrowthDiaryDate).filter((date): date is string => Boolean(date));
+    const currentDays = computeCurrentConsecutiveDays(validDates);
+    const milestoneById = new Map(milestones.map(milestone => [milestone.milestoneId, milestone]));
+    if (computeLongestConsecutiveDays(validDates) >= 30
+      && !milestoneById.has('streak-30')) {
+      const evidence = findStreakEvidence(diaries, 30);
+      if (evidence) {
+        const milestone = await this.persistMilestone(
+          ownerDeviceId,
+          'streak-30',
+          evidence.sourceDiaryIds,
+          evidence.achievedAt,
+        );
+        milestoneById.set(milestone.milestoneId, milestone);
+      }
+    }
+    if (anchorCount !== undefined && anchorCount >= 100
+      && !milestoneById.has('anchors-100')) {
+      const milestone = await this.persistMilestone(ownerDeviceId, 'anchors-100', []);
+      milestoneById.set(milestone.milestoneId, milestone);
+    }
     const flowerById = new Map(flowers.map(flower => [flower.flowerKey, flower]));
-    const bloomedCount = GROWTH_FLOWER_IDS.filter(flowerId => flowerById.has(flowerId)).length;
+    const bloomedCount = GROWTH_FLOWER_IDS.filter(flowerId =>
+      milestoneById.has(FLOWER_MILESTONE_RECORD_IDS[flowerId])).length;
     const currentSourceVersion = makeSourceVersion(diaries.map(diary => ({
       id: diary.id,
       version: diary.version,
@@ -408,7 +471,6 @@ export class GrowthInsightsService implements OnModuleInit {
             : visibleReport
               ? 'stale'
               : 'idle';
-    const validDates = diaries.map(resolveGrowthDiaryDate).filter((date): date is string => Boolean(date));
     const progress = baseline?.batchCount
       ? Math.min(baseline.nextBatchIndex, baseline.batchCount)
       : 0;
@@ -416,15 +478,18 @@ export class GrowthInsightsService implements OnModuleInit {
     return {
       version: 'growth-insight-v1' as const,
       flowers: GROWTH_FLOWER_IDS.map(flowerId => {
-        const flower = flowerById.get(flowerId);
+        const unlock = milestoneById.get(FLOWER_MILESTONE_RECORD_IDS[flowerId]);
+        const recognition = flowerById.get(flowerId);
         return {
           flowerId,
           title: FLOWER_TITLES[flowerId],
-          status: flower ? 'bloomed' as const : 'locked' as const,
-          ...(flower ? {
-            summary: flower.summary,
-            sourceDiaries: parseSourceRefs(flower.sourceDiaryVersions),
-            awardedAt: flower.awardedAt.toISOString(),
+          status: unlock ? 'bloomed' as const : 'locked' as const,
+          ...(unlock ? {
+            awardedAt: unlock.achievedAt.toISOString(),
+            ...(recognition ? {
+              summary: recognition.summary,
+              sourceDiaries: parseSourceRefs(recognition.sourceDiaryVersions),
+            } : {}),
           } : {}),
         };
       }),
@@ -436,17 +501,20 @@ export class GrowthInsightsService implements OnModuleInit {
       },
       milestones: {
         firstTrip: {
-          achieved: Boolean(milestones),
-          sourceDiaryIds: milestones ? parseStringArray(milestones.sourceDiaryIds) : [],
+          achieved: milestoneById.has('first-trip'),
+          sourceDiaryIds: milestoneById.has('first-trip')
+            ? parseStringArray(milestoneById.get('first-trip')?.sourceDiaryIds)
+            : [],
         },
         streak30: {
-          currentDays: computeCurrentConsecutiveDays(validDates),
+          currentDays,
           targetDays: 30 as const,
-          achieved: computeCurrentConsecutiveDays(validDates) >= 30,
+          achieved: milestoneById.has('streak-30'),
         },
         anchors100: {
-          ...(anchorCount !== undefined ? { count: anchorCount, achieved: anchorCount >= 100 } : {}),
+          ...(anchorCount !== undefined ? { count: anchorCount } : {}),
           target: 100 as const,
+          achieved: milestoneById.has('anchors-100'),
           ...(anchorCountUnavailable ? { unavailable: true } : {}),
         },
       },
@@ -461,8 +529,9 @@ export class GrowthInsightsService implements OnModuleInit {
   }
 
   async ensureCurrentReport(ownerDeviceId: string) {
-    const flowers = await this.prisma.growthFlower.count({ where: { ownerDeviceId } });
-    if (flowers < GROWTH_FLOWER_IDS.length) throw new GrowthInsightServiceError('not_unlocked');
+    if (!(await this.getState(ownerDeviceId)).report.unlocked) {
+      throw new GrowthInsightServiceError('not_unlocked');
+    }
     const sourceSnapshot = await this.listCurrentDiarySources(ownerDeviceId);
     if (!sourceSnapshot.length) throw new GrowthInsightServiceError('no_sources');
     const sourceVersion = await this.currentDiarySetVersion(ownerDeviceId);
@@ -490,13 +559,14 @@ export class GrowthInsightsService implements OnModuleInit {
   }
 
   async retryCurrentReport(ownerDeviceId: string) {
+    if (!(await this.getState(ownerDeviceId)).report.unlocked) {
+      throw new GrowthInsightServiceError('not_unlocked');
+    }
     const currentSourceVersion = await this.currentDiarySetVersion(ownerDeviceId);
     const job = await this.prisma.growthReportJob.findUnique({
       where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion: currentSourceVersion } },
     });
     if (!job || job.status !== 'failed') return this.ensureCurrentReport(ownerDeviceId);
-    const flowers = await this.prisma.growthFlower.count({ where: { ownerDeviceId } });
-    if (flowers < GROWTH_FLOWER_IDS.length) throw new GrowthInsightServiceError('not_unlocked');
     const refs = parseSourceRefs(job.sourceDiaryRefs);
     const sourceSnapshot = await this.loadSourcesByRefs(ownerDeviceId, refs);
     if (!sourceSnapshot.length || await this.currentDiarySetVersion(ownerDeviceId) !== currentSourceVersion) {
@@ -666,12 +736,22 @@ export class GrowthInsightsService implements OnModuleInit {
 
   private async grantFirstTrip(ownerDeviceId: string, sourceDiaryIds: string[]) {
     if (!sourceDiaryIds.length) return;
-    await this.prisma.growthMilestone.upsert({
-      where: { ownerDeviceId_milestoneId: { ownerDeviceId, milestoneId: 'first-trip' } },
+    await this.persistMilestone(ownerDeviceId, 'first-trip', sourceDiaryIds);
+  }
+
+  private async persistMilestone(
+    ownerDeviceId: string,
+    milestoneId: string,
+    sourceDiaryIds: string[],
+    achievedAt?: Date,
+  ) {
+    return this.prisma.growthMilestone.upsert({
+      where: { ownerDeviceId_milestoneId: { ownerDeviceId, milestoneId } },
       create: {
         ownerDeviceId,
-        milestoneId: 'first-trip',
+        milestoneId,
         sourceDiaryIds: inputJson(sourceDiaryIds),
+        ...(achievedAt ? { achievedAt } : {}),
       },
       update: {},
     });
@@ -743,8 +823,9 @@ export class GrowthInsightsService implements OnModuleInit {
       if (await this.currentDiarySetVersion(ownerDeviceId) !== job.sourceVersion) {
         throw new GrowthInsightServiceError('source_changed');
       }
-      const flowerCount = await this.prisma.growthFlower.count({ where: { ownerDeviceId } });
-      if (flowerCount < GROWTH_FLOWER_IDS.length) throw new GrowthInsightServiceError('not_unlocked');
+      if (!(await this.getState(ownerDeviceId)).report.unlocked) {
+        throw new GrowthInsightServiceError('not_unlocked');
+      }
       await this.prisma.$transaction(async transaction => {
         const savedReport = await transaction.growthInsightReport.upsert({
           where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion: job.sourceVersion } },

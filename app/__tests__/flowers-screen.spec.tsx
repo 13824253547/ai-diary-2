@@ -136,6 +136,11 @@ describe('Flowers screen', () => {
         awardedAt: '2026-10-26T00:00:00.000Z',
       })),
       flowerAnalysis: { status: 'succeeded', completedBatches: 1, totalBatches: 1 },
+      milestones: {
+        firstTrip: { achieved: true, sourceDiaryIds: ['diary-1'] },
+        streak30: { currentDays: 30, targetDays: 30, achieved: true },
+        anchors100: { count: 100, target: 100, achieved: true },
+      },
       report: { unlocked: true, status: 'succeeded', stale: false },
     };
     const loadGrowthInsights = jest.fn(async () => unlocked);
@@ -146,5 +151,39 @@ describe('Flowers screen', () => {
     expect(screen.getByText('集满 3 朵花可解锁专属洞察报告（3/3）')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('查看专属洞察报告'));
     expect(mockRouter.push).toHaveBeenCalledWith('/profile/report');
+  });
+
+  test('maps each flower and report progress to its matching completed milestone', async () => {
+    const oneMilestoneComplete: GrowthInsightState = {
+      ...baselineState,
+      flowers: GROWTH_FLOWER_IDS.map((flowerId, index) => ({
+        ...baselineState.flowers[index],
+        status: flowerId === 'pathfinder' ? 'bloomed' : 'locked',
+        ...(flowerId === 'pathfinder'
+          ? { awardedAt: '2026-10-26T00:00:00.000Z' }
+          : {}),
+      })),
+      flowerAnalysis: { status: 'succeeded', completedBatches: 1, totalBatches: 1 },
+      milestones: {
+        firstTrip: { achieved: true, sourceDiaryIds: ['diary-trip'] },
+        streak30: { currentDays: 1, targetDays: 30, achieved: false },
+        anchors100: { count: 9, target: 100, achieved: false },
+      },
+    };
+    useAppStore.setState({
+      growthInsights: oneMilestoneComplete,
+      growthInsightsStatus: 'ready',
+      loadGrowthInsights: jest.fn(async () => oneMilestoneComplete),
+    });
+
+    const screen = await render(<FlowersScreen />);
+
+    expect(screen.getByLabelText('记忆花朵图稿').props.children).toBe(
+      '{"pathfinder":true,"self-awareness":false,"healing":false}',
+    );
+    expect(screen.getByText('集满 3 朵花可解锁专属洞察报告（1/3）')).toBeTruthy();
+    expect(screen.getByText('已从日记中找到旅行回忆')).toBeTruthy();
+    expect(screen.getByText('1/30 天')).toBeTruthy();
+    expect(screen.getByText('9/100')).toBeTruthy();
   });
 });

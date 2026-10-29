@@ -47,7 +47,7 @@ function makeState(): GrowthInsightState {
     })),
     flowerAnalysis: { status: 'succeeded', completedBatches: 1, totalBatches: 1 },
     milestones: {
-      firstTrip: { achieved: false, sourceDiaryIds: [] },
+      firstTrip: { achieved: true, sourceDiaryIds: ['diary-1'] },
       streak30: { currentDays: 3, targetDays: 30, achieved: false },
       anchors100: { count: 5, target: 100, achieved: false },
     },

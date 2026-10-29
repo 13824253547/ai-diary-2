@@ -42,6 +42,18 @@ export type GrowthMilestones = {
   };
 };
 
+export const GROWTH_MILESTONE_RECORD_IDS = {
+  firstTrip: 'first-trip',
+  streak30: 'streak-30',
+  anchors100: 'anchors-100',
+} as const;
+
+export const GROWTH_FLOWER_MILESTONE_MAP = {
+  pathfinder: 'firstTrip',
+  'self-awareness': 'streak30',
+  healing: 'anchors100',
+} as const satisfies Record<GrowthFlowerId, keyof GrowthMilestones>;
+
 export type GrowthAnalysisStatus = {
   status: 'not_started' | 'pending' | 'running' | 'succeeded' | 'failed';
   completedBatches: number;
@@ -172,9 +184,10 @@ export function isGrowthInsightState(value: unknown): value is GrowthInsightStat
         || (value.milestones.anchors100.count as number) < 0))
     || (value.milestones.anchors100.achieved !== undefined
       && typeof value.milestones.anchors100.achieved !== 'boolean')
-    || (value.milestones.streak30.achieved !== ((value.milestones.streak30.currentDays as number) >= 30))
+    || ((value.milestones.streak30.currentDays as number) >= 30 && !value.milestones.streak30.achieved)
     || (value.milestones.anchors100.count !== undefined
-      && value.milestones.anchors100.achieved !== ((value.milestones.anchors100.count as number) >= 100))
+      && (value.milestones.anchors100.count as number) >= 100
+      && !value.milestones.anchors100.achieved)
     || !isRecord(value.report)
     || typeof value.report.unlocked !== 'boolean'
     || !['locked', 'idle', 'pending', 'running', 'succeeded', 'failed', 'stale'].includes(String(value.report.status))
@@ -194,13 +207,20 @@ export function isGrowthInsightState(value: unknown): value is GrowthInsightStat
         && (!Array.isArray(flower.sourceDiaries) || !flower.sourceDiaries.every(isSourceDiaryRef)))
       || (flower.awardedAt !== undefined && !isDate(flower.awardedAt))) return false;
     if (flower.status === 'bloomed'
-      && (!isNonEmptyString(flower.summary)
-        || !Array.isArray(flower.sourceDiaries)
-        || flower.sourceDiaries.length === 0
-        || !isDate(flower.awardedAt))) return false;
+      && !isDate(flower.awardedAt)) return false;
+    if (flower.summary !== undefined
+      && (!Array.isArray(flower.sourceDiaries) || flower.sourceDiaries.length === 0)) return false;
     flowerIds.add(flower.flowerId as string);
   }
   if (flowerIds.size !== GROWTH_FLOWER_IDS.length) return false;
+  for (const [flowerId, milestoneKey] of Object.entries(GROWTH_FLOWER_MILESTONE_MAP) as Array<
+    [GrowthFlowerId, keyof GrowthMilestones]
+  >) {
+    const milestone = value.milestones[milestoneKey] as { achieved?: boolean };
+    const flower = value.flowers.find(item =>
+      isRecord(item) && item.flowerId === flowerId);
+    if (!flower || (flower.status === 'bloomed') !== Boolean(milestone.achieved)) return false;
+  }
   const bloomedCount = value.flowers.filter(flower =>
     isRecord(flower) && flower.status === 'bloomed').length;
   return value.report.unlocked === (bloomedCount === GROWTH_FLOWER_IDS.length)

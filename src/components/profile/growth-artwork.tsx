@@ -90,18 +90,12 @@ export function GrowthArtwork({ width, kind, unlocked, flowerStates, onLabelPres
         />;
       })}
       {metadata.flowers.labels.map((label, index) => {
-        const flowerId = flowerSlots[index].id;
-        const flowerUnlocked = states[flowerId];
         return <View
           key={label.text}
-          accessibilityLabel={`${label.text}，${flowerUnlocked ? '已绽放' : '未解锁'}`}
           style={[s.flowerLabel, positioned(flowerLabelBoxes[index])]}
         >
-          <Text numberOfLines={1} style={[s.flowerTitle, { fontSize: 12 * scale, lineHeight: 16 * scale }, !flowerUnlocked && s.lockedText]}>
+          <Text numberOfLines={1} style={[s.flowerTitle, { fontSize: 12 * scale, lineHeight: 16 * scale }]}>
             {label.text}
-          </Text>
-          <Text numberOfLines={1} style={[s.flowerStatus, { fontSize: 10 * scale, lineHeight: 13 * scale }, !flowerUnlocked && s.lockedText]}>
-            {flowerUnlocked ? '· 已绽放' : '· 未解锁'}
           </Text>
         </View>;
       })}
@@ -113,6 +107,5 @@ const s = StyleSheet.create({
   flowerLabel: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   treeText: { color: '#634B34', fontWeight: '500' }, ribbonText: { color: '#4C3218', fontWeight: '600' },
   flowerTitle: { color: '#50381F', textAlign: 'center', fontWeight: '500' },
-  flowerStatus: { color: '#806C58', textAlign: 'center', fontWeight: '400' },
-  lockedText: { color: '#877057', fontWeight: '400' }, pressed: { opacity: 0.55 },
+  pressed: { opacity: 0.55 },
 });

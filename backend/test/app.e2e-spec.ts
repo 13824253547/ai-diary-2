@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { configureApiBodyParser } from '../src/common/api-body-parser';
 import { MemoryStoreService, type DiaryContentSnapshotRecord } from '../src/common/memory-store.service';
 import { PrismaService } from '../src/common/prisma.service';
+import { AnchorReadModelService } from '../src/modules/anchors/anchor-read-model.service';
 import { ChatDailyAnchorService } from '../src/modules/anchors/chat-daily-anchor.service';
 import { ArkMemoryAnchorProvider, MemoryAnchorProviderError } from '../src/modules/anchors/ark-memory-anchor-provider';
 import { ArkGrowthInsightProvider, GrowthInsightProviderError } from '../src/modules/growth/ark-growth-insight-provider';
@@ -264,7 +265,7 @@ describe('Backend foundation (e2e)', () => {
     expect(edited?.publishedLocalDate).toBe('2026-10-20');
   });
 
-  it('authorizes report generation only after three device-owned flowers', async () => {
+  it('authorizes report generation only after three persisted milestones', async () => {
     await prisma.diary.create({
       data: {
         id: 'growth-diary-1',
@@ -332,6 +333,25 @@ describe('Backend foundation (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/growth/reports/ensure-current')
       .set('x-device-id', deviceA)
+      .expect(403)
+      .expect(({ body }) => {
+        expect(body.error.code).toBe('not_unlocked');
+      });
+    expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceA } })).toBe(0);
+
+    for (const milestoneId of ['first-trip', 'streak-30', 'anchors-100']) {
+      await prisma.growthMilestone.create({
+        data: {
+          ownerDeviceId: deviceA,
+          milestoneId,
+          sourceDiaryIds: milestoneId === 'first-trip' ? ['growth-diary-1'] : [],
+        },
+      });
+    }
+
+    await request(app.getHttpServer())
+      .post('/api/growth/reports/ensure-current')
+      .set('x-device-id', deviceA)
       .expect(201)
       .expect(({ body }) => {
         expect(body.data.report).toMatchObject({
@@ -339,10 +359,68 @@ describe('Backend foundation (e2e)', () => {
           status: 'pending',
         });
         expect(body.data.report.current).toBeUndefined();
+        expect(body.data.flowers.map((flower: { status: string }) => flower.status))
+          .toEqual(['bloomed', 'bloomed', 'bloomed']);
       });
 
     expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceA } })).toBe(1);
     expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceB } })).toBe(0);
+  });
+
+  it('awards milestone flowers once and retains them when live progress later drops', async () => {
+    await prisma.diary.createMany({
+      data: Array.from({ length: 30 }, (_, index) => {
+        const date = new Date(Date.UTC(2026, 0, index + 1));
+        const publishedLocalDate = date.toISOString().slice(0, 10);
+        return {
+          id: `streak-diary-${index + 1}`,
+          ownerDeviceId: deviceA,
+          draftId: `streak-draft-${index + 1}`,
+          title: `连续记录 ${index + 1}`,
+          summary: '成长记录测试日记。',
+          location: '',
+          date,
+          publishedLocalDate,
+          privacy: 'private',
+          photoIds: [],
+          contentSnapshot: { blocks: [] },
+          version: 1,
+        };
+      }),
+    });
+
+    const growth = app.get(GrowthInsightsService);
+    const anchors = app.get(AnchorReadModelService);
+    const countFeed = jest.spyOn(anchors, 'countFeed')
+      .mockResolvedValueOnce(100)
+      .mockResolvedValueOnce(9);
+    try {
+      const reached = await growth.getState(deviceA);
+      expect(reached.milestones).toMatchObject({
+        streak30: { currentDays: 30, achieved: true },
+        anchors100: { count: 100, achieved: true },
+      });
+      expect(reached.flowers.map(flower => flower.status))
+        .toEqual(['locked', 'bloomed', 'bloomed']);
+      expect(reached.report.unlocked).toBe(false);
+
+      await prisma.diary.updateMany({
+        where: { ownerDeviceId: deviceA, id: { startsWith: 'streak-diary-' } },
+        data: { publishedLocalDate: '2026-03-12' },
+      });
+      const afterProgressDrop = await growth.getState(deviceA);
+      expect(afterProgressDrop.milestones).toMatchObject({
+        streak30: { currentDays: 1, achieved: true },
+        anchors100: { count: 9, achieved: true },
+      });
+      expect(afterProgressDrop.flowers.map(flower => flower.status))
+        .toEqual(['locked', 'bloomed', 'bloomed']);
+      expect(await prisma.growthMilestone.count({
+        where: { ownerDeviceId: deviceA, milestoneId: { in: ['streak-30', 'anchors-100'] } },
+      })).toBe(2);
+    } finally {
+      countFeed.mockRestore();
+    }
   });
 
   it('persists evidence-bound AI flower awards and a three-dimension report', async () => {
@@ -402,11 +480,20 @@ describe('Backend foundation (e2e)', () => {
     }).processRecognitionRun(run!.id, deviceA);
 
     const flowerState = await growth.getState(deviceA);
-    expect(flowerState.flowers.filter(flower => flower.status === 'bloomed')).toHaveLength(3);
+    expect(flowerState.flowers.filter(flower => flower.status === 'bloomed')).toHaveLength(1);
+    expect(flowerState.flowers.map(flower => flower.status)).toEqual(['bloomed', 'locked', 'locked']);
     expect(flowerState.milestones.firstTrip).toMatchObject({
       achieved: true,
       sourceDiaryIds: ['growth-diary-source'],
     });
+    await expect(growth.ensureCurrentReport(deviceA)).rejects.toMatchObject({ code: 'not_unlocked' });
+    for (const milestoneId of ['streak-30', 'anchors-100']) {
+      await prisma.growthMilestone.create({
+        data: { ownerDeviceId: deviceA, milestoneId, sourceDiaryIds: [] },
+      });
+    }
+    expect((await growth.getState(deviceA)).flowers.map(flower => flower.status))
+      .toEqual(['bloomed', 'bloomed', 'bloomed']);
     expect(recognize).toHaveBeenCalledTimes(1);
 
     await growth.ensureCurrentReport(deviceA);

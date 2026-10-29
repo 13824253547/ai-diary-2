@@ -19,7 +19,7 @@ describe('GrowthArtwork stable tag navigation', () => {
     expect(onLabelPress).toHaveBeenCalledWith({ id, text });
   });
 
-  test('shows flower status text without lock icons or translucent veils', async () => {
+  test('shows flower titles without status text, lock icons, or translucent veils', async () => {
     const screen = await render(
       <GrowthArtwork
         kind="flowers"
@@ -35,8 +35,8 @@ describe('GrowthArtwork stable tag navigation', () => {
     expect(screen.getByText('人生旷野的寻路者')).toBeTruthy();
     expect(screen.getByText('觉察自我的思考者')).toBeTruthy();
     expect(screen.getByText('压力迷茫的疗愈者')).toBeTruthy();
-    expect(screen.getAllByText('· 未解锁')).toHaveLength(2);
-    expect(screen.getByText('· 已绽放')).toBeTruthy();
+    expect(screen.queryByText('· 未解锁')).toBeNull();
+    expect(screen.queryByText('· 已绽放')).toBeNull();
     expect(screen.queryByLabelText('pathfinder-locked')).toBeNull();
     expect(screen.queryByLabelText('healing-locked')).toBeNull();
   });
