@@ -1,6 +1,6 @@
-# Orange Glow AI Diary
+# AI旅行日记
 
-`Orange Glow AI Diary` 是一个独立的 Expo + React Native iOS 前端原型项目。
+`AI旅行日记` 是一个独立的 Expo + React Native iOS 前端项目。
 
 ## 当前范围
 - 仅前端

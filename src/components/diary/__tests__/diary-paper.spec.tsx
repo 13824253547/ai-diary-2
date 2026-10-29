@@ -87,6 +87,8 @@ describe('Diary paper layout', () => {
       expect(screen.getByText(/同一篇作品的引用句也必须保持一致/)).toBeTruthy();
       expect(screen.getByTestId(`diary-photo-${diary.coverPhotoId}`)).toBeTruthy();
       expect(screen.getByTestId('diary-photo-photo-layout-inline')).toBeTruthy();
+      expect(screen.getByTestId(`diary-ai-label-${diary.id}`).props.children)
+        .toBe('含AI生成内容，可经用户编辑，请核对');
     }
 
     expect(StyleSheet.flatten(blueScreen.getByTestId('diary-paper-diary-paper-blue').props.style)).toMatchObject({

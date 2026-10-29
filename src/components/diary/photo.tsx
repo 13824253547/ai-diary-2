@@ -2,6 +2,7 @@ import {useEffect,useMemo,useState} from 'react';
 import {Image,StyleSheet,Text,View,type ImageSourcePropType,type StyleProp,type ViewStyle} from 'react-native';
 import {appSelectors,useAppStore} from '../../store/use-app-store';
 import {getDiaryPhotoContentUrl} from '../../services/material-photo-api';
+import {AIContentLabel,isGeneratedPhoto} from '../common/ai-content-label';
 
 export function Photo({id,diaryId,style,anonymous=false}:{id:string;diaryId?:string;style?:StyleProp<ViewStyle>;anonymous?:boolean}){
   useAppStore(state=>state.photoCatalogVersion);
@@ -24,11 +25,12 @@ export function Photo({id,diaryId,style,anonymous=false}:{id:string;diaryId?:str
   const scale=sourceSize?Math.max(size.width/sourceSize.width,size.height/sourceSize.height):1;
   const dx=sourceSize?(size.width-sourceSize.width*scale)/2:0;
   const dy=sourceSize?(size.height-sourceSize.height*scale)/2:0;
-  return <View onLayout={e=>setSize(e.nativeEvent.layout)} style={[s.frame,style]}><Image onError={()=>setFailed(true)} source={source} resizeMode="cover" style={s.image} testID={`diary-photo-${id}`}/>{anonymous&&sourceSize?photo.faceRects?.map((rect,index)=><View key={index} accessibilityLabel="人物已匿名遮挡" style={{position:'absolute',left:rect.x*sourceSize.width*scale+dx,top:rect.y*sourceSize.height*scale+dy,width:rect.width*sourceSize.width*scale,height:rect.height*sourceSize.height*scale,backgroundColor:'#C0B6AA',borderRadius:8,opacity:1}}/>):null}</View>}
+  return <View onLayout={e=>setSize(e.nativeEvent.layout)} style={[s.frame,style]}><Image onError={()=>setFailed(true)} source={source} resizeMode="cover" style={s.image} testID={`diary-photo-${id}`}/>{anonymous&&sourceSize?photo.faceRects?.map((rect,index)=><View key={index} accessibilityLabel="人物已匿名遮挡" style={{position:'absolute',left:rect.x*sourceSize.width*scale+dx,top:rect.y*sourceSize.height*scale+dy,width:rect.width*sourceSize.width*scale,height:rect.height*sourceSize.height*scale,backgroundColor:'#C0B6AA',borderRadius:8,opacity:1}}/>):null}{isGeneratedPhoto(photo)?<AIContentLabel testID={`ai-photo-label-${id}`} style={s.aiLabel}/>:null}</View>}
 
 const s=StyleSheet.create({
   frame:{overflow:'hidden',backgroundColor:'#EFE3D5'},
   image:{width:'100%',height:'100%'},
+  aiLabel:{position:'absolute',top:4,left:4,backgroundColor:'#FFFAF0',paddingHorizontal:5,paddingVertical:2,borderRadius:4},
   fallback:{alignItems:'center',justifyContent:'center',paddingHorizontal:12},
   fallbackText:{fontSize:12,lineHeight:18,color:'#8B7866',textAlign:'center'},
 });

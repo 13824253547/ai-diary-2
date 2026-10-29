@@ -68,6 +68,12 @@ type DiarySaveAssetHook = {
   rollback: () => Promise<void>;
 };
 
+type DiaryDeleteAssetHook = {
+  beforeCommit: (tx: Prisma.TransactionClient, diaryId: string) => Promise<void>;
+  afterCommit: () => Promise<void>;
+  rollback: () => Promise<void>;
+};
+
 type SaveErrorCode = 'not_found' | 'version_conflict' | 'invalid_input' | 'publication_blocked';
 type GenerationJobErrorCode = 'not_found' | 'version_conflict' | 'invalid_input' | 'asset_unreadable';
 type DraftInputErrorCode = 'invalid_input';
@@ -106,6 +112,15 @@ function canSelectCharacterId(value: string) {
 export class SaveDiaryError extends Error {
   constructor(
     readonly code: SaveErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export class DeleteDiaryError extends Error {
+  constructor(
+    readonly code: 'not_found' | 'invalid_input',
     message: string,
   ) {
     super(message);
@@ -168,6 +183,14 @@ export class RewriteDraftError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readJsonStringIds(value: Prisma.JsonValue) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function hasJsonDiaryReference(value: Prisma.JsonValue, diaryId: string) {
+  return Array.isArray(value) && value.some(item => isRecord(item) && item.id === diaryId);
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -741,6 +764,120 @@ export class MemoryStoreService implements OnModuleDestroy {
       throw new PermissionDeniedError('diary does not belong to current device');
     }
     return this.mapDiaryRecord(diary);
+  }
+
+  async deleteDiary(id: string, ownerDeviceId: string, assetHook?: DiaryDeleteAssetHook) {
+    if (!isNonEmptyString(id) || id.trim().length > 191 || !isNonEmptyString(ownerDeviceId)) {
+      throw new DeleteDiaryError('invalid_input', '日记标识无效。');
+    }
+
+    try {
+      await this.prisma.$transaction(async transaction => {
+        const ownerDiaries = await transaction.$queryRaw<Array<{ id: string; version: number; draftId: string }>>(Prisma.sql`
+          SELECT \`id\`, \`version\`, \`draftId\`
+          FROM \`Diary\`
+          WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+          ORDER BY \`id\`
+          FOR UPDATE
+        `);
+        const diary = ownerDiaries.find(item => item.id === id);
+        if (!diary) throw new DeleteDiaryError('not_found', '没有找到这篇日记。');
+
+        await assetHook?.beforeCommit(transaction, id);
+
+        const stories = await transaction.discoveryStory.findMany({
+          where: { ownerDeviceId, sourceDiaryId: id },
+          select: { id: true },
+        });
+        const storyIds = stories.map(story => story.id);
+        if (storyIds.length) {
+          await transaction.discoveryLike.deleteMany({ where: { storyId: { in: storyIds } } });
+          await transaction.discoveryStory.deleteMany({ where: { id: { in: storyIds }, ownerDeviceId } });
+        }
+
+        const drafts = await transaction.draft.findMany({
+          where: {
+            ownerDeviceId,
+            OR: [{ id: diary.draftId }, { sourceDiaryId: id }],
+          },
+          select: { id: true },
+        });
+        const draftIds = drafts.map(draft => draft.id);
+        if (draftIds.length) {
+          await transaction.generationJob.deleteMany({ where: { ownerDeviceId, draftId: { in: draftIds } } });
+        }
+
+        const corrections = await transaction.anchorCorrection.findMany({
+          where: { ownerDeviceId, diaryId: id },
+          select: { id: true },
+        });
+        const correctionIds = corrections.map(correction => correction.id);
+        if (correctionIds.length) {
+          await transaction.anchorCorrectionCommand.deleteMany({
+            where: { ownerDeviceId, correctionId: { in: correctionIds } },
+          });
+          await transaction.anchorCorrection.deleteMany({ where: { ownerDeviceId, diaryId: id } });
+        }
+        await transaction.diaryAnchor.deleteMany({ where: { ownerDeviceId, diaryId: id } });
+        await transaction.diaryAnchorExtraction.deleteMany({ where: { ownerDeviceId, diaryId: id } });
+
+        const flowers = await transaction.growthFlower.findMany({
+          where: { ownerDeviceId },
+          select: { id: true, sourceDiaryIds: true },
+        });
+        const affectedFlowerIds = flowers
+          .filter(flower => readJsonStringIds(flower.sourceDiaryIds).includes(id))
+          .map(flower => flower.id);
+        if (affectedFlowerIds.length) {
+          await transaction.growthFlower.deleteMany({ where: { ownerDeviceId, id: { in: affectedFlowerIds } } });
+        }
+
+        const milestones = await transaction.growthMilestone.findMany({
+          where: { ownerDeviceId },
+          select: { id: true, sourceDiaryIds: true },
+        });
+        for (const milestone of milestones) {
+          const sourceDiaryIds = readJsonStringIds(milestone.sourceDiaryIds);
+          if (sourceDiaryIds.includes(id)) {
+            await transaction.growthMilestone.update({
+              where: { id: milestone.id },
+              data: { sourceDiaryIds: sourceDiaryIds.filter(sourceId => sourceId !== id) as Prisma.InputJsonValue },
+            });
+          }
+        }
+
+        const recognitionRuns = await transaction.growthRecognitionRun.findMany({
+          where: { ownerDeviceId },
+          select: { id: true, sourceDiaryId: true, sourceDiaryRefs: true },
+        });
+        const affectedRunIds = recognitionRuns
+          .filter(run => run.sourceDiaryId === id || hasJsonDiaryReference(run.sourceDiaryRefs, id))
+          .map(run => run.id);
+        if (affectedRunIds.length) {
+          await transaction.growthRecognitionRun.deleteMany({
+            where: { ownerDeviceId, id: { in: affectedRunIds } },
+          });
+        }
+
+        // Reports summarize the full diary set, so any deletion invalidates their stored output and jobs.
+        await transaction.growthReportJob.deleteMany({ where: { ownerDeviceId } });
+        await transaction.growthInsightReport.deleteMany({ where: { ownerDeviceId } });
+
+        await transaction.saveCommand.deleteMany({
+          where: { ownerDeviceId, OR: [{ diaryId: id }, { sourceDiaryId: id }] },
+        });
+        if (draftIds.length) {
+          await transaction.draft.deleteMany({ where: { ownerDeviceId, id: { in: draftIds } } });
+        }
+        await transaction.diary.delete({ where: { id } });
+      });
+    } catch (error) {
+      await assetHook?.rollback();
+      throw error;
+    }
+
+    await assetHook?.afterCommit();
+    return { diaryId: id };
   }
 
   private async syncDiscoveryPublication(

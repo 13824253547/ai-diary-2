@@ -8,6 +8,7 @@ import { getDiaryStatistics, useAppStore } from '../../src/store/use-app-store';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
 import { createBackendAnchorReadModelRepository } from '../../src/store/adapters/backend-anchor-read-model-adapter';
+import { useAIConsent } from '../../src/hooks/use-ai-consent';
 
 function TypingIndicator() {
   const progress = useRef(new Animated.Value(0)).current;
@@ -45,6 +46,9 @@ export default function PetScreen() {
     focusMessageId?: string;
   }>();
   const [message, setMessage] = useState('');
+  const latestMessage = useRef(message);
+  latestMessage.current = message;
+  const { authorize, requestingConsent } = useAIConsent();
   const [anchorCount, setAnchorCount] = useState<number>();
   const skipNextSubmit = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
@@ -54,7 +58,7 @@ export default function PetScreen() {
   const messages = useAppStore(s => s.chatMessages);
   const currentConversationId = useAppStore(s => s.chatConversationId);
   const historyStatus = useAppStore(s => s.chatHistoryStatus);
-  const chatBusy = useAppStore(s => s.chatTurnRequests.some(request => request.status === 'pending')) || historyStatus === 'loading';
+  const chatBusy = useAppStore(s => s.chatTurnRequests.some(request => request.status === 'pending')) || historyStatus === 'loading' || requestingConsent;
   const sendChat = useAppStore(s => s.sendChat);
   const loadChatConversation = useAppStore(s => s.loadChatConversation);
   const restoreLatestChatConversation = useAppStore(s => s.restoreLatestChatConversation);
@@ -85,13 +89,19 @@ export default function PetScreen() {
   useEffect(() => {
     lastFocusedMessageId.current = undefined;
   }, [conversationId, focusMessageId]);
-  const send = () => {
+  const send = async () => {
     if (historyStatus === 'error') {
       void (conversationId
         ? loadChatConversation(conversationId)
         : restoreLatestChatConversation());
     } else if (!chatBusy && historyStatus === 'ready' && message.trim()) {
-      sendChat(message.trim());
+      const text = message.trim();
+      const conversation = useAppStore.getState().chatConversationId;
+      if (!(await authorize('chat'))) return;
+      const latest = useAppStore.getState();
+      if (latestMessage.current.trim() !== text || latest.chatConversationId !== conversation
+        || latest.chatHistoryStatus !== 'ready' || latest.chatTurnRequests.some(turn => turn.status === 'pending')) return;
+      sendChat(text);
       setMessage('');
       setViewingHistory(false);
       router.setParams({ conversationId: undefined, focusMessageId: undefined });
@@ -102,7 +112,7 @@ export default function PetScreen() {
       skipNextSubmit.current = false;
       return;
     }
-    send();
+    void send();
   };
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -173,7 +183,9 @@ export default function PetScreen() {
                   accessibilityLabel={`聊天回复失败，点击重试，消息标识 ${item.requestId}`}
                   accessibilityState={{ disabled: chatBusy }}
                   disabled={chatBusy}
-                  onPress={() => retryChat(item.requestId!)}
+                  onPress={() => { void (async () => {
+                    if (await authorize('chat')) retryChat(item.requestId!);
+                  })(); }}
                   style={[bubbleStyle, chatBusy && { opacity: 0.7 }]}
                 ><Text style={messageStyle}>{item.text}</Text></Pressable>
               : <View style={bubbleStyle}>

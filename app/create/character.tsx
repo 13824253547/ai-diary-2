@@ -8,6 +8,7 @@ import {listAvailableCharacters} from '../../src/services/character-catalog';
 import type {DiaryCharacter} from '../../src/types/diary';
 import {useAppStore} from '../../src/store/use-app-store';
 import {colors} from '../../src/theme/tokens';
+import {useAIConsent} from '../../src/hooks/use-ai-consent';
 type CharacterCatalogState={status:'loading'|'ready'|'error';characters:DiaryCharacter[];error?:string};
 export default function Character() {
   const { draft, params, router } = useDraftRoute();
@@ -16,6 +17,7 @@ export default function Character() {
   const requestVersionRef = useRef(0);
   const [catalog, setCatalog] = useState<CharacterCatalogState>({ status: 'loading', characters: [] });
   const currentCharacterId = draft?.diary.characterId;
+  const {authorize,requestingConsent,cancelConsent}=useAIConsent();
 
   const loadCharacters = useCallback(async () => {
     const version = requestVersionRef.current + 1;
@@ -65,6 +67,14 @@ export default function Character() {
         router.back();
         return;
       }
+      if (!(await authorize('diary'))) {
+        locked.current = false;
+        return;
+      }
+      if (!mountedRef.current || useAppStore.getState().drafts[draft.id]?.diary.characterId !== draft.diary.characterId) {
+        locked.current = false;
+        return;
+      }
       const synced = await store.restartGenerationWithCharacter(draft.id, id);
       if (!synced) {
         locked.current = false;
@@ -88,7 +98,7 @@ export default function Character() {
         <TopBar
           title="今天让谁来帮你排？"
           subtitle="不同风格的排版师，帮你定制独一无二的日记"
-          onBackPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/home')}
+          onBackPress={() => {cancelConsent();router.canGoBack() ? router.back() : router.replace('/(tabs)/home');}}
         />
       )}
     >
@@ -119,7 +129,8 @@ export default function Character() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`选择${character.name}`}
-              accessibilityState={{ selected: currentCharacterId === character.id }}
+              accessibilityState={{ selected: currentCharacterId === character.id, disabled: requestingConsent }}
+              disabled={requestingConsent}
               onPress={() => void pick(character.id)}
               style={[s.choose, { backgroundColor: [colors.brandStrong, colors.blue, colors.green][index] }]}
             >

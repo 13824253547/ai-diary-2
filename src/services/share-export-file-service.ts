@@ -1,6 +1,8 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { DiaryItem } from '../types/diary';
 import type { PreparedShareAsset } from './share-asset-preparation';
+import { AI_DIARY_NOTICE } from './ai-content-provenance';
+import { createAIFileXmp } from './ai-file-metadata';
 
 export type ShareExportMode = 'save' | 'pdf';
 
@@ -109,6 +111,7 @@ function wrapText(value: string, maxChars: number) {
 function buildPdfLines(diary: DiaryItem, assets: PreparedShareAsset[]) {
   const lines: string[] = [
     diary.title,
+    AI_DIARY_NOTICE,
     diary.summary,
     `${diary.date}，${diary.location}`,
   ];
@@ -134,7 +137,7 @@ function buildPdfLines(diary: DiaryItem, assets: PreparedShareAsset[]) {
   return lines.filter((line, index, array) => !(line === '' && array[index - 1] === ''));
 }
 
-function buildSimplePdf(lines: string[]) {
+function buildSimplePdf(lines: string[], contentId: string) {
   const pageLines = lines.slice(0, 40);
   const commands = [
     'BT',
@@ -144,13 +147,15 @@ function buildSimplePdf(lines: string[]) {
     ...pageLines.map((line, index) => `${index === 0 ? '' : 'T* '}${encodePdfCjkText(line)} Tj`),
     'ET',
   ].join('\n');
+  const xmp = createAIFileXmp(contentId);
   const objects = [
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Metadata 7 0 R >>\nendobj\n',
     '2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n',
     '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>\nendobj\n',
     '4 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [5 0 R] >>\nendobj\n',
     '5 0 obj\n<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 5 >> /DW 1000 >>\nendobj\n',
     `6 0 obj\n<< /Length ${Buffer.byteLength(commands, 'utf8')} >>\nstream\n${commands}\nendstream\nendobj\n`,
+    `7 0 obj\n<< /Type /Metadata /Subtype /XML /Length ${Buffer.byteLength(xmp, 'utf8')} >>\nstream\n${xmp}\nendstream\nendobj\n`,
   ];
   let pdf = '%PDF-1.4\n';
   const offsets: number[] = [0];
@@ -174,7 +179,7 @@ async function renderSharePdfFile(
   writeFile: (uri: string, buffer: Buffer | Uint8Array) => Promise<void>,
 ) {
   const lines = buildPdfLines(input.diary, input.assets);
-  await writeFile(outputUri, buildSimplePdf(lines));
+  await writeFile(outputUri, buildSimplePdf(lines, input.operationId));
 }
 
 export function createShareExportFileService(deps: ShareExportFileDeps = {}) {

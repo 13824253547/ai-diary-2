@@ -1,13 +1,14 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { GrowthScreen } from '../../src/components/profile/growth-screen';
 import { GrowthArtwork } from '../../src/components/profile/growth-artwork';
 import { TopBar } from '../../src/components/layout/top-bar';
 import { Button } from '../../src/components/common/button';
 import { GROWTH_FLOWER_IDS } from '../../src/contracts/growth-insight-contract';
 import { useAppStore } from '../../src/store/use-app-store';
+import { useAIConsent } from '../../src/hooks/use-ai-consent';
 
 export default function FlowersScreen() {
   const router = useRouter();
@@ -19,21 +20,27 @@ export default function FlowersScreen() {
   const loadGrowthInsights = useAppStore(value => value.loadGrowthInsights);
   const initializeGrowthFlowers = useAppStore(value => value.initializeGrowthFlowers);
   const retryGrowthFlowers = useAppStore(value => value.retryGrowthFlowers);
+  const { authorize, requestingConsent, cancelConsent } = useAIConsent();
+  const [consentDeclined, setConsentDeclined] = useState(false);
   const bloomedCount = state?.flowers.filter(flower => flower.status === 'bloomed').length ?? 0;
   const flowerStates = Object.fromEntries(
     GROWTH_FLOWER_IDS.map(id => [id, state?.flowers.find(flower => flower.flowerId === id)?.status === 'bloomed']),
   ) as Record<(typeof GROWTH_FLOWER_IDS)[number], boolean>;
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     let active = true;
     void (async () => {
       const current = await loadGrowthInsights();
       if (active && current?.flowerAnalysis.status === 'not_started') {
+        const allowed = await authorize('insights');
+        if (!active) return;
+        setConsentDeclined(!allowed);
+        if (!allowed) return;
         await initializeGrowthFlowers();
       }
     })();
-    return () => { active = false; };
-  }, [initializeGrowthFlowers, loadGrowthInsights]);
+    return () => { active = false; cancelConsent(); };
+  }, [authorize, cancelConsent, initializeGrowthFlowers, loadGrowthInsights]));
 
   useEffect(() => {
     const analysisStatus = state?.flowerAnalysis.status;
@@ -54,13 +61,21 @@ export default function FlowersScreen() {
     Alert.alert('继续完成成长记录', `已完成 ${bloomedCount}/3 项，完成首次旅行、连续记录 30 天和 100 个锚点后即可查看专属洞察报告。`);
   };
 
-  return <GrowthScreen header={<View style={s.header}><TopBar title="记忆花朵" onBackPress={() => router.canGoBack() ? router.back() : router.replace('/profile/insights')} /></View>} contentStyle={s.content}>
+  return <GrowthScreen header={<View style={s.header}><TopBar title="记忆花朵" onBackPress={() => {cancelConsent();router.canGoBack() ? router.back() : router.replace('/profile/insights');}} /></View>} contentStyle={s.content}>
     {state
       ? <GrowthArtwork kind="flowers" width={contentWidth} flowerStates={flowerStates} />
       : <View style={[s.artworkLoading, { width: contentWidth }]}><Text style={s.status}>正在读取记忆花朵…</Text></View>}
     <View style={s.lower}>
       <View style={s.milestonePanel}>
         <Text style={s.section}>成长记录</Text>
+        {consentDeclined ? <View style={s.retry}>
+          <Text style={s.status}>尚未授权全库分析，已有记录保持不变。</Text>
+          <Button disabled={requestingConsent} label="授权并整理日记" onPress={() => { void (async () => {
+            if (!(await authorize('insights'))) return;
+            setConsentDeclined(false);
+            await initializeGrowthFlowers();
+          })(); }} />
+        </View> : null}
         {state?.flowerAnalysis.status === 'pending' || state?.flowerAnalysis.status === 'running'
           ? <Text style={s.status}>小橘正在从你的日记里认识你…（{state.flowerAnalysis.completedBatches}/{state.flowerAnalysis.totalBatches}）</Text>
           : null}
@@ -70,7 +85,9 @@ export default function FlowersScreen() {
           : null}
         {status === 'error' && state ? <Text style={s.error}>{error ?? '成长状态更新失败，当前显示上次成功读取的数据。'}</Text> : null}
         {state?.flowerAnalysis.status === 'failed'
-          ? <View style={s.retry}><Text style={s.error}>花朵识别暂时没有完成，已有的成长记录仍会保留。</Text><Button label="重试识别" onPress={() => { void retryGrowthFlowers(); }} /></View>
+          ? <View style={s.retry}><Text style={s.error}>花朵识别暂时没有完成，已有的成长记录仍会保留。</Text><Button disabled={requestingConsent} label="重试识别" onPress={() => { void (async () => {
+            if (await authorize('insights')) await retryGrowthFlowers();
+          })(); }} /></View>
           : null}
         {state?.flowerAnalysis.status === 'succeeded' && state.flowers.every(flower => flower.status === 'locked')
           ? <Text style={s.unavailable}>目前还没有足够的日记线索绽放花朵，保存新的日记后小橘会继续认识你。</Text>

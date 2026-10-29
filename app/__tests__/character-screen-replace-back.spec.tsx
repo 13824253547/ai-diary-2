@@ -7,6 +7,10 @@ import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import { canSelectCharacterId } from '../../src/types/character-capabilities';
 
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
+
 const mockRouter = {
   push: jest.fn(),
   replace: jest.fn(),

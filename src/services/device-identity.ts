@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 import { appConfig } from '../config/app-config';
+import { createInstallationIdentity, nativeInstallationDependencies, type InstallationIdentity } from './installation-identity';
 import {
   createDiagnosticRequestId,
   isDevDiagnosticsEnabled,
@@ -19,6 +20,8 @@ let pendingDeviceId: Promise<string> | undefined;
 let cachedAttestedIdentity: AttestedDeviceIdentity | undefined;
 let appIntegrityApi: AppIntegrityApi | null | undefined;
 let secureStoreApi: SecureStoreApi | undefined;
+let installationApi: ReturnType<typeof createInstallationIdentity> | undefined;
+let cachedInstallationIdentity: InstallationIdentity | undefined;
 
 function isValidDeviceId(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith(DEVICE_ID_PREFIX) && value.trim().length > DEVICE_ID_PREFIX.length;
@@ -291,6 +294,12 @@ async function ensureAttestedIdentity() {
 }
 
 export async function ensureDeviceIdentity() {
+  if (appConfig.identityMode === 'installation' && !process.env.JEST_WORKER_ID) {
+    if (Platform.OS !== 'ios') throw new Error('当前设备不支持安全身份存储。');
+    installationApi ??= createInstallationIdentity(nativeInstallationDependencies(requestIdentityApi));
+    cachedInstallationIdentity = await installationApi.ensure();
+    return cachedInstallationIdentity.deviceId;
+  }
   if (
     cachedDeviceId
     && (!cachedAttestedIdentity || Date.parse(cachedAttestedIdentity.expiresAt) > Date.now() + TOKEN_REFRESH_WINDOW_MS)
@@ -367,6 +376,12 @@ export async function ensureDeviceIdentity() {
 
 export async function getDeviceIdentityHeaders() {
   const deviceId = await ensureDeviceIdentity();
+  if (appConfig.identityMode === 'installation' && cachedInstallationIdentity) {
+    return {
+      'x-device-id': deviceId,
+      Authorization: `Bearer ${cachedInstallationIdentity.accessToken}`,
+    };
+  }
   const identity = cachedAttestedIdentity;
   const headers: Record<string, string> = { 'x-device-id': deviceId };
   if (identity && identity.deviceId === deviceId) {

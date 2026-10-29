@@ -20,7 +20,7 @@ export class GrowthInsightsController {
     const ownerDeviceId = resolveDeviceId(deviceId);
     return {
       ok: true,
-      version: 'growth-insight-v1',
+      version: 'growth-insight-v2',
       data: await this.growth.getState(ownerDeviceId),
     };
   }
@@ -30,7 +30,7 @@ export class GrowthInsightsController {
     const ownerDeviceId = resolveDeviceId(deviceId);
     return {
       ok: true,
-      version: 'growth-insight-v1',
+      version: 'growth-insight-v2',
       data: await this.growth.initializeFlowers(ownerDeviceId),
     };
   }
@@ -40,7 +40,7 @@ export class GrowthInsightsController {
     const ownerDeviceId = resolveDeviceId(deviceId);
     return {
       ok: true,
-      version: 'growth-insight-v1',
+      version: 'growth-insight-v2',
       data: await this.growth.retryFlowerAnalysis(ownerDeviceId),
     };
   }
@@ -51,7 +51,7 @@ export class GrowthInsightsController {
     try {
       return {
         ok: true,
-        version: 'growth-insight-v1',
+        version: 'growth-insight-v2',
         data: await this.growth.ensureCurrentReport(ownerDeviceId),
       };
     } catch (error) {
@@ -65,7 +65,7 @@ export class GrowthInsightsController {
     try {
       return {
         ok: true,
-        version: 'growth-insight-v1',
+        version: 'growth-insight-v2',
         data: await this.growth.retryCurrentReport(ownerDeviceId),
       };
     } catch (error) {
@@ -78,7 +78,7 @@ export class GrowthInsightsController {
     const ownerDeviceId = resolveDeviceId(deviceId);
     return {
       ok: true,
-      version: 'growth-insight-v1',
+      version: 'growth-insight-v2',
       data: await this.growth.getState(ownerDeviceId),
     };
   }

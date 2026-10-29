@@ -6,6 +6,11 @@ import { Image, type View } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import { capturePostcard, discardPostcard, savePostcard, sharePostcard } from '../postcard-export';
 
+const mockPngBytes = jest.fn();
+const mockPngWrite = jest.fn();
+jest.mock('expo-file-system', () => ({
+  File: jest.fn().mockImplementation(() => ({ bytes: mockPngBytes, write: mockPngWrite })),
+}));
 jest.mock('expo-file-system/legacy', () => ({ getInfoAsync: jest.fn(), deleteAsync: jest.fn() }));
 jest.mock('expo-media-library/legacy', () => ({
   getPermissionsAsync: jest.fn(), requestPermissionsAsync: jest.fn(), saveToLibraryAsync: jest.fn(),
@@ -26,6 +31,7 @@ describe('postcard export', () => {
     jest.mocked(Sharing.isAvailableAsync).mockResolvedValue(true);
     jest.mocked(Sharing.shareAsync).mockResolvedValue();
     jest.mocked(MediaLibrary.saveToLibraryAsync).mockResolvedValue();
+    mockPngBytes.mockResolvedValue(new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3xkAAAAASUVORK5CYII=', 'base64')));
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -43,6 +49,18 @@ describe('postcard export', () => {
   test('discards an empty capture without sharing it', async () => {
     jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({ exists: true, uri, size: 0, isDirectory: false, modificationTime: 0 });
     await expect(capturePostcard(ref)).rejects.toThrow('empty postcard');
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
+  test('writes provenance into the actual captured file for an AI postcard', async () => {
+    await expect(capturePostcard(ref, 'postcard-1')).resolves.toBe(uri);
+    expect(Buffer.from(mockPngWrite.mock.calls[0][0]).toString('latin1')).toContain('AIGC\0');
+  });
+
+  test('discards the file if AI metadata cannot be written', async () => {
+    mockPngBytes.mockResolvedValue(new Uint8Array([1, 2, 3]));
+    await expect(capturePostcard(ref, 'postcard-1')).rejects.toThrow('PNG');
     expect(FileSystem.deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
     expect(Sharing.shareAsync).not.toHaveBeenCalled();
   });

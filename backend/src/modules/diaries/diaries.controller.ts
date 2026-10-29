@@ -1,7 +1,7 @@
-import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Headers, InternalServerErrorException, NotFoundException, Param, Post, UploadedFiles, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Headers, InternalServerErrorException, NotFoundException, Param, Post, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { resolveDeviceId } from '../../common/device-identity';
-import { MemoryStoreService, PermissionDeniedError, SaveDiaryError, type DiaryContentSnapshotRecord } from '../../common/memory-store.service';
+import { DeleteDiaryError, MemoryStoreService, PermissionDeniedError, SaveDiaryError, type DiaryContentSnapshotRecord } from '../../common/memory-store.service';
 import { DiaryAnchorGenerationService } from '../anchors/diary-anchor-generation.service';
 import { PhotoAssetError, PhotoAssetService, type DiaryPhotoUpload } from '../photos/photo-asset.service';
 import { BoundedMemoryUploadStorage } from '../generation/bounded-memory-upload-storage';
@@ -227,6 +227,44 @@ export class DiariesController {
             message: error.message,
             retryable: false,
           },
+        });
+      }
+      throw error;
+    }
+  }
+
+  @Delete(':id')
+  async deleteDiary(@Param('id') id: string, @Headers('x-device-id') deviceId?: string) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    const assetHook = this.photoAssets.createDiaryPhotoDeleteHook(ownerDeviceId, id);
+    try {
+      return {
+        ok: true,
+        data: await this.store.deleteDiary(id, ownerDeviceId, assetHook),
+      };
+    } catch (error) {
+      if (error instanceof DeleteDiaryError) {
+        const payload = {
+          ok: false,
+          error: { code: error.code, message: error.message, retryable: false },
+        };
+        if (error.code === 'not_found') throw new NotFoundException(payload);
+        throw new BadRequestException(payload);
+      }
+      if (error instanceof PermissionDeniedError) {
+        throw new ForbiddenException({
+          ok: false,
+          error: {
+            code: 'permission_denied',
+            message: error.message,
+            retryable: false,
+          },
+        });
+      }
+      if (error instanceof PhotoAssetError) {
+        throw new InternalServerErrorException({
+          ok: false,
+          error: { code: 'provider_failed', message: '日记删除失败，请稍后重试。', retryable: true },
         });
       }
       throw error;

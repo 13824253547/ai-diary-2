@@ -29,7 +29,7 @@ export type DiaryPhoto = {
   id: string; title: string; location: string; emoji: string; color: string; date: string;
   image?: number; uri?: string; localUri?: string; albumId?: string; albumTitle?: string;
   width?: number; height?: number; filename?: string; source?: 'mock' | 'device' | 'generated';
-  sourceAssetId?: string; remoteHeaders?: Record<string, string>;
+  sourceAssetId?: string; remoteHeaders?: Record<string, string>; diaryId?: string;
   generationRequestId?: string; generationPrompt?: string; generationSource?: 'mock' | 'provider';
   selected?: boolean; personIds?: string[]; faceRects?: FaceRect[];
 };

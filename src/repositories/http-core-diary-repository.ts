@@ -329,6 +329,52 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
     };
   }
 
+  async deleteDiary(diaryId: string, options?: ApiRequestOptions): Promise<RemoteResult<{ diaryId: string }>> {
+    if (typeof diaryId !== 'string' || !diaryId.trim() || diaryId.length > 191) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: {
+          code: 'invalid_input',
+          message: '日记标识无效。',
+          retryable: false,
+        },
+      };
+    }
+    let response: ApiResponse<OkEnvelope<{ diaryId: string }> | ErrorEnvelope>;
+    try {
+      response = await this.client.request(`/diaries/${encodeURIComponent(diaryId)}`, {
+        method: 'DELETE',
+      }, options);
+    } catch (error) {
+      return requestFailure(error);
+    }
+    const json = response.data;
+    if (!response.ok || !isOkEnvelope<{ diaryId: string }>(json)) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: responseError(response),
+      };
+    }
+    if (!isRecord(json.data) || json.data.diaryId !== diaryId) {
+      return {
+        ok: false,
+        version: CORE_DIARY_CONTRACT_VERSION,
+        error: {
+          code: 'provider_failed',
+          message: '服务器返回的删除结果与请求不一致。',
+          retryable: false,
+        },
+      };
+    }
+    return {
+      ok: true,
+      version: CORE_DIARY_CONTRACT_VERSION,
+      data: { diaryId },
+    };
+  }
+
   async listMemories(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>> {
     if (!isMemoriesQuery(query)) return this.invalidMemoriesQueryResult();
     const search = new URLSearchParams();

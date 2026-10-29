@@ -4,6 +4,11 @@ import PetScreen from '../(tabs)/pet';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
+import { requestAIConsent } from '../../src/services/ai-consent';
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
 
 const mockRouter = { push: jest.fn(), replace: jest.fn(), setParams: jest.fn() };
 const mockGetAnchorSummary = jest.fn();
@@ -57,6 +62,20 @@ describe('Pet chat screen reply feedback', () => {
     mockGetAnchorSummary.mockResolvedValue({ total: 7 });
     mockRouteParams.conversationId = undefined;
     mockRouteParams.focusMessageId = undefined;
+  });
+
+  test('declining first chat consent keeps the text without adding a user message', async () => {
+    jest.mocked(requestAIConsent).mockResolvedValueOnce(false);
+    useAppStore.setState({ chatHistoryStatus: 'ready', restoreLatestChatConversation: jest.fn(async () => false) });
+    const sendChat = jest.fn();
+    useAppStore.setState({ sendChat });
+    const screen = await render(<PetScreen />);
+    fireEvent.changeText(screen.getByLabelText('和小橘聊天'), '今天去海边了');
+    await waitFor(() => expect(screen.getByDisplayValue('今天去海边了')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('发送消息'));
+    await waitFor(() => expect(requestAIConsent).toHaveBeenCalledWith('chat', expect.anything()));
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('今天去海边了')).toBeTruthy();
   });
 
   test('does not show a separate name beneath the mascot', async () => {

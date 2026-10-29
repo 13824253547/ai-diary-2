@@ -34,6 +34,7 @@ export interface CoreDiaryRepository {
   }>>;
   getSaveResult(idempotencyKey: string, options?: ApiRequestOptions): Promise<RemoteResult<SaveDraftResult & { id?: string }>>;
   getDiary?(diaryId: string, options?: ApiRequestOptions): Promise<RemoteResult<DiaryItem>>;
+  deleteDiary?(diaryId: string, options?: ApiRequestOptions): Promise<RemoteResult<{ diaryId: string }>>;
   listMemories(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>>;
   listAllMemories?(query: MemoriesQuery, options?: ApiRequestOptions): Promise<RemoteResult<MemoriesQueryResult>>;
 }

@@ -4,6 +4,11 @@ import LibraryScreen from '../library';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
+import { requestAIConsent } from '../../src/services/ai-consent';
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
 
 const mockRouter = {
   push: jest.fn(),
@@ -76,6 +81,19 @@ describe('Library screen inspiration submission', () => {
   beforeEach(() => {
     resetAppStore();
     jest.clearAllMocks();
+  });
+
+  test('declining chat consent keeps the written answer without sending or navigating', async () => {
+    jest.mocked(requestAIConsent).mockResolvedValueOnce(false);
+    const initialMessages = useAppStore.getState().chatMessages;
+    const screen = await render(<LibraryScreen />);
+    fireEvent.press(screen.getByText(inspirationCards[0]!));
+    await waitFor(() => expect(screen.getByLabelText('记录灵感')).toBeTruthy());
+    await act(async () => { fireEvent.changeText(screen.getByLabelText('记录灵感'), '今天去海边了'); });
+    await act(async () => { fireEvent.press(screen.getByLabelText('和小橘聊聊')); });
+    expect(useAppStore.getState().chatMessages).toEqual(initialMessages);
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('记录灵感').props.value).toBe('今天去海边了');
   });
 
   test.each(inspirationCards)('keeps blank answers from submitting for prompt: %s', async prompt => {

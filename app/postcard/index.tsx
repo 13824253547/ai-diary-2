@@ -14,6 +14,7 @@ import { capturePostcard, discardPostcard, savePostcard, sharePostcard } from '.
 import type { DiaryPhoto } from '../../src/types/diary';
 import type { PostcardComposition } from '../../src/types/postcard';
 import { createPostcardStampPlacement, getPostcardStampPosition, isPostcardStampPlacement } from '../../src/services/postcard-composition';
+import { AIContentLabel, isGeneratedPhoto } from '../../src/components/common/ai-content-label';
 
 const stickerDecorations = ['stickerHappy', 'stickerCamera', 'mascotCamera', 'stickerCool', 'stickerCry', 'stickerLove'] as const;
 
@@ -40,6 +41,7 @@ export default function PostcardScreen() {
   const materialPhoto = registeredPhoto?.source === 'device' || registeredPhoto?.source === 'generated'
     ? registeredPhoto : undefined;
   const image = materialPhoto ? getPhotoImageSource(materialPhoto) : undefined;
+  const aiGenerated = isGeneratedPhoto(materialPhoto);
   const legacyStickerId = isStickerDecoration(params.decoration) ? params.decoration : undefined;
   const legacyCityStampId = params.decoration && !legacyStickerId && getCityStampConfig(params.decoration)
     ? params.decoration : undefined;
@@ -56,7 +58,7 @@ export default function PostcardScreen() {
   const [imageReady, setImageReady] = useState(false);
   const [message, setMessage] = useState('');
   const photoKey = `${materialPhoto?.id ?? ''}:${materialPhoto?.localUri ?? materialPhoto?.uri ?? ''}`;
-  const inputKey = `${photoKey}:${params.stickerId ?? stickerId ?? ''}:${params.cityStampId ?? cityStamp?.id ?? ''}:${params.decoration ?? ''}:${stampPlacement}:${photoWidth}`;
+  const inputKey = `${photoKey}:${params.stickerId ?? stickerId ?? ''}:${params.cityStampId ?? cityStamp?.id ?? ''}:${params.decoration ?? ''}:${stampPlacement}:${photoWidth}:${aiGenerated}`;
   const inputKeyRef = useRef(inputKey);
   inputKeyRef.current = inputKey;
   useEffect(() => {
@@ -76,7 +78,9 @@ export default function PostcardScreen() {
     setMessage('');
     let uri: string | undefined;
     try {
-      uri = await capturePostcard(cardRef);
+      uri = aiGenerated
+        ? await capturePostcard(cardRef, `postcard${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`)
+        : await capturePostcard(cardRef);
       if (inputKeyRef.current !== inputKey) return;
       if (destination === 'share') {
         const result = await sharePostcard(uri);
@@ -108,8 +112,8 @@ export default function PostcardScreen() {
   };
   return <Screen header={<TopBar title="明信片" centered onBackPress={() => router.back()} trailing={<IconAction name="images-outline" label="编辑素材" onPress={() => router.push({ pathname: '/postcard/apply', params: applyParams })} />} />}>
     {!materialPhoto ? <EmptyResult title="请选择真实照片"><Button label="应用明信片素材" onPress={() => router.replace({ pathname: '/postcard/apply', params: applyParams })} /></EmptyResult> : <>
-      <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View ref={cardRef} collapsable={false} style={s.card}><Image key={photoKey} testID="postcard-photo" source={image as ImageSourcePropType} style={s.image} onLayout={event => setPhotoWidth(event.nativeEvent.layout.width)} onLoad={() => setImageReady(true)} onError={() => { setImageReady(false); setMessage('照片暂时无法读取，请重新选择素材。'); }} />{stampText ? <View style={s.stamp}><Text style={s.stampText}>{stampText}</Text></View> : null}{cityStamp ? <CityStamp {...cityStamp} width={68} height={68} testID={legacyDecorationTestId ?? 'postcard-city-stamp'} style={[s.cityStampOverlay, stampPosition]} /> : null}<Text style={s.words}>把这段真实回忆，{`\n`}寄给未来的自己</Text>{stickerId ? <Image testID={legacyDecorationTestId ?? 'postcard-sticker'} source={art[stickerId]} resizeMode="contain" style={s.mascot} /> : null}</View></View>
-      <Text style={s.note}>已使用当前选择的真实照片</Text>
+      <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View ref={cardRef} collapsable={false} style={s.card}><Image key={photoKey} testID="postcard-photo" source={image as ImageSourcePropType} style={s.image} onLayout={event => setPhotoWidth(event.nativeEvent.layout.width)} onLoad={() => setImageReady(true)} onError={() => { setImageReady(false); setMessage('照片暂时无法读取，请重新选择素材。'); }} />{stampText ? <View style={s.stamp}><Text style={s.stampText}>{stampText}</Text></View> : null}{cityStamp ? <CityStamp {...cityStamp} width={68} height={68} testID={legacyDecorationTestId ?? 'postcard-city-stamp'} style={[s.cityStampOverlay, stampPosition]} /> : null}<Text style={s.words}>{aiGenerated ? '把这份灵感画面，' : '把这段真实回忆，'}{`\n`}寄给未来的自己</Text>{aiGenerated ? <AIContentLabel text="图片由AI生成" testID="postcard-ai-label" style={{position:'absolute',bottom:8,left:16}} /> : null}{stickerId ? <Image testID={legacyDecorationTestId ?? 'postcard-sticker'} source={art[stickerId]} resizeMode="contain" style={s.mascot} /> : null}</View></View>
+      <Text style={s.note}>{aiGenerated ? '已使用AI生成配图，导出图片保留标识' : '已使用当前选择的真实照片'}</Text>
       <Button disabled={busy || !imageReady || Boolean(cityStamp && photoWidth <= 0)} label={busy ? '正在准备明信片…' : '分享明信片'} onPress={() => { void exportCard('share'); }} />
       <Button disabled={busy || !imageReady || Boolean(cityStamp && photoWidth <= 0)} label="保存到相册" variant="secondary" onPress={() => { void exportCard('save'); }} />
       {message ? <Text accessibilityLiveRegion="polite" style={s.note}>{message}</Text> : null}

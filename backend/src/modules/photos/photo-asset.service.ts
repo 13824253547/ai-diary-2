@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma.service';
+import { labelGeneratedImage } from '../../common/ai-image-label';
 
 export const MAX_MATERIAL_PHOTOS_PER_UPLOAD = 12;
 export const MAX_MATERIAL_LIBRARY_PHOTOS = 100;
@@ -35,6 +36,12 @@ export type DiaryPhotoUpload = {
   buffer: Buffer;
   mimeType: string;
   date?: string;
+};
+
+export type DiaryPhotoDeleteHook = {
+  beforeCommit: (tx: Prisma.TransactionClient, diaryId: string) => Promise<void>;
+  afterCommit: () => Promise<void>;
+  rollback: () => Promise<void>;
 };
 
 export class PhotoAssetError extends Error {
@@ -82,6 +89,7 @@ function isMetadata(value: unknown): value is PhotoAssetUploadMetadata {
 
 @Injectable()
 export class PhotoAssetService {
+  private readonly logger = new Logger(PhotoAssetService.name);
   private readonly root = resolve(
     process.env.PHOTO_ASSET_STORAGE_DIR?.trim() || join(process.cwd(), 'var', 'photo-assets'),
   );
@@ -229,8 +237,9 @@ export class PhotoAssetService {
     const existing = await this.findGeneratedMaterial(ownerDeviceId, requestId);
     if (existing) return existing;
 
+    const labelledBuffer = await labelGeneratedImage(image.buffer, requestId);
     const [asset] = await this.uploadMaterials(ownerDeviceId, [{
-      buffer: image.buffer,
+      buffer: labelledBuffer,
       mimetype: image.mimeType,
     }], [{
       sourceAssetId: requestId,
@@ -328,6 +337,44 @@ export class PhotoAssetService {
           createdPaths,
         ),
       rollback: () => this.removeCreatedCopies(createdPaths),
+    };
+  }
+
+  createDiaryPhotoDeleteHook(ownerDeviceId: string, diaryId: string): DiaryPhotoDeleteHook {
+    const diaryDirectory = join(
+      this.root,
+      'diaries',
+      this.ownerKey(ownerDeviceId),
+      this.key(diaryId),
+    );
+    let filePaths: string[] = [];
+
+    return {
+      beforeCommit: async (tx, targetDiaryId) => {
+        if (targetDiaryId !== diaryId) {
+          throw new PhotoAssetError('invalid_input', '删除日记标识不匹配。');
+        }
+        const copies = await tx.diaryPhotoCopy.findMany({
+          where: { ownerDeviceId, diaryId },
+          select: { filePath: true },
+        });
+        filePaths = copies.flatMap(copy => {
+          const absolutePath = this.absolutePath(copy.filePath);
+          return absolutePath.startsWith(`${diaryDirectory}/`) ? [absolutePath] : [];
+        });
+        await tx.diaryPhotoCopy.deleteMany({ where: { ownerDeviceId, diaryId } });
+      },
+      afterCommit: async () => {
+        try {
+          await Promise.all(filePaths.map(path => rm(path, { force: true })));
+          await rm(diaryDirectory, { recursive: true, force: true });
+        } catch {
+          this.logger.error('Diary photo copy cleanup failed after diary deletion.');
+        }
+      },
+      rollback: async () => {
+        filePaths = [];
+      },
     };
   }
 
@@ -486,11 +533,17 @@ export class PhotoAssetService {
       where: { ownerDeviceId, diaryId: { in: diaryIds } },
       orderBy: [{ diaryId: 'asc' }, { createdAt: 'asc' }],
     });
+    const materials = rows.length ? await this.prisma.materialPhoto.findMany({
+      where: { ownerDeviceId, id: { in: [...new Set(rows.map(row => row.photoId))] } },
+    }) : [];
+    const materialById = new Map(materials.map(material => [material.id, material]));
     return rows.map(row => ({
       ...this.toAssetContract(row),
       id: row.photoId,
       sourceAssetId: row.photoId,
       diaryId: row.diaryId,
+      generationRequestId: materialById.get(row.photoId)?.generationRequestId ?? undefined,
+      generationSource: materialById.get(row.photoId)?.generationSource ?? undefined,
     }));
   }
 
@@ -569,7 +622,13 @@ export class PhotoAssetService {
   async readMaterialPhoto(ownerDeviceId: string, photoId: string) {
     const row = await this.prisma.materialPhoto.findFirst({ where: { ownerDeviceId, id: photoId } });
     if (!row) throw new PhotoAssetError('not_found', '照片素材不存在。');
-    return this.readFile(row.filePath, row.mimeType);
+    const file = await this.readFile(row.filePath, row.mimeType);
+    if (!row.generationRequestId || row.generationSource === 'mock') return file;
+    try {
+      return { ...file, buffer: await labelGeneratedImage(file.buffer, row.id) };
+    } catch {
+      throw new PhotoAssetError('asset_unreadable', 'AI图片标识处理失败，请稍后重试。');
+    }
   }
 
   private async readFile(filePath: string, mimeType: string) {

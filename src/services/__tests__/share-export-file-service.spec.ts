@@ -125,6 +125,12 @@ describe('share export file service', () => {
     const pdfText = pdfBuffer.toString('utf8');
     expect(pdfText.startsWith('%PDF-1.4')).toBe(true);
     expect(pdfText).toContain('/Encoding /UniGB-UCS2-H');
+    expect(pdfText).toContain('/Metadata 7 0 R');
+    expect(pdfText).toContain('ContentProducer');
+    expect(pdfText).toContain('orange-glow-ai-diary');
+    const noticeHex = Array.from('含AI生成内容，可经用户编辑，请核对')
+      .map(character => character.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase()).join('');
+    expect(pdfText).toContain(`<${noticeHex}> Tj`);
     expect(pdfText).toContain('<53F0535761626E3865E58BB0> Tj');
     expect(pdfText).toContain('<533F540D65E58BB0FF0C4EBA72695DF2906E6321> Tj');
     expect(pdfText).toContain('<5DF251C6590756FE72470020003100205F20> Tj');

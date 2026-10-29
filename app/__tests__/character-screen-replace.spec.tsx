@@ -6,6 +6,11 @@ import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import { canSelectCharacterId } from '../../src/types/character-capabilities';
+import { requestAIConsent } from '../../src/services/ai-consent';
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
 
 const mockRouter = {
   push: jest.fn(),
@@ -129,6 +134,21 @@ describe('Character screen replace mode', () => {
   afterEach(() => {
     cleanup();
     useAppStore.setState({ restartGenerationWithCharacter: originalRestartAction });
+  });
+
+  test('does not restart generation when diary consent is declined', async () => {
+    seedReplaceDraft('diary-1');
+    jest.mocked(requestAIConsent).mockResolvedValueOnce(false);
+    const restart = jest.fn();
+    useAppStore.setState({ restartGenerationWithCharacter: restart });
+    const screen = await render(<CharacterScreen />);
+    const draft = useAppStore.getState().drafts[mockDraftId!];
+    const target = mockCharacters.find(character => canSelectCharacterId(character.id) && character.id !== draft.diary.characterId)!;
+    await waitFor(() => expect(screen.getByLabelText(`选择${target.name}`)).toBeTruthy());
+    fireEvent.press(screen.getByLabelText(`选择${target.name}`));
+    await waitFor(() => expect(requestAIConsent).toHaveBeenCalledWith('diary', expect.anything()));
+    expect(restart).not.toHaveBeenCalled();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
   });
 
   test('picks a new character, syncs it, and replaces the editor with the generating screen', async () => {

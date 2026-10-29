@@ -1,0 +1,26 @@
+ARG NODE_IMAGE=public.ecr.aws/docker/library/node:22-bookworm-slim
+FROM ${NODE_IMAGE} AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+FROM base AS build
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY prisma ./prisma
+RUN DATABASE_URL=mysql://build:build@127.0.0.1:3306/build npx prisma generate
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+FROM build AS migration
+CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
+
+FROM base AS runtime
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/dist ./dist
+COPY deployment/server.cjs ./deployment/server.cjs
+USER node
+CMD ["node", "deployment/server.cjs"]

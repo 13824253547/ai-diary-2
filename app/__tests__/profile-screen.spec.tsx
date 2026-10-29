@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Linking } from 'react-native';
 import ProfileScreen from '../(tabs)/profile';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
@@ -152,5 +153,17 @@ describe('Profile screen monthly entry', () => {
 
     expect(queryByText('notifications-outline')).toBeNull();
     expect(queryByText('settings-outline')).toBeNull();
+  });
+
+  test('opens the hosted privacy policy from the personal profile', async () => {
+    const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
+    const { getByLabelText } = await render(<ProfileScreen />);
+
+    fireEvent.press(getByLabelText('隐私政策'));
+
+    await waitFor(() => {
+      expect(openURL).toHaveBeenCalledWith('https://www.comiaite.com/privacy-policy');
+    });
+    openURL.mockRestore();
   });
 });

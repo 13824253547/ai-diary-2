@@ -21,6 +21,9 @@ describe('device identity headers', () => {
       },
     }));
     jest.doMock('expo-file-system/legacy', () => ({ documentDirectory: null }));
+    jest.doMock('../../config/app-config', () => ({
+      appConfig: { identityMode: 'attested', backendBaseUrl: 'http://127.0.0.1:3001/api' },
+    }));
 
     try {
       expect(process.env.JEST_WORKER_ID).toBeUndefined();
@@ -34,6 +37,7 @@ describe('device identity headers', () => {
     } finally {
       jest.dontMock('react-native');
       jest.dontMock('expo-file-system/legacy');
+      jest.dontMock('../../config/app-config');
       jest.resetModules();
       if (originalWorkerId === undefined) delete process.env.JEST_WORKER_ID;
       else process.env.JEST_WORKER_ID = originalWorkerId;

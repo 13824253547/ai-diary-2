@@ -9,9 +9,11 @@ import { TopBar } from '../../src/components/layout/top-bar';
 import { Button } from '../../src/components/common/button';
 import { EmptyResult, IconAction, SearchField, SectionTitle, supportStyles as u } from '../../src/components/common/support-ui';
 import { Photo } from '../../src/components/diary/photo';
+import { AIContentLabel, isGeneratedPhoto } from '../../src/components/common/ai-content-label';
 import { CityStamp, type CityStampConfig } from '../../src/components/library/city-stamp';
 import { getCityStampConfig, getVisitedCityStampIds } from '../../src/components/library/city-stamp-catalog';
 import { useAppStore } from '../../src/store/use-app-store';
+import { useAIConsent } from '../../src/hooks/use-ai-consent';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
 import type { DiaryPhoto } from '../../src/types/diary';
@@ -80,7 +82,11 @@ export default function LibraryScreen() {
   const [sheet, setSheet] = useState<'upload' | 'upload-albums' | 'diary' | 'ai' | 'inspiration' | null>(null);
   const [prompt, setPrompt] = useState('');
   const [answer, setAnswer] = useState('');
+  const latestAnswer = useRef(answer);
+  latestAnswer.current = answer;
+  const { authorize, requestingConsent, cancelConsent } = useAIConsent();
   const [generating, setGenerating] = useState(false);
+  const aiSubmissionVersion = useRef(0);
   const [aiGenerationRequestId, setAiGenerationRequestId] = useState<string>();
   const [aiGenerationError, setAiGenerationError] = useState<string>();
   const [savingGeneratedImage, setSavingGeneratedImage] = useState(false);
@@ -115,6 +121,9 @@ export default function LibraryScreen() {
   const photos = filterMaterialPhotosByDiary(materialPhotos, diaries, search);
   const visiblePhotos = deleteMode ? photos : photos.slice(0, MATERIAL_PHOTO_PREVIEW_LIMIT);
   const close = () => {
+    aiSubmissionVersion.current += 1;
+    cancelConsent();
+    if (requestingConsent) setGenerating(false);
     if (sheet === 'ai' && generating && aiGenerationRequestId) {
       useAppStore.getState().cancelMaterialImageGeneration(aiGenerationRequestId);
     }
@@ -127,15 +136,23 @@ export default function LibraryScreen() {
   const submitAIImage = async () => {
     const description = prompt.trim();
     if (!description || generating) return;
+    const submissionVersion = ++aiSubmissionVersion.current;
     setGenerating(true);
     setAiGenerationError(undefined);
     setAiGenerationRequestId(undefined);
+    const allowed = await authorize('image');
+    if (submissionVersion !== aiSubmissionVersion.current) return;
+    if (!allowed) {
+      setGenerating(false);
+      return;
+    }
     const operation = generateMaterialImage(description);
     const pendingRequest = useAppStore.getState().aiImageGenerationRequests
       .find(item => item.status === 'pending' && item.description === description);
     if (pendingRequest) setAiGenerationRequestId(pendingRequest.id);
     try {
       const result = await operation;
+      if (submissionVersion !== aiSubmissionVersion.current) return;
       if (!result.ok) {
         if (result.reason !== 'cancelled') setAiGenerationError(result.message);
         return;
@@ -150,13 +167,17 @@ export default function LibraryScreen() {
       setSheet(null);
       setPreview({ title: photo.title, image: getPhotoImageSource(photo), photoId: photo.id, generated: true });
     } catch {
-      setAiGenerationError('配图暂时无法生成，请稍后重试。');
+      if (submissionVersion === aiSubmissionVersion.current) setAiGenerationError('配图暂时无法生成，请稍后重试。');
     } finally {
-      setGenerating(false);
-      setAiGenerationRequestId(undefined);
+      if (submissionVersion === aiSubmissionVersion.current) {
+        setGenerating(false);
+        setAiGenerationRequestId(undefined);
+      }
     }
   };
   const cancelAIImage = () => {
+    aiSubmissionVersion.current += 1;
+    cancelConsent();
     if (aiGenerationRequestId) {
       useAppStore.getState().cancelMaterialImageGeneration(aiGenerationRequestId);
     }
@@ -441,7 +462,7 @@ export default function LibraryScreen() {
         <Pressable accessibilityRole="button" accessibilityLabel="添加照片" onPress={() => { void openUpload(); }}><Text style={s.sectionAction}>上传 ›</Text></Pressable>
       </View>
     </View>
-    <View style={s.grid}>{visiblePhotos.map(p => <Pressable accessibilityRole="button" accessibilityLabel={deleteMode ? `选择删除${p.title}` : `预览${p.title}`} key={p.id} onPress={() => { if (deleteMode) toggleDeletePhoto(p.id); else setPreview({ title: p.title, image: getPhotoImageSource(p), photoId: p.id, generated: p.source === 'generated' }); }} style={s.photo}><Image testID={`material-photo-${p.id}`} source={getPhotoImageSource(p)} style={s.image} />{deleteMode ? <View style={[s.selectionMark, selectedDeleteIds.includes(p.id) && s.selectedMark]}><Ionicons name={selectedDeleteIds.includes(p.id) ? 'checkmark' : 'ellipse-outline'} size={15} color={selectedDeleteIds.includes(p.id) ? '#fff' : colors.textSecondary} /></View> : !diaries.some(d => d.photoIds.includes(p.id) || d.blocks.some(block => block.type === 'photo' ? block.photoId === p.id : block.photoIds?.includes(p.id))) ? <Text style={s.badge}>未生成日记</Text> : null}</Pressable>)}</View>
+    <View style={s.grid}>{visiblePhotos.map(p => <Pressable accessibilityRole="button" accessibilityLabel={deleteMode ? `选择删除${p.title}` : `预览${p.title}`} key={p.id} onPress={() => { if (deleteMode) toggleDeletePhoto(p.id); else setPreview({ title: p.title, image: getPhotoImageSource(p), photoId: p.id, generated: p.source === 'generated' }); }} style={s.photo}><Image testID={`material-photo-${p.id}`} source={getPhotoImageSource(p)} style={s.image} />{isGeneratedPhoto(p) ? <AIContentLabel testID={`material-ai-label-${p.id}`} style={{position:'absolute',top:4,left:4,backgroundColor:'#FFFAF0',paddingHorizontal:5,paddingVertical:2,borderRadius:4}} /> : null}{deleteMode ? <View style={[s.selectionMark, selectedDeleteIds.includes(p.id) && s.selectedMark]}><Ionicons name={selectedDeleteIds.includes(p.id) ? 'checkmark' : 'ellipse-outline'} size={15} color={selectedDeleteIds.includes(p.id) ? '#fff' : colors.textSecondary} /></View> : !diaries.some(d => d.photoIds.includes(p.id) || d.blocks.some(block => block.type === 'photo' ? block.photoId === p.id : block.photoIds?.includes(p.id))) ? <Text style={s.badge}>未生成日记</Text> : null}</Pressable>)}</View>
     {deleteMode ? <Button disabled={!selectedDeleteIds.length || deleting} label={deleting ? '正在删除…' : `删除所选（${selectedDeleteIds.length}）`} onPress={() => Alert.alert('删除素材', `确定删除选中的 ${selectedDeleteIds.length} 张照片吗？已保存日记中的照片副本会保留。`, [{ text: '取消', style: 'cancel' }, { text: '删除', style: 'destructive', onPress: () => { void confirmDelete(); } }])} /> : null}
     {photos.length === 0 ? <EmptyResult
       title={materialLoadError && !materialPhotos.length ? '素材暂时无法加载' : search ? '没有找到匹配日记的照片' : '还没有照片素材'}
@@ -520,12 +541,17 @@ export default function LibraryScreen() {
             <Button
               disabled={!prompt.trim() || generating || material.length >= MAX_MATERIAL_LIBRARY_PHOTOS}
               loading={generating}
-              label={generating ? '正在为你描绘画面，请稍候…' : material.length >= MAX_MATERIAL_LIBRARY_PHOTOS ? '素材库已满，请先删除部分照片' : aiGenerationError ? '重新生成' : '生成配图'}
+              label={requestingConsent ? '正在确认授权…' : generating ? '正在为你描绘画面，请稍候…' : material.length >= MAX_MATERIAL_LIBRARY_PHOTOS ? '素材库已满，请先删除部分照片' : aiGenerationError ? '重新生成' : '生成配图'}
               onPress={() => { void submitAIImage(); }}
             />
             {generating ? <Button variant="secondary" label="取消生成" onPress={cancelAIImage} /> : null}
           </> : null}
-          {sheet === 'inspiration' ? <><Text style={u.body}>{prompt}</Text><TextInput accessibilityLabel="记录灵感" value={answer} onChangeText={setAnswer} multiline placeholder="慢慢写，把心情留在这里…" style={s.textInput} /><Button disabled={!answer.trim()} label="和小橘聊聊" onPress={() => { useAppStore.getState().sendChat(answer.trim()); close(); router.push('/(tabs)/pet'); }} /></> : null}
+          {sheet === 'inspiration' ? <><Text style={u.body}>{prompt}</Text><TextInput accessibilityLabel="记录灵感" value={answer} onChangeText={setAnswer} editable={!requestingConsent} multiline placeholder="慢慢写，把心情留在这里…" style={s.textInput} /><Button disabled={!answer.trim() || requestingConsent} label="和小橘聊聊" onPress={() => { void (async () => {
+            const text = answer.trim();
+            if (!text || !(await authorize('chat')) || latestAnswer.current.trim() !== text) return;
+            useAppStore.getState().sendChat(text); close(); router.push('/(tabs)/pet');
+          })(); }} /></> : null}
+          {preview?.generated && !sheet ? <AIContentLabel text="AI生成配图，非真实拍摄" testID="material-preview-ai-label" /> : null}
           {preview && !sheet ? <>{preview.stamp ? <><CityStamp {...preview.stamp} width="100%" height={270} testID="city-stamp-preview" /><Text style={u.muted}>{preview.stampUnlocked ? '已解锁，可用于明信片。' : '记录地点与城市名称精确匹配的已保存日记后解锁应用。'}</Text></> : <Image testID="material-photo-preview" source={preview.image} style={s.preview} resizeMode="contain" />}{preview.photoId ? preview.generated ? <><Button label={savingGeneratedImage ? '正在保存…' : '保存到相册'} disabled={savingGeneratedImage} onPress={() => { void savePreviewToLibrary(); }} />{saveGeneratedImageMessage ? <Text accessibilityLiveRegion="polite" style={saveGeneratedImageMessage.startsWith('已保存') ? s.savedMessage : s.aiError}>{saveGeneratedImageMessage}</Text> : null}<Button label="用于明信片" variant="secondary" onPress={usePreviewForPostcard} /><Button label="生成日记" variant="secondary" onPress={startDiaryFromGeneratedPhoto} /></> : <><Button label="用于日记" onPress={() => setSheet('diary')} /><Button label="用于明信片" variant="secondary" onPress={usePreviewForPostcard} /></> : <Button label="用于明信片" onPress={usePreviewForPostcard} />}</> : null}
     </BottomSheet>
   </Screen>;

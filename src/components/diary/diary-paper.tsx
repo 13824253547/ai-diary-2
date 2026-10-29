@@ -6,6 +6,7 @@ import { colors } from '../../theme/tokens';
 import { Photo } from './photo';
 import { CityStamp } from '../library/city-stamp';
 import { getCityStampConfig, getVisitedCityStampIds } from '../library/city-stamp-catalog';
+import { AIContentLabel, AI_DIARY_NOTICE } from '../common/ai-content-label';
 
 const titleFont = 'STSong';
 const bodyFont = 'PingFang SC';
@@ -103,6 +104,7 @@ export function DiaryPaper({
       <Text style={s.meta}>
         {metadata}
       </Text>
+      <AIContentLabel text={AI_DIARY_NOTICE} testID={`${testIDPrefix}-ai-label-${diary.id}`} />
       {paragraphs.map((block, index) => {
         if (block.type !== 'text') return null;
         const [photoId, ...additionalPhotos] = photosForBlock(diary, block);

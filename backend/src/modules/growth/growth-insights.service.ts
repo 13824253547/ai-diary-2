@@ -94,7 +94,10 @@ export function computeLongestConsecutiveDays(values: string[]) {
   return longest;
 }
 
-function findStreakEvidence(diaries: DiarySnapshotRow[], targetDays: number) {
+function findStreakEvidence(
+  diaries: Array<Pick<DiarySnapshotRow, 'id' | 'date' | 'publishedLocalDate' | 'createdAt'>>,
+  targetDays: number,
+) {
   const diaryByDate = new Map<string, string>();
   for (const diary of diaries) {
     const date = resolveGrowthDiaryDate(diary);
@@ -476,7 +479,7 @@ export class GrowthInsightsService implements OnModuleInit {
       : 0;
 
     return {
-      version: 'growth-insight-v1' as const,
+      version: 'growth-insight-v2' as const,
       flowers: GROWTH_FLOWER_IDS.map(flowerId => {
         const unlock = milestoneById.get(FLOWER_MILESTONE_RECORD_IDS[flowerId]);
         const recognition = flowerById.get(flowerId);
@@ -680,14 +683,22 @@ export class GrowthInsightsService implements OnModuleInit {
           || result.tripDiaryIds.some(id => !allowedDiaryIds.has(id))) {
           throw new GrowthInsightProviderError('invalid_response');
         }
-        await this.grantFlowers(ownerDeviceId, result, refs);
-        await this.grantFirstTrip(ownerDeviceId, result.tripDiaryIds);
-        await this.prisma.growthRecognitionRun.update({
-          where: { id: runId },
-          data: {
-            nextBatchIndex: index + 1,
-            inFlightBatchIndex: null,
-          },
+        await this.prisma.$transaction(async transaction => {
+          await this.lockDiaryRefs(transaction, ownerDeviceId, refs);
+          const currentRun = await transaction.growthRecognitionRun.findFirst({
+            where: { id: runId, ownerDeviceId, status: 'running' },
+            select: { id: true },
+          });
+          if (!currentRun) throw new GrowthInsightServiceError('source_changed');
+          await this.grantFlowers(transaction, ownerDeviceId, result, refs);
+          await this.grantFirstTrip(transaction, ownerDeviceId, result.tripDiaryIds);
+          await transaction.growthRecognitionRun.update({
+            where: { id: runId },
+            data: {
+              nextBatchIndex: index + 1,
+              inFlightBatchIndex: null,
+            },
+          });
         });
       }
       await this.prisma.growthRecognitionRun.update({
@@ -710,6 +721,7 @@ export class GrowthInsightsService implements OnModuleInit {
   }
 
   private async grantFlowers(
+    transaction: Prisma.TransactionClient,
     ownerDeviceId: string,
     result: GrowthFlowerRecognitionResult,
     sourceRefs: SourceDiaryRef[],
@@ -719,7 +731,7 @@ export class GrowthInsightsService implements OnModuleInit {
       const versions = flower.sourceDiaryIds.map(id => ({ id, version: versionById.get(id) }));
       if (versions.some(ref => !ref.version)) throw new GrowthInsightProviderError('invalid_response');
       const sourceHash = createHash('sha256').update(JSON.stringify(versions)).digest('hex');
-      await this.prisma.growthFlower.upsert({
+      await transaction.growthFlower.upsert({
         where: { ownerDeviceId_flowerKey: { ownerDeviceId, flowerKey: flower.flowerId } },
         create: {
           ownerDeviceId,
@@ -734,9 +746,48 @@ export class GrowthInsightsService implements OnModuleInit {
     }
   }
 
-  private async grantFirstTrip(ownerDeviceId: string, sourceDiaryIds: string[]) {
+  private async grantFirstTrip(
+    transaction: Prisma.TransactionClient,
+    ownerDeviceId: string,
+    sourceDiaryIds: string[],
+  ) {
     if (!sourceDiaryIds.length) return;
-    await this.persistMilestone(ownerDeviceId, 'first-trip', sourceDiaryIds);
+    await transaction.growthMilestone.upsert({
+      where: { ownerDeviceId_milestoneId: { ownerDeviceId, milestoneId: 'first-trip' } },
+      create: {
+        ownerDeviceId,
+        milestoneId: 'first-trip',
+        sourceDiaryIds: inputJson(sourceDiaryIds),
+      },
+      update: {},
+    });
+  }
+
+  private async lockDiaryRefs(
+    transaction: Prisma.TransactionClient,
+    ownerDeviceId: string,
+    refs: SourceDiaryRef[],
+  ) {
+    if (!refs.length) throw new GrowthInsightServiceError('source_changed');
+    const diaryIds = [...new Set(refs.map(ref => ref.id))];
+    const locked = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT \`id\`
+      FROM \`Diary\`
+      WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+        AND \`id\` IN (${Prisma.join(diaryIds)})
+      ORDER BY \`id\`
+      FOR UPDATE
+    `);
+    if (locked.length !== diaryIds.length) throw new GrowthInsightServiceError('source_changed');
+    const current = await transaction.diary.findMany({
+      where: { ownerDeviceId, id: { in: diaryIds } },
+      select: { id: true, version: true },
+    });
+    const versionById = new Map(current.map(diary => [diary.id, diary.version]));
+    if (current.length !== diaryIds.length
+      || refs.some(ref => versionById.get(ref.id) !== ref.version)) {
+      throw new GrowthInsightServiceError('source_changed');
+    }
   }
 
   private async persistMilestone(
@@ -827,6 +878,21 @@ export class GrowthInsightsService implements OnModuleInit {
         throw new GrowthInsightServiceError('not_unlocked');
       }
       await this.prisma.$transaction(async transaction => {
+        const lockedDiaries = await transaction.$queryRaw<Array<{ id: string; version: number }>>(Prisma.sql`
+          SELECT \`id\`, \`version\`
+          FROM \`Diary\`
+          WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+          ORDER BY \`id\`
+          FOR UPDATE
+        `);
+        if (makeSourceVersion(lockedDiaries) !== job.sourceVersion) {
+          throw new GrowthInsightServiceError('source_changed');
+        }
+        const currentJob = await transaction.growthReportJob.findFirst({
+          where: { id: jobId, ownerDeviceId, status: 'running' },
+          select: { id: true },
+        });
+        if (!currentJob) throw new GrowthInsightServiceError('source_changed');
         const savedReport = await transaction.growthInsightReport.upsert({
           where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion: job.sourceVersion } },
           create: {

@@ -8,6 +8,11 @@ import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryPhoto } from '../../src/types/diary';
 import * as saveImage from '../../src/services/save-generated-image';
 import * as materialPhotoApi from '../../src/services/material-photo-api';
+import { requestAIConsent } from '../../src/services/ai-consent';
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
 
 const mockRouter = {
   push: jest.fn(),
@@ -122,6 +127,37 @@ describe('Library AI image generation panel', () => {
   afterEach(() => {
     cleanup();
     jest.restoreAllMocks();
+  });
+
+  test('preserves the scene description and does not generate after declining consent', async () => {
+    jest.mocked(requestAIConsent).mockResolvedValueOnce(false);
+    const generate = jest.fn();
+    useAppStore.setState({ generateMaterialImage: generate as AppStore['generateMaterialImage'] });
+    const screen = await render(<LibraryScreen />);
+    await openAIPanel(screen);
+    await act(async () => { fireEvent.changeText(screen.getByLabelText('画面描述'), '海边日落'); });
+    await pressAction(screen, '生成配图');
+    expect(generate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('画面描述').props.value).toBe('海边日落');
+    expect(screen.getByLabelText('生成配图').props.accessibilityState.disabled).toBe(false);
+  });
+
+  test('does not submit the description if the panel closes before consent completes', async () => {
+    let finishConsent!: (allowed: boolean) => void;
+    const consent = new Promise<boolean>(resolve => { finishConsent = resolve; });
+    jest.mocked(requestAIConsent).mockReturnValueOnce(consent);
+    const generate = jest.fn();
+    useAppStore.setState({ generateMaterialImage: generate as AppStore['generateMaterialImage'] });
+    const screen = await render(<LibraryScreen />);
+    await openAIPanel(screen);
+    await act(async () => { fireEvent.changeText(screen.getByLabelText('画面描述'), '海边日落'); });
+    await pressAction(screen, '生成配图');
+    expect(generate).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('正在确认授权…')).toBeTruthy();
+    await pressAction(screen, '关闭底部面板');
+    await act(async () => { finishConsent(true); await consent; });
+    expect(generate).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('画面描述')).toBeNull();
   });
 
   test('shows loading, disables the prompt and allows cancelling an in-flight request', async () => {

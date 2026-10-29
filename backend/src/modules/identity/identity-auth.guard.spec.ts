@@ -1,5 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { IdentityAuthGuard } from './identity-auth.guard';
+const TEST_TOKEN = `${Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url')}.payload.signature`;
 
 function createContext(request: {
   method: string;
@@ -18,7 +19,12 @@ describe('IdentityAuthGuard', () => {
     isAttestedMode: jest.fn(),
     authenticateAccessToken: jest.fn(),
   };
-  const guard = new IdentityAuthGuard(identityAuth as never);
+  const installationAuth = {
+    enabled: jest.fn().mockReturnValue(false),
+    authenticate: jest.fn(),
+    limitBusiness: jest.fn(),
+  };
+  const guard = new IdentityAuthGuard(identityAuth as never, installationAuth as never);
 
   beforeEach(() => {
     process.env.NODE_ENV = 'development';
@@ -26,6 +32,8 @@ describe('IdentityAuthGuard', () => {
     identityAuth.isAttestedMode.mockReturnValue(true);
     identityAuth.authenticateAccessToken.mockResolvedValue({ sub: 'device-server-id' });
     identityAuth.authenticateAccessToken.mockClear();
+    installationAuth.enabled.mockReturnValue(false);
+    installationAuth.limitBusiness.mockClear();
   });
 
   afterAll(() => {
@@ -46,7 +54,7 @@ describe('IdentityAuthGuard', () => {
       method: 'GET',
       path: '/api/diaries',
       headers: {
-        authorization: 'Bearer signed-token',
+        authorization: `Bearer ${TEST_TOKEN}`,
         'x-device-id': 'device-client-substitution',
       },
     }))).rejects.toBeInstanceOf(UnauthorizedException);
@@ -55,11 +63,11 @@ describe('IdentityAuthGuard', () => {
       method: 'GET',
       path: '/api/diaries',
       headers: {
-        authorization: 'Bearer signed-token',
+        authorization: `Bearer ${TEST_TOKEN}`,
         'x-device-id': 'device-server-id',
       },
     }))).resolves.toBe(true);
-    expect(identityAuth.authenticateAccessToken).toHaveBeenCalledWith('signed-token');
+    expect(identityAuth.authenticateAccessToken).toHaveBeenCalledWith(TEST_TOKEN);
   });
 
   it('keeps registration endpoints reachable before a server-issued identity exists', async () => {
@@ -82,4 +90,27 @@ describe('IdentityAuthGuard', () => {
       headers: { 'x-device-id': 'device-server-id' },
     }))).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it('validates installation tokens and limits authenticated requests before business code', async () => {
+    installationAuth.enabled.mockReturnValue(true);
+    installationAuth.authenticate.mockResolvedValue({ sub: 'device-server-id' });
+    await expect(guard.canActivate(createContext({
+      method: 'GET', path: '/api/diaries',
+      headers: {
+        authorization: `Bearer ${Buffer.from(JSON.stringify({ alg: 'EdDSA' })).toString('base64url')}.payload.signature`,
+        'x-device-id': 'device-server-id',
+      },
+    }))).resolves.toBe(true);
+    expect(installationAuth.authenticate).toHaveBeenCalled();
+    expect(installationAuth.limitBusiness).toHaveBeenCalledWith('device-server-id', 'unknown', 'GET', '/api/diaries');
+    expect(identityAuth.authenticateAccessToken).not.toHaveBeenCalled();
+  });
+
+  it.each(['/api/identity/installation/challenge', '/api/identity/installation/exchange'])(
+    'allows only the enrollment POST route %s without a token', async path => {
+      installationAuth.enabled.mockReturnValue(true);
+      await expect(guard.canActivate(createContext({ method: 'POST', path, headers: {} }))).resolves.toBe(true);
+      await expect(guard.canActivate(createContext({ method: 'GET', path, headers: {} }))).rejects.toBeInstanceOf(UnauthorizedException);
+    },
+  );
 });

@@ -1,0 +1,64 @@
+name: orange-glow
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    env_file: ./mysql.env
+    ports: ["127.0.0.1:33307:3306"]
+    command:
+      - --innodb-buffer-pool-size=96M
+      - --innodb-log-buffer-size=8M
+      - --max-connections=25
+      - --performance-schema=OFF
+      - --mysqlx=OFF
+    mem_limit: 380m
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7.4
+    restart: unless-stopped
+    ports: ["127.0.0.1:36380:6379"]
+    command: ["redis-server", "--bind", "0.0.0.0", "--appendonly", "yes", "--maxmemory", "32mb", "--maxmemory-policy", "noeviction"]
+    mem_limit: 64m
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  migrate:
+    image: orange-glow-backend:${RELEASE_TAG:?RELEASE_TAG required}-migration
+    profiles: [tools]
+    network_mode: host
+    env_file: ./backend.env
+    mem_limit: 220m
+    depends_on:
+      mysql: {condition: service_healthy}
+  backend:
+    image: orange-glow-backend:${RELEASE_TAG:?RELEASE_TAG required}
+    restart: unless-stopped
+    network_mode: host
+    env_file: ./backend.env
+    environment:
+      NODE_OPTIONS: --max-old-space-size=256
+    mem_limit: 340m
+    volumes:
+      - ./photo-assets:/data/photo-assets
+      - ./generation-tmp:/data/generation-tmp
+    depends_on:
+      mysql: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "node", "-e", "const s=require('net').connect(3001,'127.0.0.1',()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),3000).unref()"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}
+volumes:
+  mysql-data:
+  redis-data:

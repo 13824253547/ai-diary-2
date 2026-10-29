@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
         <key>CFBundleDisplayName</key>
-        <string>橙光AI日记</string>
+        <string>AI旅行日记</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -45,11 +45,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
         <key>NSPhotoLibraryUsageDescription</key>
-        <string>允许访问你的相册，用来读取你选择的照片并生成回忆日记。</string>
+        <string>允许读取你选择的照片，用于AI创作游记或添加到素材库。</string>
         <key>NSPhotoLibraryAddUsageDescription</key>
         <string>允许将生成的配图和明信片保存到你的系统相册。</string>
         <key>NSLocationWhenInUseUsageDescription</key>
-        <string>允许在日记地点无法识别时补充当前城市，并在查看同城内容时筛选附近公开日记。</string>
+        <string>允许在日记地点无法识别时补充当前城市，并在筛选同城公开日记时使用城市信息。</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

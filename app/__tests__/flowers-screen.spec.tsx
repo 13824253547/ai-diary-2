@@ -4,6 +4,11 @@ import FlowersScreen from '../profile/flowers';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
+import { requestAIConsent } from '../../src/services/ai-consent';
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
 import {
   GROWTH_FLOWER_IDS,
   GROWTH_INSIGHT_CONTRACT_VERSION,
@@ -29,6 +34,10 @@ const baselineState: GrowthInsightState = {
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
+  useFocusEffect: (effect: () => void | (() => void)) => {
+    const { useEffect } = require('react');
+    useEffect(effect, [effect]);
+  },
 }));
 
 jest.mock('expo-linear-gradient', () => {
@@ -91,6 +100,19 @@ describe('Flowers screen', () => {
 
   afterEach(() => cleanup());
 
+  test('does not initialize full-library recognition after refusing consent', async () => {
+    jest.mocked(requestAIConsent).mockResolvedValueOnce(false);
+    const initializeGrowthFlowers = jest.fn();
+    useAppStore.setState({
+      growthInsights: baselineState,
+      loadGrowthInsights: jest.fn(async () => baselineState),
+      initializeGrowthFlowers,
+    });
+    await render(<FlowersScreen />);
+    await waitFor(() => expect(requestAIConsent).toHaveBeenCalledWith('insights', expect.anything()));
+    expect(initializeGrowthFlowers).not.toHaveBeenCalled();
+  });
+
   test('starts the one-time full diary recognition on first entry and shows real milestones', async () => {
     const running: GrowthInsightState = {
       ...baselineState,
@@ -148,7 +170,7 @@ describe('Flowers screen', () => {
 
     const screen = await render(<FlowersScreen />);
     await waitFor(() => expect(screen.getByText('有日记来源支持的花朵总结 1')).toBeTruthy());
-    expect(screen.getByText('集满 3 朵花可解锁专属洞察报告（3/3）')).toBeTruthy();
+    expect(screen.getByText('完成 3 项成长记录可解锁专属洞察报告（3/3）')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('查看专属洞察报告'));
     expect(mockRouter.push).toHaveBeenCalledWith('/profile/report');
   });
@@ -181,7 +203,7 @@ describe('Flowers screen', () => {
     expect(screen.getByLabelText('记忆花朵图稿').props.children).toBe(
       '{"pathfinder":true,"self-awareness":false,"healing":false}',
     );
-    expect(screen.getByText('集满 3 朵花可解锁专属洞察报告（1/3）')).toBeTruthy();
+    expect(screen.getByText('完成 3 项成长记录可解锁专属洞察报告（1/3）')).toBeTruthy();
     expect(screen.getByText('已从日记中找到旅行回忆')).toBeTruthy();
     expect(screen.getByText('1/30 天')).toBeTruthy();
     expect(screen.getByText('9/100')).toBeTruthy();

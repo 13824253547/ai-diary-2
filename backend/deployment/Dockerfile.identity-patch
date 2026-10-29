@@ -1,0 +1,10 @@
+ARG AUTH_IMAGE
+ARG BASE_IMAGE
+FROM ${AUTH_IMAGE} AS authentication
+FROM ${BASE_IMAGE}
+COPY --from=authentication /app/dist/modules/identity/identity-auth.guard.js /app/dist/modules/identity/
+COPY --from=authentication /app/dist/modules/identity/identity-auth.service.js /app/dist/modules/identity/
+COPY --from=authentication /app/dist/modules/identity/identity.controller.js /app/dist/modules/identity/
+COPY --from=authentication /app/dist/modules/identity/identity.module.js /app/dist/modules/identity/
+COPY --from=authentication /app/dist/modules/identity/installation-auth.service.js /app/dist/modules/identity/
+COPY --from=authentication /app/dist/modules/identity/installation-token.js /app/dist/modules/identity/

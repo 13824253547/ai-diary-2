@@ -303,7 +303,17 @@ describe('Postcard screen material assets', () => {
       uri: generated.uri, headers: generated.remoteHeaders,
     });
     expect(screen.queryByText('未知日期')).toBeNull();
-    expect(screen.getByText('已使用当前选择的真实照片')).toBeTruthy();
+    expect(screen.getByTestId('postcard-ai-label')).toBeTruthy();
+    expect(screen.getByText('已使用AI生成配图，导出图片保留标识')).toBeTruthy();
+    expect(screen.queryByText('已使用当前选择的真实照片')).toBeNull();
+    fireEvent(screen.getByTestId('postcard-photo'), 'load');
+    await waitFor(() => expect(screen.getByLabelText('分享明信片').props.accessibilityState.disabled).toBe(false));
+    await act(async () => { fireEvent.press(screen.getByLabelText('分享明信片')); });
+    await waitFor(() => expect(capturePostcard).toHaveBeenCalledWith(
+      expect.anything(), expect.stringMatching(/^postcard/),
+    ));
+    expect(sharePostcard).toHaveBeenCalledWith('file:///cache/postcard.png');
+    await waitFor(() => expect(screen.getByLabelText('分享明信片').props.accessibilityState.disabled).toBe(false));
   });
 
   test('does not share a stale capture after the selected photo changes', async () => {

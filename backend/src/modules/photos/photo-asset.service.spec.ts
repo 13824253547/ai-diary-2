@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Prisma } from '@prisma/client';
+import sharp from 'sharp';
 import { PrismaService } from '../../common/prisma.service';
 import { PhotoAssetError, PhotoAssetService } from './photo-asset.service';
 
@@ -150,7 +151,7 @@ describe('PhotoAssetService', () => {
 
   test('persists generated image bytes with request provenance and reuses the same request asset', async () => {
     const image = {
-      buffer: Buffer.from([0xff, 0xd8, 0xff, 0x01, 0x02]),
+      buffer: await sharp({ create: { width: 400, height: 300, channels: 3, background: '#123456' } }).jpeg().toBuffer(),
       mimeType: 'image/jpeg',
       extension: 'jpg',
     };
@@ -175,8 +176,17 @@ describe('PhotoAssetService', () => {
     });
     expect(replayed.id).toBe(generated.id);
     expect(materialRows).toHaveLength(1);
-    expect(await readFile(join(root, String(materialRows[0]?.filePath)))).toEqual(image.buffer);
+    const persisted = await readFile(join(root, String(materialRows[0]?.filePath)));
+    expect((await sharp(persisted).metadata()).xmp?.toString()).toContain('orange-glow-visible-ai-label-v1');
+    expect(await service.readMaterialPhoto('device-1', generated.id)).toEqual({
+      buffer: persisted,
+      mimeType: 'image/jpeg',
+    });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    await service.ensureDiaryPhotoCopies('device-1', 'diary-ai', [generated.id]);
+    await service.deleteMaterials('device-1', [generated.id]);
+    expect((await sharp((await service.readDiaryPhotoCopy('device-1', 'diary-ai', generated.id)).buffer).metadata()).xmp?.toString())
+      .toContain('orange-glow-visible-ai-label-v1');
   });
 
   test('counts generated images and uploaded photos in the same device quota', async () => {
@@ -186,7 +196,7 @@ describe('PhotoAssetService', () => {
     })));
     await service.assertMaterialCapacity('device-1');
     const image = {
-      buffer: Buffer.from([0xff, 0xd8, 0xff, 0x01, 0x02]),
+      buffer: await sharp({ create: { width: 400, height: 300, channels: 3, background: '#123456' } }).jpeg().toBuffer(),
       mimeType: 'image/jpeg',
       extension: 'jpg',
     };

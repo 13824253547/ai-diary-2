@@ -4,6 +4,11 @@ import ReportScreen from '../profile/report';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
+import { requestAIConsent } from '../../src/services/ai-consent';
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
 import {
   GROWTH_FLOWER_IDS,
   GROWTH_INSIGHT_CONTRACT_VERSION,
@@ -113,6 +118,21 @@ describe('Report screen', () => {
 
   afterEach(() => cleanup());
 
+  test('does not generate an unlocked report after refusing full-library consent', async () => {
+    jest.mocked(requestAIConsent).mockResolvedValueOnce(false);
+    const unlocked = withReport();
+    const ensureCurrentGrowthReport = jest.fn();
+    useAppStore.setState({
+      growthInsights: unlocked,
+      loadGrowthInsights: jest.fn(async () => unlocked),
+      ensureCurrentGrowthReport,
+    });
+    const screen = await render(<ReportScreen />);
+    await waitFor(() => expect(requestAIConsent).toHaveBeenCalledWith('insights', expect.anything()));
+    expect(ensureCurrentGrowthReport).not.toHaveBeenCalled();
+    expect(screen.getByText('这是第 1 条来自日记的真实观察。')).toBeTruthy();
+  });
+
   test('blocks direct access while the server says flowers are locked', async () => {
     const locked = state({
       flowers: GROWTH_FLOWER_IDS.map((flowerId, index) => ({
@@ -120,6 +140,11 @@ describe('Report screen', () => {
         title: ['人生旷野的寻路者', '觉察自我的思考者', '压力迷茫的疗愈者'][index],
         status: 'locked',
       })),
+      milestones: {
+        firstTrip: { achieved: false, sourceDiaryIds: [] },
+        streak30: { currentDays: 4, targetDays: 30, achieved: false },
+        anchors100: { count: 3, target: 100, achieved: false },
+      },
       report: { unlocked: false, status: 'locked', stale: false },
     });
     const ensureCurrentGrowthReport = jest.fn();
@@ -131,6 +156,7 @@ describe('Report screen', () => {
     const screen = await render(<ReportScreen />);
 
     await waitFor(() => expect(screen.getByText('专属洞察报告尚未解锁')).toBeTruthy());
+    expect(screen.getByText('完成首次旅行、连续记录 30 天和 100 个锚点后，小橘就会为你整理专属洞察。')).toBeTruthy();
     expect(screen.queryByText('这是第 1 条来自日记的真实观察。')).toBeNull();
     expect(ensureCurrentGrowthReport).not.toHaveBeenCalled();
     fireEvent.press(screen.getByLabelText('返回记忆花朵'));
@@ -180,6 +206,6 @@ describe('Report screen', () => {
     await waitFor(() => expect(screen.getByText('这次没有生成新报告；之前成功的报告仍会保留。')).toBeTruthy());
     expect(screen.getByText('这是第 1 条来自日记的真实观察。')).toBeTruthy();
     fireEvent.press(screen.getByLabelText('重试生成报告'));
-    expect(retryGrowthReport).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(retryGrowthReport).toHaveBeenCalledTimes(1));
   });
 });

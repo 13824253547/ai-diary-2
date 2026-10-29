@@ -5,6 +5,7 @@ import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'rea
 import { Button } from '../../src/components/common/button';
 import { Empty, Sheet } from '../../src/components/common/design-ui';
 import { Photo } from '../../src/components/diary/photo';
+import { AIContentLabel, AI_DIARY_NOTICE } from '../../src/components/common/ai-content-label';
 import { Screen } from '../../src/components/layout/screen';
 import { TopBar } from '../../src/components/layout/top-bar';
 import { projectDiaryForSharing, useAppStore } from '../../src/store/use-app-store';
@@ -17,6 +18,7 @@ function SharePoster({ diary, expanded = false }: { diary: DiaryItem; expanded?:
   const photos = diary.posterPhotoIds?.length ? diary.posterPhotoIds : diary.photoIds.slice(0, 2);
   return <View style={[styles.poster, expanded && styles.expandedPoster]}>
     <View style={styles.posterHeading}><Text style={[styles.posterTitle, expanded && { fontSize: 27 }]}>{diary.title}</Text><Image source={art.stamp} style={styles.stamp} resizeMode="contain" /></View>
+    <AIContentLabel text={AI_DIARY_NOTICE} />
     <View style={styles.posterPhotos}>{photos.slice(0, 2).map((photoId, index) => <Photo key={photoId} id={photoId} diaryId={diary.id} anonymous={diary.anonymous} style={[styles.posterPhoto, { aspectRatio: index === 0 ? 1.55 : 1.65 }]} />)}{photos.length === 0 ? <Text style={styles.quoteOnly}>{diary.summary}</Text> : null}</View>
     <View style={styles.posterFooter}><View style={styles.posterCopy}><Text numberOfLines={2} style={styles.posterCaption}>{diary.summary}</Text><Text style={styles.posterDate}>{diary.date}{diary.location ? ` · ${diary.location}` : ''}</Text>{diary.anonymous ? <Text style={styles.anonymous}>匿名日记 · 人物已遮挡</Text> : null}</View></View>
     <Image source={art.mascot} style={styles.mascot} resizeMode="contain" />

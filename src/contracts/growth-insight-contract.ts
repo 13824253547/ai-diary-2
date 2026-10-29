@@ -1,4 +1,4 @@
-export const GROWTH_INSIGHT_CONTRACT_VERSION = 'growth-insight-v1';
+export const GROWTH_INSIGHT_CONTRACT_VERSION = 'growth-insight-v2';
 
 export const GROWTH_FLOWER_IDS = ['pathfinder', 'self-awareness', 'healing'] as const;
 export const GROWTH_REPORT_DIMENSION_IDS = [
@@ -172,6 +172,7 @@ export function isGrowthInsightState(value: unknown): value is GrowthInsightStat
     || typeof value.milestones.firstTrip.achieved !== 'boolean'
     || !Array.isArray(value.milestones.firstTrip.sourceDiaryIds)
     || !value.milestones.firstTrip.sourceDiaryIds.every(isNonEmptyString)
+    || (value.milestones.firstTrip.achieved && value.milestones.firstTrip.sourceDiaryIds.length === 0)
     || !isRecord(value.milestones.streak30)
     || !Number.isSafeInteger(value.milestones.streak30.currentDays)
     || (value.milestones.streak30.currentDays as number) < 0

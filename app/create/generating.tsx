@@ -17,6 +17,7 @@ import { TopBar } from "../../src/components/layout/top-bar";
 import { Empty } from "../../src/components/common/design-ui";
 import { useDraftRoute } from "../../src/hooks/use-diary-flow";
 import { useAppStore } from "../../src/store/use-app-store";
+import { requestAIConsent } from "../../src/services/ai-consent";
 import { art } from "../../src/theme/assets";
 import { colors } from "../../src/theme/tokens";
 import type {
@@ -108,6 +109,7 @@ export default function Generating() {
   const [phaseMinimumElapsed, setPhaseMinimumElapsed] = useState(false);
   const [successReady, setSuccessReady] = useState(false);
   const [isPageFocused, setIsPageFocused] = useState(false);
+  const [waitingForConsent, setWaitingForConsent] = useState(false);
   const round = draft?.generation.round;
   const stage = draft?.generation.remoteStage ?? "queued";
   const progress = draft
@@ -275,6 +277,8 @@ export default function Generating() {
       let cancelled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       let activeRound: number | undefined;
+      let authorizing = false;
+      const consentController = new AbortController();
       focusActive.current = true;
       navigationDone.current = false;
       setIsPageFocused(true);
@@ -292,7 +296,7 @@ export default function Generating() {
             text: "重新生成",
             onPress: () => {
               finished = false;
-              beginAttempt();
+              void beginAttempt();
             },
           },
         ]);
@@ -346,13 +350,29 @@ export default function Generating() {
         );
       };
 
-      const beginAttempt = () => {
+      const beginAttempt = async () => {
+        if (authorizing || cancelled) return;
         const current = useAppStore.getState().drafts[id];
         if (current?.generation.status === "complete") {
           setSuccessReady(true);
           return;
         }
-
+        if (!current) return;
+        const fingerprint = JSON.stringify([current.generation.round, current.selectedPhotoIds, current.diary.characterId]);
+        authorizing = true;
+        setWaitingForConsent(true);
+        const allowed = await requestAIConsent('diary', consentController.signal);
+        authorizing = false;
+        if (cancelled) return;
+        setWaitingForConsent(false);
+        if (!allowed) {
+          router.back();
+          return;
+        }
+        const latest = useAppStore.getState().drafts[id];
+        if (!latest || fingerprint !== JSON.stringify([latest.generation.round, latest.selectedPhotoIds, latest.diary.characterId])) return;
+        phaseStartedAt.current = Date.now();
+        setPhaseMinimumElapsed(false);
         const round = useAppStore.getState().startGeneration(id);
         if (round === undefined) {
           showFailure("当前草稿还不能生成，请返回首页检查照片和排版师。");
@@ -371,10 +391,11 @@ export default function Generating() {
         };
       }
 
-      beginAttempt();
+      void beginAttempt();
 
       return () => {
         cancelled = true;
+        consentController.abort();
         focusActive.current = false;
         setIsPageFocused(false);
         setSuccessReady(false);
@@ -404,7 +425,7 @@ export default function Generating() {
           style={s.hero}
           resizeMode="contain"
         />
-        <Text style={s.title}>小橘正在帮你{"\n"}生成回忆日记中…</Text>
+        <Text style={s.title}>{waitingForConsent ? '请先确认AI创作授权' : <>小橘正在帮你{"\n"}生成回忆日记中…</>}</Text>
         <View
           style={s.track}
           accessible

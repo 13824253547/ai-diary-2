@@ -210,7 +210,7 @@ export class IdentityAuthService {
     const device = await this.prisma.appAttestDevice.findUnique({
       where: { keyId: input.keyId },
     });
-    if (!device) {
+    if (!device || device.environment === 'installation-ed25519-v1') {
       throw new NotFoundException({
         ok: false,
         error: {
@@ -267,7 +267,7 @@ export class IdentityAuthService {
     const device = await this.prisma.appAttestDevice.findUnique({
       where: { keyId: input.keyId },
     });
-    if (!device || device.deviceId !== challenge.deviceId || device.revokedAt) throw this.invalidProof();
+    if (!device || device.environment === 'installation-ed25519-v1' || device.deviceId !== challenge.deviceId || device.revokedAt) throw this.invalidProof();
 
     const signedChallenge: SignedTokenChallenge = {
       challengeId: challenge.id,
@@ -318,6 +318,7 @@ export class IdentityAuthService {
     });
     if (
       !device
+      || device.environment === 'installation-ed25519-v1'
       || device.revokedAt
       || device.keyId !== claims.keyId
       || device.tokenVersion !== claims.ver

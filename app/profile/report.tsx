@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -7,6 +7,7 @@ import { Button } from '../../src/components/common/button';
 import { EmptyResult } from '../../src/components/common/support-ui';
 import { colors } from '../../src/theme/tokens';
 import { useAppStore } from '../../src/store/use-app-store';
+import { useAIConsent } from '../../src/hooks/use-ai-consent';
 
 export default function ReportScreen() {
   const router = useRouter();
@@ -16,17 +17,27 @@ export default function ReportScreen() {
   const loadGrowthInsights = useAppStore(value => value.loadGrowthInsights);
   const ensureCurrentGrowthReport = useAppStore(value => value.ensureCurrentGrowthReport);
   const retryGrowthReport = useAppStore(value => value.retryGrowthReport);
+  const { authorize, requestingConsent, cancelConsent } = useAIConsent();
+  const [consentDeclined, setConsentDeclined] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let active = true;
     void (async () => {
       const current = await loadGrowthInsights();
       if (active && current?.report.unlocked) {
+        const allowed = await authorize('insights');
+        if (!active) return;
+        setConsentDeclined(!allowed);
+        if (!allowed) return;
         await ensureCurrentGrowthReport();
       }
     })();
-    return () => { active = false; };
-  }, [ensureCurrentGrowthReport, loadGrowthInsights]));
+    return () => { active = false; cancelConsent(); };
+  }, [authorize, cancelConsent, ensureCurrentGrowthReport, loadGrowthInsights]));
+
+  const retryWithConsent = async () => {
+    if (await authorize('insights')) await retryGrowthReport();
+  };
 
   useEffect(() => {
     if (state?.report.status !== 'pending' && state?.report.status !== 'running') return undefined;
@@ -36,7 +47,7 @@ export default function ReportScreen() {
 
   return (
     <GrowthScreen header={<View style={s.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel="返回" hitSlop={8} onPress={() => router.back()} style={s.back}>
+        <Pressable accessibilityRole="button" accessibilityLabel="返回" hitSlop={8} onPress={() => {cancelConsent();router.back();}} style={s.back}>
           <Ionicons name="chevron-back" size={25} color={colors.textPrimary} />
         </Pressable>
         <View style={s.heading}>
@@ -56,19 +67,27 @@ export default function ReportScreen() {
             <Button label="返回记忆花朵" onPress={() => router.replace('/profile/flowers')} />
           </EmptyResult>
         : <>
+            {consentDeclined ? <View style={s.errorPanel}>
+              <Text style={s.status}>尚未授权全库洞察，未启动新的分析。</Text>
+              <Button disabled={requestingConsent} label="授权并生成报告" onPress={() => { void (async () => {
+                if (!(await authorize('insights'))) return;
+                setConsentDeclined(false);
+                await ensureCurrentGrowthReport();
+              })(); }} />
+            </View> : null}
             {state.report.status === 'pending' || state.report.status === 'running'
               ? <Text style={s.status}>{state.report.current ? '正在更新报告，先为你保留上次的成功版本。' : '小橘正在阅读你的日记并整理报告…'}</Text>
               : null}
             {status === 'error'
               ? <View style={s.errorPanel}>
                   <Text style={s.errorText}>{error ?? '洞察报告暂时无法读取。'}</Text>
-                  <Button label="重试生成报告" onPress={() => { void retryGrowthReport(); }} />
+                  <Button disabled={requestingConsent} label="重试生成报告" onPress={() => { void retryWithConsent(); }} />
                 </View>
               : null}
             {state.report.status === 'failed'
               ? <View style={s.errorPanel}>
                   <Text style={s.errorText}>这次没有生成新报告；之前成功的报告仍会保留。</Text>
-                  <Button label="重试生成报告" onPress={() => { void retryGrowthReport(); }} />
+                  <Button disabled={requestingConsent} label="重试生成报告" onPress={() => { void retryWithConsent(); }} />
                 </View>
               : null}
             {state.report.current
@@ -94,7 +113,7 @@ export default function ReportScreen() {
                   ))}
                   <Text style={s.disclaimer}>这不是定义，只是一面镜子。报告由服务端 AI 根据当前可访问的日记生成，并按设备身份隔离保存。</Text>
                 </ScrollView>
-              : state.report.status === 'idle' || state.report.status === 'stale'
+              : !consentDeclined && (state.report.status === 'idle' || state.report.status === 'stale')
                 ? <Text style={s.status}>正在准备当前日记版本的洞察报告…</Text>
                 : null}
           </>}

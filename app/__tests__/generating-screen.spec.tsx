@@ -5,6 +5,11 @@ import GeneratingScreen from '../create/generating';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
+import { requestAIConsent } from '../../src/services/ai-consent';
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: jest.fn(async () => true),
+}));
 
 const mockRouter = {
   push: jest.fn(),
@@ -85,6 +90,12 @@ async function advanceVisiblePhase() {
   });
 }
 
+const baselineGenerationActions = {
+  startGeneration: useAppStore.getState().startGeneration,
+  refreshDraftGeneration: useAppStore.getState().refreshDraftGeneration,
+  pauseGeneration: useAppStore.getState().pauseGeneration,
+};
+
 describe('Generating screen', () => {
   const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   const createDeferred = <T,>() => {
@@ -97,12 +108,43 @@ describe('Generating screen', () => {
 
   beforeEach(() => {
     resetAppStore();
+    useAppStore.setState(baselineGenerationActions);
     jest.clearAllMocks();
     mockDraftId = undefined;
   });
 
   afterAll(() => {
     alertSpy.mockRestore();
+  });
+
+  test('does not start or poll generation when first-use consent is refused', async () => {
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1']);
+    const startGeneration = jest.fn();
+    const refreshDraftGeneration = jest.fn();
+    useAppStore.setState({ startGeneration, refreshDraftGeneration });
+    jest.mocked(requestAIConsent).mockResolvedValueOnce(false);
+    await render(<GeneratingScreen />);
+    await waitFor(() => expect(mockRouter.back).toHaveBeenCalledTimes(1));
+    expect(startGeneration).not.toHaveBeenCalled();
+    expect(refreshDraftGeneration).not.toHaveBeenCalled();
+    expect(useAppStore.getState().drafts[draftId]).toBeTruthy();
+  });
+
+  test('ignores permission granted after the generation page has been left', async () => {
+    const deferred = createDeferred<boolean>();
+    jest.mocked(requestAIConsent).mockReturnValueOnce(deferred.promise);
+    const draftId = useAppStore.getState().beginCreation();
+    mockDraftId = draftId;
+    useAppStore.getState().setDraftPhotos(draftId, ['photo-11', 'photo-12', 'photo-1']);
+    const startGeneration = jest.fn();
+    useAppStore.setState({ startGeneration });
+    const screen = await render(<GeneratingScreen />);
+    expect(startGeneration).not.toHaveBeenCalled();
+    await screen.unmount();
+    await act(async () => { deferred.resolve(true); await deferred.promise; });
+    expect(startGeneration).not.toHaveBeenCalled();
   });
 
   test('smoothly shows the backend target, active work step, and selected photo count', async () => {

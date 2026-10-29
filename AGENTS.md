@@ -1,4 +1,4 @@
-# Orange Glow AI Diary Local Agent Rules
+# AI旅行日记 Local Agent Rules
 
 ## Goal
 
@@ -58,6 +58,6 @@ Prefer these local files first:
 
 ## Current Scope
 
-- Project: `Orange Glow AI Diary`
+- Project display name: `AI旅行日记`
 - Path: `/Users/hjd/Desktop/enter/code/aliyuncodeV2/AI-diary/orange-glow-ai-diary`
 - Current phase: iOS-first application prototype with both mock and service-backed flows; local NestJS/Prisma/MySQL integration exists, while production backend/provider deployment remains unestablished.

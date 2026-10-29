@@ -1,5 +1,11 @@
 # 当前执行快照
 
+## DEV-90 三项成长记录绑定记忆花朵（2026-10-29）
+
+首次旅行、历史最长连续记录满 30 天、100 个真实锚点依序解锁 pathfinder、self-awareness、healing；首次授予按设备持久保留，当前连续段/锚点数仍显示实时值。AI 识别只提供有来源的主题摘要和首次旅行证据，不再单独授权花朵/报告；报告读状态及服务端 API 统一按三项里程碑检查。花名下“已绽放/未解锁”提示已移除，保留原开放花与灰褐色花苞资产；成长锁定说明改为三项记录条件。读契约升级为 `growth-insight-v2`，复用既有表，无 migration。
+
+客户端定向 6 suites / 23 tests、后端 Growth 2 suites / 7 tests、backend build、root typecheck 通过。安全隔离 MySQL E2E 3/3 通过（56 项按名称过滤跳过）；临时 schema `ai_diary_e2e_growth_20261029` 已删除，未使用开发库或调用模型。真实设备成长页、模型质量与真实用户来源仍待验，不增加完整 CASE passed。
+
 ## DEV-89 修复 AI 素材下载（2026-10-28）
 
 根因是 Expo `FileSystem/legacy.downloadAsync` 在 iOS 26 模拟器默认创建后台 URLSession，因 `com.apple.nsurlsessiond` XPC 不可用而在 HTTP 请求发出前失败。切换到 Expo 57 `File.downloadFileAsync` 的前台 `URLSession.shared` 后，当前设备 8 张 provider AI 素材均完成授权下载与 JPEG 转码；内容接口 8/8 HTTP 200。真实 generation job 分 3 张、5 张两批提交，均成功且各 1 次尝试；只创建私密未保存草稿/任务，按用户选择保留，不保存日记。临时执行器已移除；设备级素材 CASE 仍为部分执行，未增加完整 CASE passed。
