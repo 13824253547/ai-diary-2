@@ -109,23 +109,25 @@ describe('Profile screen monthly entry', () => {
   test('uses real monthly groups instead of fixed demo month params', async () => {
     useAppStore.setState({
       diaries: [
-        buildDiary({ id: 'diary-feb-1', title: '二月回忆', date: '2026.02.03' }),
-        buildDiary({ id: 'diary-jan-1', title: '一月回忆', date: '2026.01.10' }),
+        buildDiary({ id: 'diary-oct-1', title: '十月回忆', date: '2026.10.14' }),
+        buildDiary({ id: 'diary-aug-1', title: '八月回忆', date: '2026.08.27' }),
       ],
     });
 
-    const { getByLabelText } = await render(<ProfileScreen />);
+    const { getByLabelText, getByText } = await render(<ProfileScreen />);
 
     await waitFor(() => {
-      expect(getByLabelText('打开2026年2月月度装订')).toBeTruthy();
-      expect(getByLabelText('打开2026年1月月度装订')).toBeTruthy();
+      expect(getByLabelText('打开2026年10月月度装订')).toBeTruthy();
+      expect(getByLabelText('打开2026年8月月度装订')).toBeTruthy();
+      expect(getByText('2026年10月')).toBeTruthy();
+      expect(getByText('2026年8月')).toBeTruthy();
     });
 
-    fireEvent.press(getByLabelText('打开2026年2月月度装订'));
+    fireEvent.press(getByLabelText('打开2026年10月月度装订'));
 
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/profile/monthly',
-      params: { month: '2026-02' },
+      params: { month: '2026-10' },
     });
   });
 
