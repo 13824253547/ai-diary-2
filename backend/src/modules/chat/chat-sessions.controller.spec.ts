@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException } from '@nes
 import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
 import { ChatDailyAnchorService } from '../anchors/chat-daily-anchor.service';
 import { ArkPetChatProvider, PetChatProviderError } from './ark-pet-chat-provider';
+import { PetChatMemoryService } from './pet-chat-memory.service';
 import {
   ChatSessionError,
   ChatSessionsService,
@@ -26,10 +27,12 @@ describe('ChatSessionsController', () => {
   const dailyAnchors = {
     enqueueAfterCompletedTurn: jest.fn(),
   } as unknown as ChatDailyAnchorService;
-  const controller = new ChatSessionsController(service, provider, taskCoordinator, dailyAnchors);
+  const memories = { getContext: jest.fn() } as unknown as PetChatMemoryService;
+  const controller = new ChatSessionsController(service, provider, taskCoordinator, dailyAnchors, memories);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(memories.getContext).mockResolvedValue('recent-diary-memory');
   });
 
   test('requires device identity and forwards scoped conversation listing', async () => {
@@ -109,7 +112,8 @@ describe('ChatSessionsController', () => {
       .rejects.toBeInstanceOf(ConflictException);
   });
 
-  test('generates from persisted conversation messages and persists a trusted provider reply', async () => {
+  test.each([true, false])('generates a trusted reply with memory available=%s', async memoryAvailable => {
+    if (!memoryAvailable) jest.mocked(memories.getContext).mockRejectedValueOnce(new Error('read failed'));
     const pending = {
       id: 'conversation-1',
       updatedAt: '2026-10-20T00:00:00.000Z',
@@ -167,7 +171,8 @@ describe('ChatSessionsController', () => {
 
     expect(provider.reply).toHaveBeenCalledWith([
       { role: 'user', content: '今天有点累。' },
-    ], undefined);
+    ], undefined, memoryAvailable ? 'recent-diary-memory' : '');
+    expect(memories.getContext).toHaveBeenCalledWith('device-1');
     expect(service.completeGeneratedTurn).toHaveBeenCalledWith(expect.objectContaining({
       conversationId: 'conversation-1',
       requestId: 'request-1',
@@ -271,7 +276,7 @@ describe('ChatSessionsController', () => {
       { role: 'user', content: '上周去海边散步，心情放松了很多。' },
       { role: 'assistant', content: '听起来那阵海风给你带来了一点放松。' },
       { role: 'user', content: '今天也想聊聊。' },
-    ], undefined);
+    ], undefined, 'recent-diary-memory');
   });
 
   test('emits reply deltas over SSE and finishes with the persisted conversation', async () => {
@@ -524,13 +529,18 @@ describe('ChatSessionsController', () => {
     const replyResult = new Promise<{ text: string; providerRequestId: string }>(resolve => {
       resolveReply = resolve;
     });
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
     jest.mocked(service.getConversation).mockResolvedValue(pending);
-    jest.mocked(provider.reply).mockReturnValue(replyResult);
+    jest.mocked(provider.reply).mockImplementation(() => {
+      markStarted();
+      return replyResult;
+    });
     jest.mocked(service.completeGeneratedTurn).mockResolvedValue(completed);
 
     const first = controller.generateReply('conversation-1', 'request-1', { attempt: 1 }, 'device-1');
     const duplicate = controller.generateReply('conversation-1', 'request-1', { attempt: 1 }, 'device-1');
-    await Promise.resolve();
+    await started;
     expect(provider.reply).toHaveBeenCalledTimes(1);
 
     resolveReply({ text: '我在这里陪你慢慢说。', providerRequestId: 'ark-request-1' });
@@ -583,13 +593,18 @@ describe('ChatSessionsController', () => {
     const replyResult = new Promise<{ text: string; providerRequestId: string }>(resolve => {
       resolveReply = resolve;
     });
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
     jest.mocked(service.getConversation).mockImplementation(async conversationId =>
       conversationId === 'conversation-1' ? firstPending : secondPending);
-    jest.mocked(provider.reply).mockReturnValue(replyResult);
+    jest.mocked(provider.reply).mockImplementation(() => {
+      markStarted();
+      return replyResult;
+    });
     jest.mocked(service.completeGeneratedTurn).mockResolvedValue(completed);
 
     const active = controller.generateReply('conversation-1', 'request-1', { attempt: 1 }, 'device-1');
-    await Promise.resolve();
+    await started;
     expect(provider.reply).toHaveBeenCalledTimes(1);
 
     await expect(controller.beginTurn('conversation-2', {

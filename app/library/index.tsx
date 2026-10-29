@@ -42,10 +42,10 @@ import {
 type Preview = { title: string; image?: ImageSourcePropType; photoId?: string; generated?: boolean; artKey?: keyof typeof art; stamp?: CityStampConfig; stampUnlocked?: boolean };
 const stickerItems = [
   { title: '开心的小橘', image: art.stickerHappy, artKey: 'stickerHappy' },
-  { title: '一起记录', image: art.mascotCamera, artKey: 'mascotCamera' },
+  { title: '一起记录', image: art.stickerCamera, artKey: 'stickerCamera' },
   { title: '酷酷的小橘', image: art.stickerCool, artKey: 'stickerCool' },
   { title: '抱抱小橘', image: art.stickerCry, artKey: 'stickerCry' },
-  { title: '喜欢你', image: art.stickerLove, artKey: 'stickerLove' },
+  { title: '比心小橘', image: art.stickerLove, artKey: 'stickerLove' },
 ] as const;
 type PostcardStickerId = (typeof stickerItems)[number]['artKey'];
 const inspirationCards = ['今天阳光正好，发生了什么小确幸？', '如果用一个颜色形容今天，你会选什么？', '最近有没有什么让你心动的瞬间？'];

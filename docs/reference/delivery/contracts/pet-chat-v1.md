@@ -34,7 +34,15 @@ The Prisma schema and migration define device-owned conversations, turns, and or
 
 The controller validates query wire values after device identity and the service repeats pagination object/type/range validation before database access.
 
-The client now calls `GET /chat/conversations?page=1&pageSize=10`, followed by a device-scoped detail GET for the first non-empty item on that page, when the pet page opens without an explicit conversation ID. Explicit anchor-linked IDs take precedence. A failed read does not mean an empty history or permit a new send; the existing input action retries the read. Only successfully persisted turns can be restored.
+The client calls `GET /chat/conversations?page=1&pageSize=10`, followed by a device-scoped detail GET for the first non-empty item on that page, when the pet page opens normally. Chat anchors now open complete batch history using `GET /anchors/chat/:batchId/history`, including all contributing conversations, without mutating the active chat store. The legacy explicit single-conversation focus route remains supported. Users can return to their active chat. A failed read does not mean an empty history or permit a new send; the input/history action retries the read. Only successfully persisted turns can be restored.
+
+## Diary memory context (2026-10-28)
+
+Before provider generation, the server reads at most ten recent valid diary anchors for the authenticated device. The internal feed source filter applies before pagination and counting. Existing source checks require current diary ownership/version, successful provider extraction and surviving non-empty source blocks. Only original excerpts, titles, save dates and source diary IDs/versions are provided as untrusted text reference, independently of the chat history limit. Save date is not event date. No images, photo URLs, chat-summary anchors or correction text are sent.
+
+A device-keyed cache holds text for up to 60 seconds and at most 100 devices. Every request still revalidates the feed before any cache hit; changed fingerprints replace cached text immediately. A failed validation/read continues chatting without memory and never falls back to stale text or mock memories. This is not semantic retrieval, permanent memory or image recognition. Current user statements take precedence over excerpts. No client memory field or database migration is introduced.
+
+Photo-topic replies should directly discuss scenes supported by diary memory, without unsolicited capability or input-mechanism disclaimers. Missing details cannot be invented; the provider must not claim live album access or fabricate a direct viewing action. Explicit questions about information sources or capabilities are answered truthfully. This changes conversational presentation only, not the text-only provider input.
 
 Q-001 still determines retention duration, deletion/cleanup, and cross-device recovery. No TTL, cross-device transfer, or deletion policy is inferred here. The same-device reopen behavior does not establish a permanent user-facing retention promise.
 

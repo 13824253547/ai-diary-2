@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { FlatList, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BottomSheet } from '../../src/components/common/bottom-sheet';
 import { Button } from '../../src/components/common/button';
 import { EmptyResult, SearchField, supportStyles as u } from '../../src/components/common/support-ui';
@@ -20,9 +20,12 @@ import {
 } from '../../src/components/library/city-stamp-catalog';
 import { useAppStore } from '../../src/store/use-app-store';
 import { colors } from '../../src/theme/tokens';
+import type { PostcardComposition } from '../../src/types/postcard';
 
 export default function CityStampCatalogScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<PostcardComposition & { mode?: string }>();
+  const selectingForPostcard = params.mode === 'postcard';
   const diaries = useAppStore(state => state.diaries);
   const [activeAreaId, setActiveAreaId] = useState<string>();
   const [search, setSearch] = useState('');
@@ -238,12 +241,26 @@ export default function CityStampCatalogScreen() {
                   : '尚未解锁。保存一篇地点与城市名称精确匹配的日记后即可应用。'}
             </Text>
             <Button
-              label="用于明信片"
+              label={selectingForPostcard ? '选用此印章' : '用于明信片'}
               disabled={!isUnlocked}
               onPress={() => {
                 if (!isUnlocked) return;
                 setPreviewCityId(undefined);
-                router.push({ pathname: '/postcard', params: { decoration: previewCity.id } });
+                if (selectingForPostcard) {
+                  router.dismissTo({
+                    pathname: '/postcard/apply',
+                    params: {
+                      photoId: params.photoId ?? '',
+                      stickerId: params.stickerId ?? '',
+                      cityStampId: previewCity.id,
+                      stampPlacement: params.stampPlacement ?? '',
+                      step: 'stamp',
+                      selectionToken: `${Date.now()}-${previewCity.id}`,
+                    },
+                  });
+                } else {
+                  router.push({ pathname: '/postcard/apply', params: { cityStampId: previewCity.id } });
+                }
               }}
             />
           </>
@@ -276,5 +293,5 @@ const styles = StyleSheet.create({
   sheet: { paddingHorizontal: 20, paddingBottom: 38, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   sheetContent: { gap: 12 },
   unlocked: { color: colors.brandStrong, fontSize: 13, lineHeight: 20, textAlign: 'center' },
-  locked: { color: colors.textSecondary, fontSize: 13, lineHeight: 20, textAlign: 'center' },
+  locked: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, textAlign: 'center' },
 });

@@ -10,13 +10,16 @@ import type { DiaryItem } from '../../src/types/diary';
 
 const mockRouter = {
   push: jest.fn(),
+  dismissTo: jest.fn(),
   back: jest.fn(),
   replace: jest.fn(),
   canGoBack: jest.fn(() => true),
 };
+let mockParams: Record<string, string> = {};
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
+  useLocalSearchParams: () => mockParams,
 }));
 
 jest.mock('../../src/components/layout/screen', () => ({
@@ -78,6 +81,7 @@ describe('city stamp country and region catalog', () => {
   beforeEach(() => {
     resetAppStore();
     jest.clearAllMocks();
+    mockParams = {};
   });
 
   test('allows browsing and previewing locked cities without applying them', async () => {
@@ -101,7 +105,10 @@ describe('city stamp country and region catalog', () => {
 
     await waitFor(() => expect(screen.getByTestId('catalog-city-stamp-preview')).toBeTruthy());
     expect(screen.getByLabelText('用于明信片').props.accessibilityState.disabled).toBe(true);
-    expect(screen.getByText(/尚未解锁/u)).toBeTruthy();
+    expect(screen.getByText(/尚未解锁/u).props.style).toMatchObject({
+      fontSize: 12,
+      lineHeight: 18,
+    });
     fireEvent.press(screen.getByLabelText('用于明信片'));
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
@@ -139,8 +146,17 @@ describe('city stamp country and region catalog', () => {
     });
 
     expect(mockRouter.push).toHaveBeenCalledWith({
-      pathname: '/postcard',
-      params: { decoration: taipei.id },
+      pathname: '/postcard/apply',
+      params: { cityStampId: taipei.id },
+    });
+
+    mockParams = { mode: 'postcard', photoId: 'photo-1', stickerId: 'stickerLove', stampPlacement: '3' };
+    await screen.rerender(<CityStampCatalogScreen />);
+    await act(async () => { fireEvent.press(screen.getByLabelText(`预览${taipei.cityName}印章`)); });
+    await act(async () => { fireEvent.press(screen.getByLabelText('选用此印章')); });
+    expect(mockRouter.dismissTo).toHaveBeenCalledWith({
+      pathname: '/postcard/apply',
+      params: { photoId: 'photo-1', stickerId: 'stickerLove', cityStampId: taipei.id, stampPlacement: '3', step: 'stamp', selectionToken: expect.any(String) },
     });
   });
 });

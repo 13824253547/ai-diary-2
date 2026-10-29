@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Button } from '../../src/components/common/button';
@@ -12,13 +12,21 @@ import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
 import type { DiaryPhoto } from '../../src/types/diary';
 import type { PostcardComposition } from '../../src/types/postcard';
+import { createPostcardStampPlacement, getRecentPostcardStampIds, isPostcardStampPlacement } from '../../src/services/postcard-composition';
+
+type Step = 'photo' | 'sticker' | 'stamp';
+const steps = [
+  { id: 'photo', title: '照片' },
+  { id: 'sticker', title: '贴纸' },
+  { id: 'stamp', title: '城市印章' },
+] as const;
 
 const stickerItems = [
   { title: '开心的小橘', artKey: 'stickerHappy' },
-  { title: '一起记录', artKey: 'mascotCamera' },
+  { title: '一起记录', artKey: 'stickerCamera' },
   { title: '酷酷的小橘', artKey: 'stickerCool' },
   { title: '抱抱小橘', artKey: 'stickerCry' },
-  { title: '喜欢你', artKey: 'stickerLove' },
+  { title: '比心小橘', artKey: 'stickerLove' },
 ] as const;
 type StickerId = (typeof stickerItems)[number]['artKey'];
 
@@ -35,7 +43,8 @@ function getPhotoSource(photo: DiaryPhoto): ImageSourcePropType | undefined {
 
 export default function PostcardApplyScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<PostcardComposition>();
+  const params = useLocalSearchParams<PostcardComposition & { step?: Step; selectionToken?: string }>();
+  const [step, setStep] = useState<Step>(params.step ?? 'photo');
   const materialPhotoIds = useAppStore(state => state.materialPhotoIds);
   const photoCatalog = useAppStore(state => state.photos);
   const diaries = useAppStore(state => state.diaries);
@@ -43,13 +52,20 @@ export default function PostcardApplyScreen() {
     photoId: params.photoId,
     stickerId: isStickerId(params.stickerId) ? params.stickerId : undefined,
     cityStampId: params.cityStampId,
+    stampPlacement: isPostcardStampPlacement(params.stampPlacement) ? params.stampPlacement : createPostcardStampPlacement(),
   }));
+  const stampPlacement = composition.stampPlacement!;
 
   const unlockedCityStampIds = useMemo(() => getVisitedCityStampIds(diaries), [diaries]);
-  const cityStamps = useMemo(() => [...unlockedCityStampIds]
+  const recentStampIds = useMemo(() => getRecentPostcardStampIds(diaries), [diaries]);
+  const cityStamps = useMemo(() => [
+    ...(composition.cityStampId && unlockedCityStampIds.has(composition.cityStampId)
+      && !recentStampIds.includes(composition.cityStampId) ? [composition.cityStampId] : []),
+    ...recentStampIds,
+  ]
     .map(id => getCityStampConfig(id))
-    .filter((stamp): stamp is CityStampConfig => stamp !== undefined)
-    .slice(0, 3), [unlockedCityStampIds]);
+    .filter((stamp): stamp is CityStampConfig => stamp !== undefined),
+  [recentStampIds, composition.cityStampId, unlockedCityStampIds]);
   const photoById = new Map(photoCatalog.map(photo => [photo.id, photo]));
   const photos = materialPhotoIds
     .map(id => photoById.get(id))
@@ -60,12 +76,18 @@ export default function PostcardApplyScreen() {
   const selectedCityStamp = cityStamps.find(stamp => stamp.id === composition.cityStampId);
 
   useEffect(() => {
-    setComposition({
+    setComposition(current => ({
       photoId: params.photoId,
       stickerId: isStickerId(params.stickerId) ? params.stickerId : undefined,
       cityStampId: params.cityStampId,
-    });
-  }, [params.photoId, params.stickerId, params.cityStampId]);
+      stampPlacement: current.photoId !== params.photoId || current.cityStampId !== params.cityStampId
+        ? createPostcardStampPlacement()
+        : isPostcardStampPlacement(params.stampPlacement) ? params.stampPlacement : current.stampPlacement,
+    }));
+  }, [params.photoId, params.stickerId, params.cityStampId, params.stampPlacement, params.selectionToken]);
+  useEffect(() => {
+    if (params.step) setStep(params.step);
+  }, [params.step, params.cityStampId, params.selectionToken]);
   useEffect(() => {
     const cityStampId = composition.cityStampId;
     if (cityStampId && !unlockedCityStampIds.has(cityStampId)) {
@@ -75,28 +97,70 @@ export default function PostcardApplyScreen() {
     }
   }, [composition.cityStampId, unlockedCityStampIds]);
 
-  const previewPostcard = () => {
+  const previewPostcard = (skipStamp = false) => {
     if (!selectedPhoto) return;
     router.push({
       pathname: '/postcard',
       params: {
         photoId: selectedPhoto.id,
         ...(selectedSticker ? { stickerId: selectedSticker.artKey } : {}),
-        ...(selectedCityStamp ? { cityStampId: selectedCityStamp.id } : {}),
+        ...(!skipStamp && selectedCityStamp ? { cityStampId: selectedCityStamp.id } : {}),
+        stampPlacement,
+      },
+    });
+  };
+  const nextStep = () => {
+    if (step === 'photo') {
+      if (selectedPhoto) setStep('sticker');
+    } else if (step === 'sticker') setStep('stamp');
+    else previewPostcard();
+  };
+  const skipStep = () => {
+    if (step === 'sticker') {
+      setComposition(current => ({ ...current, stickerId: undefined }));
+      setStep('stamp');
+    } else if (step === 'stamp') {
+      setComposition(current => ({ ...current, cityStampId: undefined }));
+      previewPostcard(true);
+    }
+  };
+  const browseStamps = () => {
+    router.push({
+      pathname: '/library/cities',
+      params: {
+        mode: 'postcard',
+        photoId: composition.photoId ?? '',
+        stickerId: composition.stickerId ?? '',
+        cityStampId: composition.cityStampId ?? '',
+        stampPlacement,
       },
     });
   };
 
-  return <Screen
-    header={<TopBar title="应用到明信片" centered onBackPress={() => router.back()} />}
+  return <Screen key={step}
+    header={<TopBar title="应用到明信片" centered onBackPress={() => {
+        if (step === 'stamp') setStep('sticker');
+        else if (step === 'sticker') setStep('photo');
+        else router.back();
+      }} />}
     footer={<View style={s.footer}>
+      <View style={s.stepRow}>{steps.map((item, index) => <Pressable
+        key={item.id}
+        accessibilityRole="button"
+        accessibilityLabel={`明信片步骤：${item.title}`}
+        accessibilityState={{ selected: step === item.id, disabled: item.id !== 'photo' && !selectedPhoto }}
+        disabled={item.id !== 'photo' && !selectedPhoto}
+        onPress={() => setStep(item.id)}
+        style={s.stepItem}
+      ><Text style={[s.stepText, step === item.id && s.activeStep]}>{index + 1}. {item.title}</Text></Pressable>)}</View>
       <Text style={s.summary}>照片：{selectedPhoto?.title ?? '请选择'}　贴纸：{selectedSticker?.title ?? '未选择'}　印章：{selectedCityStamp?.cityName ?? '未选择'}</Text>
-      {!selectedPhoto ? <Text style={s.hint}>先选择一张照片，再预览明信片。</Text> : null}
-      <Button disabled={!selectedPhoto} label="预览明信片" onPress={previewPostcard} />
+      <View style={s.actions}>
+        {step !== 'photo' ? <Button label="跳过" variant="secondary" onPress={skipStep} /> : null}
+        <View style={s.nextAction}><Button disabled={!selectedPhoto} label={step === 'stamp' ? '预览明信片' : '下一步'} onPress={nextStep} /></View>
+      </View>
     </View>}
   >
-    <Text style={s.intro}>选择照片后，可再添加一张贴纸和一个已解锁的城市印章。</Text>
-    <View style={s.section}>
+    {step === 'photo' ? <View style={s.section}>
       <Text style={s.heading}>照片</Text>
       {photos.length ? <View style={s.photoGrid}>
         {photos.map(photo => {
@@ -106,7 +170,11 @@ export default function PostcardApplyScreen() {
             accessibilityRole="button"
             accessibilityLabel={`选择明信片照片：${photo.title}`}
             accessibilityState={{ selected }}
-            onPress={() => setComposition(current => ({ ...current, photoId: photo.id }))}
+            onPress={() => setComposition(current => ({
+              ...current,
+              photoId: photo.id,
+              stampPlacement: current.photoId !== photo.id ? createPostcardStampPlacement() : current.stampPlacement,
+            }))}
             style={[s.photoCell, selected && s.selectedCell]}
           >
             <Image source={getPhotoSource(photo)} resizeMode="cover" style={s.photo} testID={`postcard-option-${photo.id}`} />
@@ -114,9 +182,9 @@ export default function PostcardApplyScreen() {
           </Pressable>;
         })}
       </View> : <Text style={s.empty}>素材库里还没有可用照片。</Text>}
-    </View>
+    </View> : null}
 
-    <View style={s.section}>
+    {step === 'sticker' ? <View style={s.section}>
       <Text style={s.heading}>贴纸表情</Text>
       <View style={s.decorationRow}>
         {stickerItems.map(item => {
@@ -138,10 +206,12 @@ export default function PostcardApplyScreen() {
         })}
       </View>
       <Text style={s.hint}>再次点选已选贴纸可移除；选择其它贴纸会替换。</Text>
-    </View>
+    </View> : null}
 
-    <View style={s.section}>
-      <Text style={s.heading}>城市印章</Text>
+    {step === 'stamp' ? <View style={s.section}>
+      <View style={s.sectionHeader}><Text style={s.heading}>城市印章</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="按地区浏览城市印章" onPress={browseStamps}><Text style={s.browse}>按地区浏览 ›</Text></Pressable>
+      </View>
       {cityStamps.length ? <View style={s.decorationRow}>
         {cityStamps.map(stamp => {
           const selected = composition.cityStampId === stamp.id;
@@ -153,6 +223,7 @@ export default function PostcardApplyScreen() {
             onPress={() => setComposition(current => ({
               ...current,
               cityStampId: current.cityStampId === stamp.id ? undefined : stamp.id,
+              stampPlacement: current.cityStampId !== stamp.id ? createPostcardStampPlacement() : current.stampPlacement,
             }))}
             style={[s.stampCell, selected && s.selectedCell]}
           >
@@ -162,12 +233,20 @@ export default function PostcardApplyScreen() {
         })}
       </View> : <Text style={s.empty}>暂无已解锁的城市印章。</Text>}
       <Text style={s.hint}>再次点选已选印章可移除；印章只显示已解锁项目。</Text>
-    </View>
+    </View> : null}
   </Screen>;
 }
 
 const s = StyleSheet.create({
-  intro: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+  footer: { gap: 10, paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10 },
+  stepRow: { flexDirection: 'row', gap: 8 },
+  stepItem: { flex: 1, paddingVertical: 6, alignItems: 'center' },
+  stepText: { color: colors.textMuted, fontSize: 13 },
+  activeStep: { color: colors.brandStrong, fontWeight: '600' },
+  actions: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  nextAction: { flex: 1 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  browse: { color: colors.textSecondary, fontSize: 12, paddingVertical: 6 },
   section: { gap: 9 },
   heading: { color: colors.textPrimary, fontSize: 16, fontWeight: '600' },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -181,6 +260,5 @@ const s = StyleSheet.create({
   check: { position: 'absolute', top: 4, right: 4, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.brandStrong },
   empty: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   hint: { color: colors.textMuted, fontSize: 11, lineHeight: 16 },
-  footer: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, gap: 8 },
   summary: { color: colors.textSecondary, fontSize: 11, lineHeight: 16 },
 });

@@ -3,13 +3,18 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import AnchorsScreen from '../profile/anchors';
 import type { MemoryAnchorFeedRecord } from '../../src/contracts/anchor-read-model-contract';
 
-const mockRouter = { push: jest.fn(), back: jest.fn() };
+const mockRouter = { push: jest.fn(), back: jest.fn(), dismissTo: jest.fn() };
 const mockListFeed = jest.fn();
 const mockGetCorrection = jest.fn();
 const mockSaveCorrection = jest.fn();
 const mockGetChatCorrection = jest.fn();
 const mockSaveChatCorrection = jest.fn();
 const mockRoute = { tag: undefined as string | undefined };
+const mockChatState = { chatConversationId: undefined as string | undefined };
+
+jest.mock('../../src/store/use-app-store', () => ({
+  useAppStore: { getState: () => mockChatState },
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -90,6 +95,8 @@ const chatAnchor = {
 describe('Memory anchors screen', () => {
   beforeEach(() => {
     mockRoute.tag = undefined;
+    mockChatState.chatConversationId = undefined;
+    mockRouter.dismissTo.mockClear();
     mockRouter.push.mockClear();
     mockRouter.back.mockClear();
     mockListFeed.mockReset();
@@ -108,8 +115,8 @@ describe('Memory anchors screen', () => {
     mockGetChatCorrection.mockResolvedValue(null);
   });
 
-  afterEach(() => {
-    cleanup();
+  afterEach(async () => {
+    await cleanup();
   });
 
   test('loads all source types by default and shows saved corrections immediately', async () => {
@@ -165,30 +172,54 @@ describe('Memory anchors screen', () => {
     });
 
     expect(mockListFeed).toHaveBeenCalledWith({ tagId: 'friends', page: 1, pageSize: 20 });
-    fireEvent.press(screen.getByLabelText('查看海边散步'));
+    await fireEvent.press(screen.getByLabelText('查看海边散步'));
     expect(mockRouter.push).toHaveBeenCalledWith('/diary/diary-1');
 
-    fireEvent.press(screen.getByLabelText('查看小橘的陪伴记忆'));
+    await fireEvent.press(screen.getByLabelText('查看小橘的陪伴记忆'));
     expect(mockRouter.push).toHaveBeenLastCalledWith({
-      pathname: '/(tabs)/pet',
-      params: { conversationId: 'conversation-1', focusMessageId: 'message-1' },
+      pathname: '/profile/chat-history',
+      params: { anchorBatchId: 'batch-1' },
     });
   });
 
+  test('opens the complete batch in read-only history even when a source is in the active chat', async () => {
+    mockChatState.chatConversationId = 'conversation-1';
+    const initialPage = deferred<any>();
+    mockListFeed.mockReturnValueOnce(initialPage.promise);
+    const screen = await render(<AnchorsScreen />);
+    await act(async () => {
+      initialPage.resolve({ items: [chatAnchor], tagId: null, page: 1, pageSize: 20, total: 1 });
+      await initialPage.promise;
+    });
+    await waitFor(() => expect(screen.getByLabelText('查看小橘的陪伴记忆')).toBeTruthy());
+    await fireEvent.press(screen.getByLabelText('查看小橘的陪伴记忆'));
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/profile/chat-history',
+      params: { anchorBatchId: 'batch-1' },
+    });
+    expect(mockRouter.dismissTo).not.toHaveBeenCalled();
+  });
+
   test('fetches the next fixed-size server page on demand', async () => {
+    const initialPage = deferred<any>();
     mockListFeed
-      .mockResolvedValueOnce({
+      .mockReturnValueOnce(initialPage.promise)
+      .mockImplementationOnce(() => new Promise(() => undefined));
+    const screen = await render(<AnchorsScreen />);
+    await waitFor(() => expect(mockListFeed).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      initialPage.resolve({
         items: [diaryAnchor] as MemoryAnchorFeedRecord[],
         tagId: null,
         page: 1,
         pageSize: 20,
         total: 21,
-      })
-      .mockImplementationOnce(() => new Promise(() => undefined));
-    const screen = await render(<AnchorsScreen />);
+      });
+      await initialPage.promise;
+    });
     await waitFor(() => expect(screen.getByLabelText('加载更多')).toBeTruthy());
 
-    fireEvent.press(screen.getByLabelText('加载更多'));
+    await fireEvent.press(screen.getByLabelText('加载更多'));
     await waitFor(() => expect(mockListFeed).toHaveBeenCalledTimes(2));
 
     expect(mockListFeed).toHaveBeenLastCalledWith({

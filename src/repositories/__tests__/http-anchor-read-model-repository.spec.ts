@@ -41,6 +41,29 @@ describe('HttpAnchorReadModelRepository', () => {
     jest.clearAllMocks();
   });
 
+  test('reads batch history and rejects mismatched, duplicate or incomplete pages', async () => {
+    const history = {
+      batchId: 'batch-1', sourceVersion: 'hash-1',
+      sourceDateStart: '2026-10-27', sourceDateEnd: '2026-10-27',
+      page: 1, pageSize: 100, total: 1,
+      items: [{ id: 'message-1', conversationId: 'chat-2', requestId: 'request-1',
+        role: 'user', text: '金色的海面', createdAt: '2026-10-27T00:00:00.000Z' }],
+    };
+    const respond = (data: unknown) => ({ ok: true, status: 200,
+      data: { ok: true, version: 'memory-anchor-v1', data } });
+    jest.mocked(client.request).mockResolvedValueOnce(respond(history));
+    await expect(repository.getChatHistory({ batchId: 'batch-1' })).resolves.toEqual(history);
+    expect(client.request).toHaveBeenCalledWith('/anchors/chat/batch-1/history?page=1&pageSize=100',
+      { method: 'GET' }, undefined);
+    for (const invalid of [
+      { ...history, batchId: 'other' }, { ...history, page: 2 },
+      { ...history, total: 2 }, { ...history, total: 2, items: [history.items[0], history.items[0]] },
+    ]) {
+      jest.mocked(client.request).mockResolvedValueOnce(respond(invalid));
+      await expect(repository.getChatHistory({ batchId: 'batch-1' })).rejects.toBeInstanceOf(AnchorReadRepositoryError);
+    }
+  });
+
   test('queries only an explicit tag and validates the source diary projection', async () => {
     jest.mocked(client.request).mockResolvedValue({
       ok: true,

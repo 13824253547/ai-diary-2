@@ -1,4 +1,5 @@
 import type { AnchorExtractionResult } from './anchor-contract';
+import { isPetChatMessage, type PetChatMessage } from './pet-chat-contract';
 
 export const ANCHOR_READ_MODEL_CONTRACT_VERSION = 'anchor-extraction-v1';
 export const MEMORY_ANCHOR_FEED_VERSION = 'memory-anchor-v1';
@@ -84,6 +85,31 @@ export type MemoryAnchorFeedPage = {
 };
 
 export type MemoryAnchorSummary = { total: number };
+
+export type ChatAnchorHistoryPage = {
+  batchId: string;
+  sourceVersion: string;
+  sourceDateStart: string;
+  sourceDateEnd: string;
+  items: PetChatMessage[];
+  page: number;
+  pageSize: typeof ANCHOR_READ_PAGE_SIZES[number];
+  total: number;
+};
+
+export function isChatAnchorHistoryPage(value: unknown): value is ChatAnchorHistoryPage {
+  if (!isRecord(value) || !isNonEmptyString(value.batchId) || !isNonEmptyString(value.sourceVersion)
+    || !isDate(value.sourceDateStart) || !isDate(value.sourceDateEnd)
+    || !isPositiveInteger(value.page)
+    || !ANCHOR_READ_PAGE_SIZES.includes(value.pageSize as typeof ANCHOR_READ_PAGE_SIZES[number])
+    || !Number.isSafeInteger(value.total) || (value.total as number) < 1
+    || !Array.isArray(value.items) || value.items.length > (value.pageSize as number)
+    || !value.items.every(isPetChatMessage)) return false;
+  const ids = value.items.map(item => item.id);
+  return new Set(ids).size === ids.length
+    && value.items.length === Math.min(value.pageSize as number,
+      Math.max(0, (value.total as number) - ((value.page as number) - 1) * (value.pageSize as number)));
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

@@ -403,7 +403,7 @@ export default function Edit() {
 }
 
 const styles = StyleSheet.create({
-  save: { fontSize: 15, color: colors.brandStrong },
+  save: { fontSize: 14, color: colors.brandStrong },
   saveDisabled: { opacity: 0.5 },
   location: {
     alignSelf: 'flex-start',

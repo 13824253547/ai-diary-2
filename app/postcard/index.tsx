@@ -13,8 +13,9 @@ import { useAppStore } from '../../src/store/use-app-store';
 import { capturePostcard, discardPostcard, savePostcard, sharePostcard } from '../../src/services/postcard-export';
 import type { DiaryPhoto } from '../../src/types/diary';
 import type { PostcardComposition } from '../../src/types/postcard';
+import { createPostcardStampPlacement, getPostcardStampPosition, isPostcardStampPlacement } from '../../src/services/postcard-composition';
 
-const stickerDecorations = ['stickerHappy', 'mascotCamera', 'stickerCool', 'stickerCry', 'stickerLove'] as const;
+const stickerDecorations = ['stickerHappy', 'stickerCamera', 'mascotCamera', 'stickerCool', 'stickerCry', 'stickerLove'] as const;
 
 function isStickerDecoration(value?: string): value is (typeof stickerDecorations)[number] {
   return stickerDecorations.includes(value as (typeof stickerDecorations)[number]);
@@ -30,6 +31,9 @@ function getPhotoImageSource(photo: DiaryPhoto): ImageSourcePropType | undefined
 export default function PostcardScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<PostcardComposition & { decoration?: string }>();
+  const [defaultPlacement] = useState(createPostcardStampPlacement);
+  const stampPlacement = isPostcardStampPlacement(params.stampPlacement) ? params.stampPlacement : defaultPlacement;
+  const [photoWidth, setPhotoWidth] = useState(0);
   const registeredPhoto = useAppStore(state => state.photos.find(photo => photo.id === params.photoId));
   const diaries = useAppStore(state => state.diaries);
   const unlockedCityStampIds = getVisitedCityStampIds(diaries);
@@ -51,11 +55,14 @@ export default function PostcardScreen() {
   const [busy, setBusy] = useState(false);
   const [imageReady, setImageReady] = useState(false);
   const [message, setMessage] = useState('');
-  const inputKey = `${materialPhoto?.id ?? ''}:${materialPhoto?.localUri ?? materialPhoto?.uri ?? ''}:${params.stickerId ?? stickerId ?? ''}:${params.cityStampId ?? cityStamp?.id ?? ''}:${params.decoration ?? ''}`;
+  const photoKey = `${materialPhoto?.id ?? ''}:${materialPhoto?.localUri ?? materialPhoto?.uri ?? ''}`;
+  const inputKey = `${photoKey}:${params.stickerId ?? stickerId ?? ''}:${params.cityStampId ?? cityStamp?.id ?? ''}:${params.decoration ?? ''}:${stampPlacement}:${photoWidth}`;
   const inputKeyRef = useRef(inputKey);
   inputKeyRef.current = inputKey;
   useEffect(() => {
     setImageReady(false);
+  }, [photoKey]);
+  useEffect(() => {
     setMessage('');
   }, [inputKey]);
   useEffect(() => () => {
@@ -63,7 +70,7 @@ export default function PostcardScreen() {
   }, []);
 
   const exportCard = async (destination: 'share' | 'save') => {
-    if (busyRef.current || !materialPhoto || !imageReady) return;
+    if (busyRef.current || !materialPhoto || !imageReady || (cityStamp && photoWidth <= 0)) return;
     busyRef.current = true;
     setBusy(true);
     setMessage('');
@@ -90,19 +97,21 @@ export default function PostcardScreen() {
       if (inputKeyRef.current) setBusy(false);
     }
   };
-  const stampText = [materialPhoto?.location?.trim(), materialPhoto?.date?.trim()]
-    .filter(value => value && value !== '未知地点' && value !== '未知日期').join('\n');
+  const location = materialPhoto?.location?.trim();
+  const stampText = location && location !== '未知地点' ? location : '';
+  const stampPosition = getPostcardStampPosition(stampPlacement, photoWidth || 280, Boolean(stampText));
   const applyParams: PostcardComposition = {
     ...(materialPhoto ? { photoId: materialPhoto.id } : {}),
     ...(stickerId ? { stickerId } : {}),
     ...(cityStamp ? { cityStampId: cityStamp.id } : {}),
+    stampPlacement,
   };
   return <Screen header={<TopBar title="明信片" centered onBackPress={() => router.back()} trailing={<IconAction name="images-outline" label="编辑素材" onPress={() => router.push({ pathname: '/postcard/apply', params: applyParams })} />} />}>
     {!materialPhoto ? <EmptyResult title="请选择真实照片"><Button label="应用明信片素材" onPress={() => router.replace({ pathname: '/postcard/apply', params: applyParams })} /></EmptyResult> : <>
-      <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View ref={cardRef} collapsable={false} style={s.card}><Image key={inputKey} testID="postcard-photo" source={image as ImageSourcePropType} style={s.image} onLoad={() => setImageReady(true)} onError={() => { setImageReady(false); setMessage('照片暂时无法读取，请重新选择素材。'); }} />{stampText ? <View style={s.stamp}><Text style={s.stampText}>{stampText}</Text></View> : null}{cityStamp ? <CityStamp {...cityStamp} width={68} height={68} testID={legacyDecorationTestId ?? 'postcard-city-stamp'} style={s.cityStampOverlay} /> : null}<Text style={s.words}>把这段真实回忆，{`\n`}寄给未来的自己</Text>{stickerId ? <Image testID={legacyDecorationTestId ?? 'postcard-sticker'} source={art[stickerId]} resizeMode="contain" style={s.mascot} /> : null}</View></View>
+      <View style={s.stack}><View style={[s.backCard, { transform: [{ rotate: '-6deg' }] }]} /><View style={[s.backCard, { transform: [{ rotate: '4deg' }] }]} /><View ref={cardRef} collapsable={false} style={s.card}><Image key={photoKey} testID="postcard-photo" source={image as ImageSourcePropType} style={s.image} onLayout={event => setPhotoWidth(event.nativeEvent.layout.width)} onLoad={() => setImageReady(true)} onError={() => { setImageReady(false); setMessage('照片暂时无法读取，请重新选择素材。'); }} />{stampText ? <View style={s.stamp}><Text style={s.stampText}>{stampText}</Text></View> : null}{cityStamp ? <CityStamp {...cityStamp} width={68} height={68} testID={legacyDecorationTestId ?? 'postcard-city-stamp'} style={[s.cityStampOverlay, stampPosition]} /> : null}<Text style={s.words}>把这段真实回忆，{`\n`}寄给未来的自己</Text>{stickerId ? <Image testID={legacyDecorationTestId ?? 'postcard-sticker'} source={art[stickerId]} resizeMode="contain" style={s.mascot} /> : null}</View></View>
       <Text style={s.note}>已使用当前选择的真实照片</Text>
-      <Button disabled={busy || !imageReady} label={busy ? '正在准备明信片…' : '分享明信片'} onPress={() => { void exportCard('share'); }} />
-      <Button disabled={busy || !imageReady} label="保存到相册" variant="secondary" onPress={() => { void exportCard('save'); }} />
+      <Button disabled={busy || !imageReady || Boolean(cityStamp && photoWidth <= 0)} label={busy ? '正在准备明信片…' : '分享明信片'} onPress={() => { void exportCard('share'); }} />
+      <Button disabled={busy || !imageReady || Boolean(cityStamp && photoWidth <= 0)} label="保存到相册" variant="secondary" onPress={() => { void exportCard('save'); }} />
       {message ? <Text accessibilityLiveRegion="polite" style={s.note}>{message}</Text> : null}
     </>}
   </Screen>;

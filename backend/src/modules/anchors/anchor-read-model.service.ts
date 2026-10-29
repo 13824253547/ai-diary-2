@@ -570,6 +570,12 @@ export class AnchorReadModelService {
     const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
     if (!isRecord(input)) throw new AnchorReadModelError('invalid_input', '锚点查询条件无效。');
     const tagId = input.tagId === undefined ? null : normalizeIdentifier(input.tagId, 'tagId');
+    if (input.sourceType !== undefined && input.sourceType !== 'diary' && input.sourceType !== 'chat') {
+      throw new AnchorReadModelError('invalid_input', '锚点来源无效。');
+    }
+    const sourceFilter = input.sourceType
+      ? Prisma.sql`WHERE \`sourceType\` = ${input.sourceType}`
+      : Prisma.empty;
     if (typeof input.page !== 'number'
       || !Number.isSafeInteger(input.page)
       || input.page < 1
@@ -714,7 +720,7 @@ export class AnchorReadModelService {
 
     return this.prisma.$transaction(async transaction => {
       const counts = await transaction.$queryRaw<Array<{ total: bigint | number }>>(Prisma.sql`
-        SELECT COUNT(*) AS total FROM (${union}) AS memory_feed
+        SELECT COUNT(*) AS total FROM (${union}) AS memory_feed ${sourceFilter}
       `);
       const rows = await transaction.$queryRaw<Array<{
         id: string;
@@ -736,6 +742,7 @@ export class AnchorReadModelService {
         sourceDateEnd: string | null;
       }>>(Prisma.sql`
         SELECT * FROM (${union}) AS memory_feed
+        ${sourceFilter}
         ORDER BY \`displayDate\` DESC, \`sourceType\` ASC, \`anchorId\` ASC, \`id\` ASC
         LIMIT ${pageSize} OFFSET ${offset}
       `);
@@ -802,6 +809,72 @@ export class AnchorReadModelService {
         page,
         pageSize,
         total: Number(counts[0]?.total ?? 0),
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async getChatHistory(batchId: unknown, input: unknown, ownerDeviceId: string) {
+    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const id = normalizeIdentifier(batchId, 'batchId');
+    if (!isRecord(input) || !Number.isSafeInteger(input.page) || (input.page as number) < 1
+      || !ANCHOR_PAGE_SIZES.includes(input.pageSize as typeof ANCHOR_PAGE_SIZES[number])) {
+      throw new AnchorReadModelError('invalid_input', '聊天记录分页条件无效。');
+    }
+    const page = input.page as number;
+    const pageSize = input.pageSize as typeof ANCHOR_PAGE_SIZES[number];
+    const offset = (page - 1) * pageSize;
+    if (!Number.isSafeInteger(offset)) throw new AnchorReadModelError('invalid_input', '聊天记录页码超出范围。');
+    return this.prisma.$transaction(async transaction => {
+      const batch = await transaction.chatDailyAnchor.findFirst({
+        where: { id, ownerDeviceId: owner, status: 'succeeded' },
+        include: {
+          sources: {
+            include: { message: true, turn: { include: { conversation: true } } },
+            orderBy: [
+              { localDate: 'asc' }, { conversationId: 'asc' },
+              { turn: { sequence: 'asc' } }, { message: { order: 'asc' } }, { messageId: 'asc' },
+            ],
+          },
+        },
+      });
+      if (!batch) throw new AnchorReadModelError('not_found', '聊天锚点不存在或不可访问。');
+      const sources = batch.sources;
+      if (!sources.length || sources.length !== batch.sourceCount || sources.some(source =>
+        source.ownerDeviceId !== owner || source.turn.ownerDeviceId !== owner
+        || source.turn.conversation.ownerDeviceId !== owner
+        || source.turn.memoryAnchorBatchId !== id || !source.turn.memoryEligible
+        || source.turn.status !== 'completed' || source.turn.source !== 'provider'
+        || source.conversationId !== source.message.conversationId
+        || source.conversationId !== source.turn.conversationId
+        || source.message.requestId !== source.turn.requestId
+        || source.localDate !== source.turn.deviceLocalDate
+        || source.localDate < batch.sourceDateStart || source.localDate > batch.sourceDateEnd
+        || (source.message.role === 'user' ? source.message.id !== source.turn.userMessageId
+          : source.message.role !== 'assistant' || source.message.id !== source.turn.assistantMessageId)
+        || !source.message.text.trim()
+      )) throw new AnchorReadModelError('not_found', '聊天锚点来源已失效。');
+      // Keep the extraction order for fingerprint validation, then merge conversations chronologically.
+      const sourceHash = createHash('sha256').update(JSON.stringify(sources.map(({ message }) =>
+        [message.id, message.conversationId, message.requestId, message.role, message.text]))).digest('hex');
+      if (sourceHash !== batch.sourceHash) {
+        throw new AnchorReadModelError('version_conflict', '聊天锚点来源已更新。');
+      }
+      const ordered = [...sources].sort((left, right) =>
+        left.localDate.localeCompare(right.localDate)
+        || left.turn.createdAt.getTime() - right.turn.createdAt.getTime()
+        || left.conversationId.localeCompare(right.conversationId)
+        || left.turn.sequence - right.turn.sequence
+        || left.message.order - right.message.order
+        || left.messageId.localeCompare(right.messageId));
+      return {
+        batchId: id, sourceVersion: sourceHash,
+        sourceDateStart: batch.sourceDateStart, sourceDateEnd: batch.sourceDateEnd,
+        items: ordered.slice(offset, offset + pageSize).map(({ message }) => ({
+          id: message.id, conversationId: message.conversationId, requestId: message.requestId,
+          role: message.role as 'user' | 'assistant', text: message.text,
+          createdAt: message.createdAt.toISOString(),
+        })),
+        page, pageSize, total: sources.length,
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }

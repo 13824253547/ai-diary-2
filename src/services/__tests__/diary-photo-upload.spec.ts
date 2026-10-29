@@ -3,7 +3,8 @@ import type { DiaryPhoto } from '../../types/diary';
 
 const mockManipulateAsync = jest.fn();
 const mockDeleteAsync = jest.fn();
-const mockDownloadAsync = jest.fn();
+const mockDownloadFileAsync = jest.fn();
+const mockGetInfoAsync = jest.fn();
 
 jest.mock('expo-image-manipulator', () => ({
   SaveFormat: { JPEG: 'jpeg' },
@@ -13,7 +14,21 @@ jest.mock('expo-image-manipulator', () => ({
 jest.mock('expo-file-system/legacy', () => ({
   cacheDirectory: 'file:///cache/',
   deleteAsync: (...args: unknown[]) => mockDeleteAsync(...args),
-  downloadAsync: (...args: unknown[]) => mockDownloadAsync(...args),
+  getInfoAsync: (...args: unknown[]) => mockGetInfoAsync(...args),
+}));
+
+jest.mock('expo-file-system', () => ({
+  File: class MockFile {
+    uri: string;
+
+    constructor(uri: string) {
+      this.uri = uri;
+    }
+
+    static downloadFileAsync(...args: unknown[]) {
+      return mockDownloadFileAsync(...args);
+    }
+  },
 }));
 
 jest.mock('../material-photo-api', () => ({
@@ -40,10 +55,8 @@ describe('diary photo upload preparation', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockDeleteAsync.mockResolvedValue(undefined);
-    mockDownloadAsync.mockImplementation(async (_uri: string, destination: string) => ({
-      status: 200,
-      uri: destination,
-    }));
+    mockGetInfoAsync.mockResolvedValue({ exists: true, size: 1_024 });
+    mockDownloadFileAsync.mockImplementation(async (_uri: string, destination: { uri: string }) => destination);
     mockManipulateAsync.mockImplementation(async (uri: string) => ({
       uri: `${uri}.upload.jpg`,
       width: 2048,
@@ -107,10 +120,12 @@ describe('diary photo upload preparation', () => {
 
     const result = await prepareDiaryPhotoUploads(['material-1'], [material]);
 
-    expect(mockDownloadAsync).toHaveBeenCalledWith(
+    expect(mockDownloadFileAsync).toHaveBeenCalledWith(
       material.uri,
-      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
-      { headers: material.remoteHeaders },
+      expect.objectContaining({
+        uri: expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
+      }),
+      { headers: material.remoteHeaders, idempotent: true },
     );
     expect(mockManipulateAsync).toHaveBeenCalledWith(
       expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
@@ -124,6 +139,40 @@ describe('diary photo upload preparation', () => {
     expect(result[0]).toMatchObject({ photoId: 'material-1', mimeType: 'image/jpeg' });
   });
 
+  test('preserves the native download error stage and asset ID without exposing the raw error', async () => {
+    const material = photo('material-failed', {
+      source: 'generated',
+      sourceAssetId: 'image-request-failed',
+      generationRequestId: 'image-request-failed',
+      generationSource: 'provider',
+      localUri: undefined,
+      uri: 'https://api.example.test/photos/materials/material-failed/content',
+      remoteHeaders: { 'x-device-id': 'device-1' },
+    });
+    mockDownloadFileAsync.mockRejectedValueOnce(
+      new Error('ERR_FILESYSTEM_CANNOT_DOWNLOAD: background daemon unavailable'),
+    );
+
+    let thrown: unknown;
+    try {
+      await prepareDiaryPhotoUploads(['material-failed'], [material]);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      stage: 'material_download',
+      causeCode: 'ERR_FILESYSTEM_CANNOT_DOWNLOAD',
+      photoId: 'material-failed',
+      photoIndex: 0,
+      message: '所选照片暂时无法处理，请返回相册重新选择。',
+    });
+    expect(mockDeleteAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-failed-/),
+      { idempotent: true },
+    );
+  });
+
   test('rejects an unauthenticated or unrelated remote image URL', async () => {
     const unrelated = photo('remote-1', {
       localUri: undefined,
@@ -134,7 +183,7 @@ describe('diary photo upload preparation', () => {
     await expect(prepareDiaryPhotoUploads(['remote-1'], [unrelated])).rejects.toThrow(
       '所选照片无法读取，请返回相册重新选择。',
     );
-    expect(mockDownloadAsync).not.toHaveBeenCalled();
+    expect(mockDownloadFileAsync).not.toHaveBeenCalled();
   });
 
   test('fails closed and cleans partial output when a selected image is unavailable', async () => {

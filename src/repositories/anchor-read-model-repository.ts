@@ -1,6 +1,7 @@
 import type { ApiRequestOptions } from '../services/api-client';
 import type {
   AnchorExtractionRunRecord,
+  ChatAnchorHistoryPage,
   AnchorsByTagPage,
   MemoryAnchorFeedPage,
   MemoryAnchorSummary,
@@ -57,4 +58,9 @@ export interface AnchorReadRepository {
     pageSize?: 10 | 20 | 50 | 100;
   }, options?: ApiRequestOptions): Promise<MemoryAnchorFeedPage>;
   getSummary(options?: ApiRequestOptions): Promise<MemoryAnchorSummary>;
+  getChatHistory(input: {
+    batchId: string;
+    page?: number;
+    pageSize?: 10 | 20 | 50 | 100;
+  }, options?: ApiRequestOptions): Promise<ChatAnchorHistoryPage>;
 }

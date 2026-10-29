@@ -5,10 +5,14 @@ export type DevDiagnosticFields = Record<string, string | number | boolean | nul
 
 const ALLOWED_FIELDS = new Set([
   'requestId',
+  'photoId',
+  'photoIndex',
   'route',
   'method',
   'status',
   'durationMs',
+  'fileSize',
+  'httpStatus',
   'errorCode',
   'errorName',
   'errorStack',

@@ -1,13 +1,196 @@
-import {Ionicons} from '@expo/vector-icons';
-import {useRef, useState} from 'react';
-import {Alert, Image, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
-import {Screen} from '../../src/components/layout/screen';
-import {TopBar} from '../../src/components/layout/top-bar';
-import {Button} from '../../src/components/common/button';
-import {Empty} from '../../src/components/common/design-ui';
-import {useDraftRoute,leaveDraft} from '../../src/hooks/use-diary-flow';
-import {appSelectors, useAppStore} from '../../src/store/use-app-store';
-import {colors} from '../../src/theme/tokens';
-function getPersonInputAccessibilityLabel(personId:string, companionOrdinal:number, companionCount:number){if(personId==='person-self')return'我的称呼';if(companionCount<=1)return'同行人的名字';return`第${companionOrdinal}位同行人的名字`}
-export default function Naming(){const {draft,router}=useDraftRoute();const finalizeNaming=useAppStore(s=>s.finalizeDraftPeopleNaming);const locked=useRef(false);const [saving,setSaving]=useState(false);if(!draft)return <Screen><Empty title="没有待命名的人物" home/></Screen>;const companionCount=draft.people.filter(person=>person.id!=='person-self').length;const next=()=>router.replace({pathname:'/diary/[id]/edit',params:{id:'new',draftId:draft.id}});const save=async()=>{if(locked.current)return;locked.current=true;setSaving(true);const result=await finalizeNaming(draft.id);if(!result.ok){locked.current=false;setSaving(false);Alert.alert('保存失败',result.message);return}next()};const skip=()=>{if(locked.current)return;locked.current=true;next()};return <Screen header={<TopBar onBackPress={()=>leaveDraft(draft.id,()=>router.replace('/(tabs)/home'))}/>}><Text style={s.title}>给同行的伙伴{'\n'}起个名字吧 <Text style={{color:colors.brandStrong}}>♥</Text></Text><Text style={s.subtitle}>只需一次命名，以后见面就记得</Text>{draft.people.map((p,i)=>{const avatar=appSelectors.getPhotoById(p.avatarPhotoId)?.image;const previews=p.photoIds.slice(0,2).map(id=>appSelectors.getPhotoById(id)?.image).filter(Boolean) as number[];const companionOrdinal=draft.people.slice(0,i+1).filter(person=>person.id!=='person-self').length;return <View key={p.id} style={s.card}><View>{avatar?<Image source={avatar} style={s.face}/>:<View style={[s.face,s.faceFallback]}><Ionicons name="person-outline" size={42} color={colors.textSecondary}/></View>}{previews.length>0?<View style={s.miniFaces}>{previews.map((image,j)=><Image key={j} source={image} style={s.mini}/>)}</View>:null}</View><TextInput accessibilityLabel={getPersonInputAccessibilityLabel(p.id,companionOrdinal,companionCount)} value={p.name} placeholder={i?'同行的朋友':'我'} placeholderTextColor={colors.textMuted} maxLength={16} onChangeText={name=>useAppStore.getState().setDraftPersonName(draft.id,p.id,name)} style={s.input} returnKeyType="done"/><Ionicons name="checkmark-circle" color={colors.brandStrong} size={23}/></View>})}<Button label={saving?'保存中…':'保存名字'} disabled={saving} onPress={()=>{void save()}}/><Pressable onPress={skip} style={{padding:16,alignSelf:'center'}}><Text style={s.subtitle}>跳过，以后再说</Text></Pressable></Screen>}
-const s=StyleSheet.create({title:{fontSize:29,lineHeight:38,fontWeight:'700',color:colors.textPrimary},subtitle:{fontSize:14,color:colors.textMuted},card:{flexDirection:'row',alignItems:'center',gap:12,padding:16,borderRadius:19,backgroundColor:colors.surface,borderWidth:1,borderColor:colors.border,minHeight:163},face:{width:117,height:117,borderRadius:70},faceFallback:{backgroundColor:colors.surfaceAlt,alignItems:'center',justifyContent:'center'},miniFaces:{position:'absolute',flexDirection:'row',bottom:-5,right:-7},mini:{width:39,height:39,borderRadius:22,borderWidth:2,borderColor:'white',marginLeft:-6},input:{flex:1,borderWidth:1,borderColor:colors.border,borderRadius:12,padding:10,color:colors.textPrimary,fontSize:16}});
+import { Ionicons } from "@expo/vector-icons";
+import { useRef, useState } from "react";
+import {
+  Alert,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { Screen } from "../../src/components/layout/screen";
+import { TopBar } from "../../src/components/layout/top-bar";
+import { Button } from "../../src/components/common/button";
+import { Empty } from "../../src/components/common/design-ui";
+import { useDraftRoute, leaveDraft } from "../../src/hooks/use-diary-flow";
+import { appSelectors, useAppStore } from "../../src/store/use-app-store";
+import { colors } from "../../src/theme/tokens";
+function getPersonInputAccessibilityLabel(
+  personId: string,
+  companionOrdinal: number,
+  companionCount: number,
+) {
+  if (personId === "person-self") return "我的称呼";
+  if (companionCount <= 1) return "同行人的名字";
+  return `第${companionOrdinal}位同行人的名字`;
+}
+export default function Naming() {
+  const { draft, router } = useDraftRoute();
+  const finalizeNaming = useAppStore((s) => s.finalizeDraftPeopleNaming);
+  const locked = useRef(false);
+  const [saving, setSaving] = useState(false);
+  if (!draft)
+    return (
+      <Screen>
+        <Empty title="没有待命名的人物" home />
+      </Screen>
+    );
+  const companionCount = draft.people.filter(
+    (person) => person.id !== "person-self",
+  ).length;
+  const next = () =>
+    router.replace({
+      pathname: "/diary/[id]/edit",
+      params: { id: "new", draftId: draft.id },
+    });
+  const save = async () => {
+    if (locked.current) return;
+    locked.current = true;
+    setSaving(true);
+    const result = await finalizeNaming(draft.id);
+    if (!result.ok) {
+      locked.current = false;
+      setSaving(false);
+      Alert.alert("保存失败", result.message);
+      return;
+    }
+    next();
+  };
+  const skip = () => {
+    if (locked.current) return;
+    locked.current = true;
+    next();
+  };
+  return (
+    <Screen
+      header={
+        <TopBar
+          onBackPress={() =>
+            leaveDraft(draft.id, () => router.replace("/(tabs)/home"))
+          }
+        />
+      }
+    >
+      <Text style={s.title}>
+        给同行的伙伴{"\n"}起个名字吧{" "}
+        <Text style={{ color: colors.brandStrong }}>♥</Text>
+      </Text>
+      <Text style={s.subtitle}>只需一次命名，以后见面就记得</Text>
+      {draft.people.map((p, i) => {
+        const avatar = appSelectors.getPhotoById(p.avatarPhotoId)?.image;
+        const previews = p.photoIds
+          .slice(0, 2)
+          .map((id) => appSelectors.getPhotoById(id)?.image)
+          .filter(Boolean) as number[];
+        const companionOrdinal = draft.people
+          .slice(0, i + 1)
+          .filter((person) => person.id !== "person-self").length;
+        return (
+          <View key={p.id} style={s.card}>
+            <View>
+              {avatar ? (
+                <Image source={avatar} style={s.face} />
+              ) : (
+                <View style={[s.face, s.faceFallback]}>
+                  <Ionicons
+                    name="person-outline"
+                    size={42}
+                    color={colors.textSecondary}
+                  />
+                </View>
+              )}
+              {previews.length > 0 ? (
+                <View style={s.miniFaces}>
+                  {previews.map((image, j) => (
+                    <Image key={j} source={image} style={s.mini} />
+                  ))}
+                </View>
+              ) : null}
+            </View>
+            <TextInput
+              accessibilityLabel={getPersonInputAccessibilityLabel(
+                p.id,
+                companionOrdinal,
+                companionCount,
+              )}
+              value={p.name}
+              placeholder={i ? "同行的朋友" : "我"}
+              placeholderTextColor={colors.textMuted}
+              maxLength={16}
+              onChangeText={(name) =>
+                useAppStore.getState().setDraftPersonName(draft.id, p.id, name)
+              }
+              style={s.input}
+              returnKeyType="done"
+            />
+            <Ionicons
+              name="checkmark-circle"
+              color={colors.brandStrong}
+              size={23}
+            />
+          </View>
+        );
+      })}
+      <Button
+        label={saving ? "保存中…" : "保存名字"}
+        disabled={saving}
+        onPress={() => {
+          void save();
+        }}
+      />
+      <Pressable onPress={skip} style={{ padding: 16, alignSelf: "center" }}>
+        <Text style={s.subtitle}>跳过，以后再说</Text>
+      </Pressable>
+    </Screen>
+  );
+}
+const s = StyleSheet.create({
+  title: {
+    fontSize: 29,
+    lineHeight: 38,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  subtitle: { fontSize: 14, color: colors.textMuted },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 16,
+    borderRadius: 19,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minHeight: 163,
+  },
+  face: { width: 117, height: 117, borderRadius: 70 },
+  faceFallback: {
+    backgroundColor: colors.surfaceAlt,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  miniFaces: {
+    position: "absolute",
+    flexDirection: "row",
+    bottom: -5,
+    right: -7,
+  },
+  mini: {
+    width: 39,
+    height: 39,
+    borderRadius: 22,
+    borderWidth: 2,
+    borderColor: "white",
+    marginLeft: -6,
+  },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 10,
+    color: colors.textPrimary,
+    fontSize: 16,
+  },
+});

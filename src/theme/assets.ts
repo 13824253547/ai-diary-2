@@ -1,4 +1,4 @@
-/** Native-resolution artwork extracted from AI日记设计图04.pptx. */
+/** Reference artwork plus regenerated, anatomy-corrected mascot stickers. */
 export const art = {
   mascot: require('../../assets/reference/mascot.png'),
   mascotCamera: require('../../assets/reference/mascotCamera.png'),
@@ -38,10 +38,11 @@ export const art = {
   bookPink: require('../../assets/reference/bookPink.png'),
   stamp: require('../../assets/reference/stamp.png'),
   tape: require('../../assets/reference/tape.png'),
-  stickerHappy: require('../../assets/reference/stickerHappy.png'),
-  stickerCool: require('../../assets/reference/stickerCool.png'),
-  stickerCry: require('../../assets/reference/stickerCry.png'),
-  stickerLove: require('../../assets/reference/stickerLove.png'),
+  stickerHappy: require('../../assets/restored/mascot-stickers/stickerHappy.png'),
+  stickerCamera: require('../../assets/restored/mascot-stickers/stickerCamera.png'),
+  stickerCool: require('../../assets/restored/mascot-stickers/stickerCool.png'),
+  stickerCry: require('../../assets/restored/mascot-stickers/stickerCry.png'),
+  stickerLove: require('../../assets/restored/mascot-stickers/stickerLove.png'),
   morning: require('../../assets/reference/morning.png'),
 } as const;
 

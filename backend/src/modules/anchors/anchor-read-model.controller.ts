@@ -7,6 +7,7 @@ import {
   Get,
   Headers,
   NotFoundException,
+  Param,
   Post,
   Query,
   ServiceUnavailableException,
@@ -101,6 +102,30 @@ export class AnchorReadModelController {
           page,
           pageSize,
         }, ownerDeviceId),
+      };
+    } catch (error) {
+      this.handleError(error);
+    }
+  }
+
+  @Get('chat/:batchId/history')
+  async getChatHistory(
+    @Param('batchId') batchId: unknown,
+    @Query('page') pageParam: unknown,
+    @Query('pageSize') pageSizeParam: unknown,
+    @Headers('x-device-id') deviceId?: string,
+  ) {
+    const ownerDeviceId = resolveDeviceId(deviceId);
+    const page = parseDecimalIntegerParam(pageParam, 1);
+    const pageSize = parseDecimalIntegerParam(pageSizeParam, 100);
+    if (page === null || page < 1 || pageSize === null
+      || !ANCHOR_PAGE_SIZES.includes(pageSize as typeof ANCHOR_PAGE_SIZES[number])) {
+      throw this.invalidInput('聊天记录分页条件无效。');
+    }
+    try {
+      return {
+        ok: true, version: 'memory-anchor-v1',
+        data: await this.service.getChatHistory(batchId, { page, pageSize }, ownerDeviceId),
       };
     } catch (error) {
       this.handleError(error);

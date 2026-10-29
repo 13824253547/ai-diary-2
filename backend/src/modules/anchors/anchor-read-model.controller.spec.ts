@@ -10,6 +10,7 @@ describe('AnchorReadModelController', () => {
     listByTag: jest.fn(),
     listFeed: jest.fn(),
     countFeed: jest.fn(),
+    getChatHistory: jest.fn(),
     beginExtraction: jest.fn(),
     completeExtraction: jest.fn(),
     failExtraction: jest.fn(),
@@ -18,6 +19,18 @@ describe('AnchorReadModelController', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  test('checks history identity first and forwards batch-scoped pagination', async () => {
+    await expect(controller.getChatHistory(undefined, 'bad', '15', undefined))
+      .rejects.toMatchObject({ response: { error: { code: 'device_identity_required' } } });
+    expect(service.getChatHistory).not.toHaveBeenCalled();
+    await expect(controller.getChatHistory('batch-1', '1e1', '100', 'device-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    jest.mocked(service.getChatHistory).mockResolvedValue({ batchId: 'batch-1' } as never);
+    await expect(controller.getChatHistory('batch-1', undefined, undefined, 'device-1'))
+      .resolves.toMatchObject({ version: 'memory-anchor-v1', data: { batchId: 'batch-1' } });
+    expect(service.getChatHistory).toHaveBeenCalledWith('batch-1', { page: 1, pageSize: 100 }, 'device-1');
   });
 
   test('requires an explicit tag and device identity for read queries', async () => {

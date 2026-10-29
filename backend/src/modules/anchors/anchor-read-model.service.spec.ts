@@ -147,6 +147,27 @@ const providerResult = {
 };
 
 describe('AnchorReadModelService', () => {
+  test('filters both feed count and pagination to diary sources before applying the limit', async () => {
+    const harness = createHarness();
+    const query = jest.mocked(harness.prisma.$queryRaw);
+    query.mockResolvedValueOnce([{ total: 0n }]).mockResolvedValueOnce([]);
+    await harness.service.listFeed({ page: 1, pageSize: 10, sourceType: 'diary' }, 'device-1');
+    expect(query).toHaveBeenCalledTimes(2);
+    for (const [sql] of query.mock.calls) {
+      const statement = sql as unknown as { sql: string; values: unknown[] };
+      expect(statement.sql).toContain('WHERE `sourceType` = ?');
+      expect(statement.values).toContain('diary');
+      expect(statement.values).toContain('device-1');
+    }
+  });
+
+  test('rejects an invalid feed source before database access', async () => {
+    const harness = createHarness();
+    await expect(harness.service.listFeed({ page: 1, pageSize: 10, sourceType: 'photo' }, 'device-1'))
+      .rejects.toMatchObject({ code: 'invalid_input' });
+    expect(harness.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test.each([
     null,
     [],

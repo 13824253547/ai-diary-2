@@ -19,6 +19,7 @@ import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator
 import { resolveDeviceId } from '../../common/device-identity';
 import { ChatDailyAnchorService } from '../anchors/chat-daily-anchor.service';
 import { ArkPetChatProvider, PetChatProviderError } from './ark-pet-chat-provider';
+import { PetChatMemoryService } from './pet-chat-memory.service';
 import {
   classifyPetChatInput,
   classifyPetChatReply,
@@ -89,6 +90,7 @@ export class ChatSessionsController {
     private readonly provider: ArkPetChatProvider,
     private readonly taskCoordinator: DeviceAiTaskCoordinator,
     private readonly dailyAnchors: ChatDailyAnchorService,
+    private readonly memories: PetChatMemoryService,
   ) {}
 
   @Get('conversations')
@@ -315,7 +317,9 @@ export class ChatSessionsController {
         role: message.role,
         content: message.text,
         }));
-      const reply = await this.provider.reply(trustedContext, onTextDelta);
+      // Unavailable memory is not evidence of an empty diary history; continue without claims.
+      const memoryContext = await this.memories.getContext(ownerDeviceId).catch(() => '');
+      const reply = await this.provider.reply(trustedContext, onTextDelta, memoryContext);
       return this.service.completeGeneratedTurn({
         conversationId,
         requestId,

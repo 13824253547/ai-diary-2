@@ -1,11 +1,11 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native';
 import PetScreen from '../(tabs)/pet';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 
-const mockRouter = { push: jest.fn() };
+const mockRouter = { push: jest.fn(), replace: jest.fn(), setParams: jest.fn() };
 const mockGetAnchorSummary = jest.fn();
 const mockRouteParams: { conversationId?: string; focusMessageId?: string } = {};
 
@@ -26,9 +26,9 @@ jest.mock('expo-router', () => ({
 }));
 
 jest.mock('../../src/components/layout/screen', () => ({
-  Screen: ({ children }: { children: React.ReactNode }) => {
+  Screen: ({ children, header }: { children: React.ReactNode; header?: React.ReactNode }) => {
     const { View } = require('react-native');
-    return <View>{children}</View>;
+    return <View>{header}{children}</View>;
   },
 }));
 
@@ -63,6 +63,8 @@ describe('Pet chat screen reply feedback', () => {
     const screen = await render(<PetScreen />);
 
     expect(screen.queryByText('小橘', { exact: true })).toBeNull();
+    expect(within(screen.getByTestId('pet-fixed-header')).getByLabelText('记忆锚点')).toBeTruthy();
+    expect(within(screen.getByTestId('pet-chat-scroll')).queryByLabelText('记忆锚点')).toBeNull();
   });
 
   test('shows the authenticated anchor count from the backend summary', async () => {
@@ -142,7 +144,7 @@ describe('Pet chat screen reply feedback', () => {
     expect(screen.getByPlaceholderText('正在恢复聊天记录…')).toBeTruthy();
   });
 
-  test('opens the conversation and source message selected by a chat anchor', async () => {
+  test('redirects another conversation to read-only history without replacing the current chat', async () => {
     mockRouteParams.conversationId = 'conversation-memory';
     mockRouteParams.focusMessageId = 'message-memory';
     const loadChatConversation = jest.fn(async (conversationId: string) => {
@@ -163,12 +165,16 @@ describe('Pet chat screen reply feedback', () => {
 
     const screen = await render(<PetScreen />);
 
-    await waitFor(() => expect(loadChatConversation).toHaveBeenCalledWith('conversation-memory'));
-    expect(screen.getByText('那天我和老朋友聊了很久。')).toBeTruthy();
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith({
+      pathname: '/profile/chat-history',
+      params: { conversationId: 'conversation-memory', focusMessageId: 'message-memory' },
+    }));
+    expect(loadChatConversation).not.toHaveBeenCalled();
+    expect(screen.queryByText('那天我和老朋友聊了很久。')).toBeNull();
     expect(restoreLatestChatConversation).not.toHaveBeenCalled();
   });
 
-  test('loads the source conversation selected by a chat memory anchor', async () => {
+  test('keeps the current conversation when its own historical message is targeted', async () => {
     mockRouteParams.conversationId = 'conversation-memory';
     mockRouteParams.focusMessageId = 'message-memory';
     const loadChatConversation = jest.fn(async (conversationId: string) => {
@@ -184,12 +190,25 @@ describe('Pet chat screen reply feedback', () => {
       });
       return true;
     });
-    useAppStore.setState({ loadChatConversation });
+    useAppStore.setState({
+      loadChatConversation, chatConversationId: 'conversation-memory', chatHistoryStatus: 'ready',
+      chatMessages: [{ id: 'message-memory', conversationId: 'conversation-memory',
+        role: 'user', text: '那天我和老朋友聊了很久。' }],
+    });
 
     const screen = await render(<PetScreen />);
 
-    await waitFor(() => expect(loadChatConversation).toHaveBeenCalledWith('conversation-memory'));
+    expect(loadChatConversation).not.toHaveBeenCalled();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(screen.getByText('那天我和老朋友聊了很久。')).toBeTruthy();
+    fireEvent(screen.getByTestId('pet-message-message-memory'), 'layout', {
+      nativeEvent: { layout: { y: 320 } },
+    });
+    await waitFor(() => expect(screen.getByLabelText('回到最新消息')).toBeTruthy());
+    fireEvent.press(screen.getByLabelText('回到最新消息'));
+    expect(mockRouter.setParams).toHaveBeenCalledWith({ conversationId: undefined, focusMessageId: undefined });
+    await waitFor(() => expect(screen.queryByLabelText('回到最新消息')).toBeNull());
+    expect(useAppStore.getState().chatConversationId).toBe('conversation-memory');
   });
 
   test('retries a failed reply from its existing assistant bubble', async () => {

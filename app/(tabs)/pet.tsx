@@ -50,6 +50,7 @@ export default function PetScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const messageOffsets = useRef<Record<string, number>>({});
   const lastFocusedMessageId = useRef<string | undefined>(undefined);
+  const [viewingHistory, setViewingHistory] = useState(false);
   const messages = useAppStore(s => s.chatMessages);
   const currentConversationId = useAppStore(s => s.chatConversationId);
   const historyStatus = useAppStore(s => s.chatHistoryStatus);
@@ -76,14 +77,11 @@ export default function PetScreen() {
   }, [conversationId, restoreLatestChatConversation]);
   useEffect(() => {
     if (!conversationId || conversationId === useAppStore.getState().chatConversationId) return;
-    let active = true;
-    void loadChatConversation(conversationId).then(loaded => {
-      if (!active || !loaded) return;
-      messageOffsets.current = {};
-      lastFocusedMessageId.current = undefined;
+    router.replace({
+      pathname: '/profile/chat-history',
+      params: { conversationId, focusMessageId },
     });
-    return () => { active = false; };
-  }, [conversationId, loadChatConversation]);
+  }, [conversationId, focusMessageId, router]);
   useEffect(() => {
     lastFocusedMessageId.current = undefined;
   }, [conversationId, focusMessageId]);
@@ -95,6 +93,8 @@ export default function PetScreen() {
     } else if (!chatBusy && historyStatus === 'ready' && message.trim()) {
       sendChat(message.trim());
       setMessage('');
+      setViewingHistory(false);
+      router.setParams({ conversationId: undefined, focusMessageId: undefined });
     }
   };
   const handleSubmit = () => {
@@ -111,27 +111,36 @@ export default function PetScreen() {
         if (offset !== undefined) {
           scrollRef.current?.scrollTo({ y: Math.max(0, offset - 24), animated: true });
           lastFocusedMessageId.current = focusMessageId;
+          setViewingHistory(true);
           return;
         }
       }
-      if (!focusMessageId || lastFocusedMessageId.current === focusMessageId) {
+      if (!focusMessageId && !viewingHistory) {
         scrollRef.current?.scrollToEnd({ animated: true });
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [messages.length, focusMessageId, currentConversationId]);
-  return <Screen scroll={false} contentStyle={s.page} footer={<BottomTabs current="pet" />}>
-      <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent} onContentSizeChange={() => {
+  }, [messages.length, focusMessageId, currentConversationId, viewingHistory]);
+  const returnToLatest = () => {
+    setViewingHistory(false);
+    router.setParams({ conversationId: undefined, focusMessageId: undefined });
+    scrollRef.current?.scrollToEnd({ animated: true });
+  };
+  return <Screen scroll={false} header={<View testID="pet-fixed-header" style={s.header}>
+        {viewingHistory ? <Pressable accessibilityRole="button" accessibilityLabel="回到最新消息" onPress={returnToLatest}><Text style={s.latest}>回到最新消息</Text></Pressable> : <View />}
+        <Pressable accessibilityRole="button" accessibilityLabel="记忆锚点" onPress={() => router.push('/profile/anchors')} style={s.anchor}><Text style={s.anchorText}>记忆锚点</Text></Pressable>
+      </View>} contentStyle={s.page} footer={<BottomTabs current="pet" />}>
+      <ScrollView testID="pet-chat-scroll" ref={scrollRef} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={s.scrollContent} onContentSizeChange={() => {
         if (focusMessageId
           && lastFocusedMessageId.current !== focusMessageId
           && messageOffsets.current[focusMessageId] !== undefined) {
           scrollRef.current?.scrollTo({ y: Math.max(0, messageOffsets.current[focusMessageId] - 24), animated: true });
           lastFocusedMessageId.current = focusMessageId;
-        } else {
+          setViewingHistory(true);
+        } else if (!focusMessageId && !viewingHistory) {
           scrollRef.current?.scrollToEnd({ animated: true });
         }
       }}>
-        <Pressable accessibilityRole="button" onPress={() => router.push('/profile/anchors')} style={s.anchor}><Text style={s.anchorText}>记忆锚点</Text></Pressable>
         <View style={s.hero}><Image source={art.mascot} resizeMode="contain" style={s.mascot} /></View>
         <View style={s.statistics}>
           <Text style={s.remembered}>小橘记住了你的</Text>
@@ -145,12 +154,13 @@ export default function PetScreen() {
         {(historyStatus === 'ready' ? messages : []).map(item => {
           const bubbleStyle = [s.bubble, item.role === 'user' && s.userBubble];
           const messageStyle = [s.message, item.role === 'user' && { color: '#fff' }];
-          return <View key={item.id} onLayout={event => {
+          return <View testID={`pet-message-${item.id}`} key={item.id} onLayout={event => {
             messageOffsets.current[item.id] = event.nativeEvent.layout.y;
             if (focusMessageId === item.id && lastFocusedMessageId.current !== item.id) {
               requestAnimationFrame(() => {
                 scrollRef.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y - 24), animated: true });
                 lastFocusedMessageId.current = item.id;
+                setViewingHistory(true);
               });
             }
           }} style={[s.messageRow, item.role === 'user' && s.userRow]}>
@@ -184,6 +194,8 @@ export default function PetScreen() {
 
 const s = StyleSheet.create({
   page: { flex: 1, gap: 0, paddingBottom: 0 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 36, paddingBottom: 6 },
+  latest: { fontSize: 12, color: colors.textSecondary },
   scrollContent: { gap: 17, paddingBottom: 14 },
   anchor: { alignSelf: 'flex-end', backgroundColor: colors.brand, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 }, anchorText: { color: '#fff', fontSize: 11, fontWeight: '600' }, hero: { alignItems: 'center', marginTop: -6 }, mascot: { width: 184, height: 186 },
   statistics: { backgroundColor: colors.surface, borderRadius: 19, paddingVertical: 17, paddingHorizontal: 23, borderWidth: 1, borderColor: colors.border, gap: 5 }, remembered: { fontSize: 12, color: colors.textPrimary }, stats: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, statNumber: { color: colors.brandStrong, fontSize: 30, fontWeight: '600', fontVariant: ['tabular-nums'] }, label: { color: colors.textPrimary, fontSize: 12, fontWeight: '400' }, dot: { fontSize: 18, color: colors.textMuted },

@@ -11,6 +11,7 @@ const mockRouter = {
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
+  useLocalSearchParams: () => ({}),
 }));
 
 jest.mock('../../src/components/layout/screen', () => {

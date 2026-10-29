@@ -242,14 +242,10 @@ export default function AnchorsScreen() {
               router.push(`/diary/${diary.id}`);
               return;
             }
-            const source = chat?.sourceMessages[0];
-            if (!source) return;
+            if (!chat?.batchId) return;
             router.push({
-              pathname: '/(tabs)/pet',
-              params: {
-                conversationId: source.conversationId,
-                focusMessageId: source.messageId,
-              },
+              pathname: '/profile/chat-history',
+              params: { anchorBatchId: chat.batchId },
             });
           };
           return (

@@ -6,11 +6,13 @@ import {
   isAnchorsByTagPage,
   isMemoryAnchorFeedPage,
   isMemoryAnchorSummary,
+  isChatAnchorHistoryPage,
   type AnchorExtractionRunRecord,
   type AnchorsByTagPage,
   type MemoryAnchorFeedPage,
   type MemoryAnchorSummary,
   type ProviderAnchorResult,
+  type ChatAnchorHistoryPage,
 } from '../contracts/anchor-read-model-contract';
 import { ApiClient, ApiRequestError, type ApiRequestOptions, type ApiResponse } from '../services/api-client';
 import {
@@ -211,6 +213,24 @@ export class HttpAnchorReadModelRepository implements AnchorReadRepository {
 
   async getSummary(options?: ApiRequestOptions): Promise<MemoryAnchorSummary> {
     return this.requestMemoryData('/anchors/summary', isMemoryAnchorSummary, isMemoryAnchorSummary, options);
+  }
+
+  async getChatHistory(input: { batchId: string; page?: number; pageSize?: 10 | 20 | 50 | 100 },
+    options?: ApiRequestOptions): Promise<ChatAnchorHistoryPage> {
+    const page = input.page ?? 1;
+    const pageSize = input.pageSize ?? 100;
+    if (typeof input.batchId !== 'string' || !input.batchId.trim()
+      || !Number.isSafeInteger(page) || page < 1 || !ANCHOR_READ_PAGE_SIZES.includes(pageSize)) {
+      throw new AnchorReadRepositoryError('invalid_input', '聊天锚点或分页条件无效。', false);
+    }
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    return this.requestMemoryData(
+      `/anchors/chat/${encodeURIComponent(input.batchId)}/history?${params}`,
+      isChatAnchorHistoryPage,
+      (value): value is ChatAnchorHistoryPage => isChatAnchorHistoryPage(value)
+        && value.batchId === input.batchId && value.page === page && value.pageSize === pageSize,
+      options,
+    );
   }
 
   private async requestData<T>(

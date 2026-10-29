@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import PostcardScreen from '../postcard';
 import { capturePostcard, discardPostcard, savePostcard, sharePostcard } from '../../src/services/postcard-export';
 import { createTestStore } from '../../src/test-utils/create-test-store';
@@ -8,6 +8,8 @@ import { art } from '../../src/theme/assets';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryPhoto } from '../../src/types/diary';
+import { getPostcardStampPosition, postcardStampPlacements } from '../../src/services/postcard-composition';
+import { StyleSheet } from 'react-native';
 
 const mockRouter = {
   push: jest.fn(),
@@ -18,6 +20,7 @@ let mockPhotoId: string | undefined;
 let mockDecoration: string | undefined;
 let mockStickerId: string | undefined;
 let mockCityStampId: string | undefined;
+let mockStampPlacement: string | undefined;
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
@@ -26,6 +29,7 @@ jest.mock('expo-router', () => ({
     decoration: mockDecoration,
     stickerId: mockStickerId,
     cityStampId: mockCityStampId,
+    stampPlacement: mockStampPlacement,
   }),
 }));
 
@@ -101,6 +105,7 @@ describe('Postcard screen material assets', () => {
     mockDecoration = undefined;
     mockStickerId = undefined;
     mockCityStampId = undefined;
+    mockStampPlacement = undefined;
     useAppStore.getState().registerPhotos([buildDevicePhoto()]);
     jest.mocked(capturePostcard).mockResolvedValue('file:///cache/postcard.png');
     jest.mocked(sharePostcard).mockResolvedValue('opened');
@@ -112,7 +117,8 @@ describe('Postcard screen material assets', () => {
     const screen = await render(<PostcardScreen />);
 
     await waitFor(() => {
-      expect(screen.getByText('苏州\n2026.10.15')).toBeTruthy();
+      expect(screen.getByText('苏州')).toBeTruthy();
+      expect(screen.queryByText('2026.10.15')).toBeNull();
       expect(screen.getByTestId('postcard-photo').props.source).toEqual({
         uri: 'file:///device/device-p1.jpg',
       });
@@ -169,9 +175,24 @@ describe('Postcard screen material assets', () => {
         photoId: 'device-photo-p1',
         stickerId: 'stickerCool',
         cityStampId,
+        stampPlacement: expect.stringMatching(/^v2:/),
       },
     });
 
+  });
+
+  test('holds the stamp placement stable on rerender and allows different safe placements', async () => {
+    mockDecoration = 'stampKyoto';
+    mockStampPlacement = '1';
+    const screen = await render(<PostcardScreen />);
+    const initial = StyleSheet.flatten(screen.getByTestId('postcard-decoration').props.style);
+    expect(initial.top).toBe(postcardStampPlacements[1].top);
+    expect(initial.right).toBe(postcardStampPlacements[1].right);
+    await screen.rerender(<PostcardScreen />);
+    expect(StyleSheet.flatten(screen.getByTestId('postcard-decoration').props.style)).toEqual(initial);
+    mockStampPlacement = '3';
+    await screen.rerender(<PostcardScreen />);
+    expect(StyleSheet.flatten(screen.getByTestId('postcard-decoration').props.style).top).toBe(postcardStampPlacements[3].top);
   });
 
   test('does not render a city stamp that is not unlocked for a new composition', async () => {
@@ -182,6 +203,57 @@ describe('Postcard screen material assets', () => {
     expect(screen.getByTestId('postcard-photo')).toBeTruthy();
     expect(screen.queryByTestId('postcard-city-stamp')).toBeNull();
     expect(screen.queryByTestId('postcard-decoration')).toBeNull();
+  });
+
+  test('uses measured width and keeps a continuous placement unchanged during sharing and saving', async () => {
+    mockDecoration = 'stampKyoto';
+    mockStampPlacement = 'v2:430:640:-13';
+    const screen = await render(<PostcardScreen />);
+    await act(async () => { fireEvent(screen.getByTestId('postcard-photo'), 'load'); });
+    expect(screen.getByLabelText('分享明信片').props.accessibilityState.disabled).toBe(true);
+    await act(async () => { fireEvent.press(screen.getByLabelText('分享明信片')); });
+    expect(capturePostcard).not.toHaveBeenCalled();
+    await act(async () => { fireEvent(screen.getByTestId('postcard-photo'), 'layout', {
+      nativeEvent: { layout: { width: 320, height: 280, x: 0, y: 0 } },
+    }); });
+    const position = () => StyleSheet.flatten(screen.getByTestId('postcard-decoration').props.style);
+    const initial = position();
+    expect(initial).toMatchObject(getPostcardStampPosition(mockStampPlacement, 320, true));
+    expect(screen.getByLabelText('分享明信片').props.accessibilityState.disabled).toBe(false);
+    await act(async () => { fireEvent.press(screen.getByLabelText('分享明信片')); });
+    await waitFor(() => expect(sharePostcard).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByLabelText('保存到相册').props.accessibilityState.disabled).toBe(false));
+    expect(position()).toEqual(initial);
+    await act(async () => { fireEvent.press(screen.getByLabelText('保存到相册')); });
+    await waitFor(() => expect(savePostcard).toHaveBeenCalledTimes(1));
+    expect(position()).toEqual(initial);
+    await screen.rerender(<PostcardScreen />);
+    expect(position()).toEqual(initial);
+    await act(async () => { fireEvent.press(screen.getByLabelText('编辑素材')); });
+    expect(mockRouter.push).toHaveBeenLastCalledWith({
+      pathname: '/postcard/apply',
+      params: { photoId: mockPhotoId, cityStampId: 'stampKyoto', stampPlacement: mockStampPlacement },
+    });
+  });
+
+  test('discards an in-flight capture when the photo layout changes', async () => {
+    mockDecoration = 'stampKyoto';
+    mockStampPlacement = 'v2:430:640:-13';
+    let finishCapture: (uri: string) => void = () => undefined;
+    jest.mocked(capturePostcard).mockImplementation(() => new Promise(resolve => { finishCapture = resolve; }));
+    const screen = await render(<PostcardScreen />);
+    await act(async () => { fireEvent(screen.getByTestId('postcard-photo'), 'layout', {
+      nativeEvent: { layout: { width: 320, height: 280, x: 0, y: 0 } },
+    }); });
+    await act(async () => { fireEvent(screen.getByTestId('postcard-photo'), 'load'); });
+    await act(async () => { fireEvent.press(screen.getByLabelText('分享明信片')); });
+    await waitFor(() => expect(capturePostcard).toHaveBeenCalledTimes(1));
+    await act(async () => { fireEvent(screen.getByTestId('postcard-photo'), 'layout', {
+      nativeEvent: { layout: { width: 280, height: 280, x: 0, y: 0 } },
+    }); });
+    await act(async () => { finishCapture('file:///cache/postcard.png'); });
+    await waitFor(() => expect(discardPostcard).toHaveBeenCalledWith('file:///cache/postcard.png'));
+    expect(sharePostcard).not.toHaveBeenCalled();
   });
 
   test('shows an empty state instead of decoration-only content without a selected device photo', async () => {
@@ -230,7 +302,7 @@ describe('Postcard screen material assets', () => {
     expect(screen.getByTestId('postcard-photo').props.source).toEqual({
       uri: generated.uri, headers: generated.remoteHeaders,
     });
-    expect(screen.queryByText('undefined\n未知日期')).toBeNull();
+    expect(screen.queryByText('未知日期')).toBeNull();
     expect(screen.getByText('已使用当前选择的真实照片')).toBeTruthy();
   });
 

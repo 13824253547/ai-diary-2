@@ -562,4 +562,21 @@ describe('Memories screen', () => {
       expect(screen.getAllByText('刚写完的旅行')).toHaveLength(1);
     });
   });
+
+  test('opens the postcard application page from the memories photo entry', async () => {
+    useAppStore.setState({
+      memoriesSourceItems: [],
+      memoriesItems: [],
+      memoriesStatus: 'ready',
+      memoriesFilterMonth: '全部',
+      memoriesFilterDay: null,
+      memoriesSearchKeyword: '',
+      memoriesSearchVisible: false,
+    });
+    const screen = await render(<MemoriesScreen />);
+
+    fireEvent.press(screen.getByText('选择真实照片 ›').parent!);
+
+    expect(mockRouter.push).toHaveBeenCalledWith('/postcard/apply');
+  });
 });

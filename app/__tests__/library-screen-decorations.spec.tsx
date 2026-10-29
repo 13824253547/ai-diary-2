@@ -14,10 +14,10 @@ const mockRouter = {
 
 const decorations = [
   { title: '开心的小橘', label: '预览开心的小橘', artKey: 'stickerHappy' },
-  { title: '一起记录', label: '预览一起记录', artKey: 'mascotCamera' },
+  { title: '一起记录', label: '预览一起记录', artKey: 'stickerCamera' },
   { title: '酷酷的小橘', label: '预览酷酷的小橘', artKey: 'stickerCool' },
   { title: '抱抱小橘', label: '预览抱抱小橘', artKey: 'stickerCry' },
-  { title: '喜欢你', label: '预览喜欢你', artKey: 'stickerLove' },
+  { title: '比心小橘', label: '预览比心小橘', artKey: 'stickerLove' },
 ] as const;
 const cityStamps = [
   { title: '京都', label: '预览京都印章', location: '京都' },
