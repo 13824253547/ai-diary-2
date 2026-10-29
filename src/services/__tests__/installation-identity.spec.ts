@@ -92,4 +92,13 @@ describe('installation identity client', () => {
     await expect(createInstallationIdentity(dependencies).ensure()).rejects.toThrow('keychain locked');
     expect(request).not.toHaveBeenCalled();
   });
+
+  it('retries transient network failures with a new challenge and keeps the original key', async () => {
+    request.mockRejectedValueOnce(new TypeError('network unavailable'));
+    const wait = jest.fn(async () => undefined);
+    await expect(createInstallationIdentity({ ...dependencies, wait }).ensure()).resolves.toMatchObject({ deviceId });
+    expect(wait).toHaveBeenCalledWith(3000);
+    expect(random).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(3);
+  });
 });

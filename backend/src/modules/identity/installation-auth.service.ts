@@ -15,6 +15,10 @@ function invalidIdentity() {
   });
 }
 
+function isUniqueConflict(error: unknown) {
+  return !!error && typeof error === 'object' && 'code' in error && error.code === 'P2002';
+}
+
 function parseKey(input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalidIdentity();
   const body = input as Record<string, unknown>;
@@ -56,10 +60,19 @@ export class InstallationAuthService {
     if (!secret || Buffer.byteLength(secret) < 32) throw new ServiceUnavailableException('Identity rate limiter unavailable');
     const id = createHmac('sha256', secret).update(`${scope}:${identity.slice(0, 256)}:${window}`).digest('hex');
     await this.prisma.appAttestRateLimit.deleteMany({ where: { expiresAt: { lt: now } } });
-    const rate = await this.prisma.appAttestRateLimit.upsert({
-      where: { id }, create: { id, count: 1, expiresAt: new Date(window + windowMs) },
-      update: { count: { increment: 1 } },
-    });
+    let rate;
+    try {
+      rate = await this.prisma.appAttestRateLimit.upsert({
+        where: { id }, create: { id, count: 1, expiresAt: new Date(window + windowMs) },
+        update: { count: { increment: 1 } },
+      });
+    } catch (error) {
+      if (!isUniqueConflict(error)) throw error;
+      // MySQL Prisma upsert can race at first creation; increment the winning row atomically.
+      rate = await this.prisma.appAttestRateLimit.update({
+        where: { id }, data: { count: { increment: 1 } },
+      });
+    }
     if (rate.count > maximum) {
       throw new HttpException({
         ok: false,
@@ -111,15 +124,21 @@ export class InstallationAuthService {
       throw invalidIdentity();
     }
     // Unique keyId makes retries and concurrent enrollment recover the same server identity.
-    const device = await this.prisma.appAttestDevice.upsert({
-      where: { keyId },
-      create: {
-        deviceId: `device-${randomUUID()}`, keyId, publicKey: publicKeyHex,
-        environment: INSTALLATION_ENVIRONMENT, tokenVersion: 1, signCount: 0,
-      },
-      update: {},
-    });
-    if (device.revokedAt || device.environment !== INSTALLATION_ENVIRONMENT || device.publicKey !== publicKeyHex) {
+    let device;
+    try {
+      device = await this.prisma.appAttestDevice.upsert({
+        where: { keyId },
+        create: {
+          deviceId: `device-${randomUUID()}`, keyId, publicKey: publicKeyHex,
+          environment: INSTALLATION_ENVIRONMENT, tokenVersion: 1, signCount: 0,
+        },
+        update: {},
+      });
+    } catch (error) {
+      if (!isUniqueConflict(error)) throw error;
+      device = await this.prisma.appAttestDevice.findUnique({ where: { keyId } });
+    }
+    if (!device || device.revokedAt || device.environment !== INSTALLATION_ENVIRONMENT || device.publicKey !== publicKeyHex) {
       throw invalidIdentity();
     }
     return {
@@ -148,6 +167,7 @@ export class InstallationAuthService {
       || /\/rewrite\/?$/.test(path)
       || /\/generate(?:\/stream)?\/?$/.test(path)
       || /^\/api\/photos\/materials\/ai\/?$/.test(path)
+      || /^\/api\/postcards\/message\/?$/.test(path)
       || /^\/api\/growth\/(?:reports\/(?:ensure-current|retry)|flowers\/(?:initialize|retry))\/?$/.test(path)
     );
     if (costly) {

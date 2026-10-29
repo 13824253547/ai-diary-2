@@ -48,6 +48,8 @@ Returns the exact currently published snapshot. The service rejects an empty/non
 
 Public image access requires an active published story, an unchanged non-private source diary version, and a `photoId` included in that story's selected public content. Unselected photos, anonymous-story photos, withdrawn stories, and stale source versions return `not_found`.
 
+The endpoint remains behind the installation identity guard even though the story itself is public. Native image requests to this backend route must include the current `Authorization: Bearer ...` and matching `x-device-id` returned by `getDeviceIdentityHeaders()`. Do not attach device credentials to externally hosted CDN URLs.
+
 ### `PUT /api/discovery/stories/:storyId/like`
 
 Body: `{ "liked": boolean }`.

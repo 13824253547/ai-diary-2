@@ -78,7 +78,7 @@ export default function Detail() {
             accessibilityRole="button"
             accessibilityLabel="更多操作"
             hitSlop={12}
-            onPress={() => router.push({ pathname: '/share/privacy', params: { diaryId: currentDiary.id, returnTo: 'detail' } })}
+            onPress={() => router.push({ pathname: '/modal/more-actions', params: { diaryId: currentDiary.id } })}
             style={s.moreButton}
           >
             <Ionicons name="ellipsis-horizontal" size={22} color={colors.textPrimary} />

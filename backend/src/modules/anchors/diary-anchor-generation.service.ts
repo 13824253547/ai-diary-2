@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
 import { PrismaService } from '../../common/prisma.service';
 import {
@@ -177,21 +178,32 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
     requestId: string,
   ) {
     const sourceHash = createHash('sha256').update('[]').digest('hex');
-    await this.prisma.diaryAnchorExtraction.upsert({
-      where: {
-        ownerDeviceId_diaryId_diaryVersion: { ownerDeviceId, diaryId, diaryVersion },
-      },
-      create: {
-        ownerDeviceId,
-        diaryId,
-        diaryVersion,
-        requestId,
-        sourceHash,
-        attempt: 0,
-        status: 'skipped',
-        failureCode: 'no_source',
-      },
-      update: {},
+    await this.prisma.$transaction(async transaction => {
+      const [source] = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT \`id\`
+        FROM \`Diary\`
+        WHERE \`id\` = ${diaryId}
+          AND \`ownerDeviceId\` = ${ownerDeviceId}
+          AND \`version\` = ${diaryVersion}
+        FOR UPDATE
+      `);
+      if (!source) return;
+      await transaction.diaryAnchorExtraction.upsert({
+        where: {
+          ownerDeviceId_diaryId_diaryVersion: { ownerDeviceId, diaryId, diaryVersion },
+        },
+        create: {
+          ownerDeviceId,
+          diaryId,
+          diaryVersion,
+          requestId,
+          sourceHash,
+          attempt: 0,
+          status: 'skipped',
+          failureCode: 'no_source',
+        },
+        update: {},
+      });
     });
   }
 

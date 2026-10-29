@@ -5,14 +5,20 @@ import { ArkMemoryAnchorProvider } from './ark-memory-anchor-provider';
 import { DiaryAnchorGenerationService } from './diary-anchor-generation.service';
 
 function createService(snapshot: unknown) {
+  const diaryAnchorExtraction = {
+    findUnique: jest.fn().mockResolvedValue(null),
+    upsert: jest.fn().mockResolvedValue({ status: 'skipped' }),
+  };
+  const transaction = {
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 'diary-1' }]),
+    diaryAnchorExtraction,
+  };
   const prisma = {
     diary: {
       findFirst: jest.fn().mockResolvedValue({ contentSnapshot: snapshot }),
     },
-    diaryAnchorExtraction: {
-      findUnique: jest.fn().mockResolvedValue(null),
-      upsert: jest.fn().mockResolvedValue({ status: 'skipped' }),
-    },
+    diaryAnchorExtraction,
+    $transaction: jest.fn(async (operation: (tx: typeof transaction) => unknown) => operation(transaction)),
   } as unknown as PrismaService;
   const readModel = {
     beginExtraction: jest.fn().mockResolvedValue({
@@ -41,6 +47,7 @@ function createService(snapshot: unknown) {
     readModel,
     provider,
     taskCoordinator,
+    transaction,
     service: new DiaryAnchorGenerationService(prisma, readModel, provider, taskCoordinator),
   };
 }
@@ -97,5 +104,17 @@ describe('DiaryAnchorGenerationService', () => {
         attempt: 0,
       }),
     }));
+  });
+
+  test('does not persist a skipped extraction after the source diary is deleted', async () => {
+    const harness = createService({
+      blocks: [{ id: 'photo-block', type: 'photo', photoId: 'photo-1' }],
+    });
+    harness.transaction.$queryRaw.mockResolvedValueOnce([]);
+
+    await harness.service.processDiaryVersion('device-1', 'diary-1', 3);
+
+    expect(harness.transaction.diaryAnchorExtraction.upsert).not.toHaveBeenCalled();
+    expect(harness.provider.summarize).not.toHaveBeenCalled();
   });
 });

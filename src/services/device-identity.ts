@@ -296,9 +296,20 @@ async function ensureAttestedIdentity() {
 export async function ensureDeviceIdentity() {
   if (appConfig.identityMode === 'installation' && !process.env.JEST_WORKER_ID) {
     if (Platform.OS !== 'ios') throw new Error('当前设备不支持安全身份存储。');
-    installationApi ??= createInstallationIdentity(nativeInstallationDependencies(requestIdentityApi));
-    cachedInstallationIdentity = await installationApi.ensure();
-    return cachedInstallationIdentity.deviceId;
+    try {
+      installationApi ??= createInstallationIdentity(nativeInstallationDependencies(requestIdentityApi));
+      cachedInstallationIdentity = await installationApi.ensure();
+      return cachedInstallationIdentity.deviceId;
+    } catch (error) {
+      logDevDiagnostic('warn', 'identity.installation.failed', {
+        platform: Platform.OS,
+        ...(error instanceof Error ? {
+          errorName: error.name,
+          errorStack: error.stack?.split('\n').slice(1, 9) ?? [],
+        } : {}),
+      });
+      throw error;
+    }
   }
   if (
     cachedDeviceId

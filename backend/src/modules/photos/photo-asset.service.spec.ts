@@ -85,6 +85,11 @@ describe('PhotoAssetService', () => {
         })));
         return { count: data.length };
       }),
+      deleteMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        const deleted = diaryRows.filter(row => matches(row, where));
+        diaryRows = diaryRows.filter(row => !matches(row, where));
+        return { count: deleted.length };
+      }),
     };
     const diary = {
       findMany: jest.fn(async ({ where }: { where: Record<string, unknown> }) =>
@@ -226,6 +231,24 @@ describe('PhotoAssetService', () => {
     expect(materialRows).toHaveLength(0);
     expect(await service.readDiaryPhotoCopy('device-1', 'diary-1', material.id)).toEqual(diaryPhoto);
     expect(await service.readAnyDiaryPhotoCopy('device-1', material.id)).toEqual(diaryPhoto);
+  });
+
+  test('deletes one diary photo copy without deleting its material original', async () => {
+    const [material] = await upload('asset-delete-copy');
+    if (!material) throw new Error('material upload returned no asset');
+    await service.ensureDiaryPhotoCopies('device-1', 'diary-delete-copy', [material.id]);
+    const copyPath = join(root, String(diaryRows[0]?.filePath));
+    const hook = service.createDiaryPhotoDeleteHook('device-1', 'diary-delete-copy');
+
+    await hook.beforeCommit(prisma as unknown as Prisma.TransactionClient, 'diary-delete-copy');
+    expect(diaryRows).toHaveLength(0);
+    await hook.afterCommit();
+
+    await expect(readFile(copyPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(materialRows.map(row => row.id)).toContain(material.id);
+    await expect(service.readMaterialPhoto('device-1', material.id)).resolves.toMatchObject({
+      mimeType: 'image/jpeg',
+    });
   });
 
   test('resolves exact material IDs but leaves ambiguous legacy source IDs untouched', async () => {

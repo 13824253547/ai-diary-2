@@ -767,7 +767,7 @@ export class MemoryStoreService implements OnModuleDestroy {
   }
 
   async deleteDiary(id: string, ownerDeviceId: string, assetHook?: DiaryDeleteAssetHook) {
-    if (!isNonEmptyString(id) || id.trim().length > 191 || !isNonEmptyString(ownerDeviceId)) {
+    if (!isNonEmptyString(id) || id !== id.trim() || id.length > 191 || !isNonEmptyString(ownerDeviceId)) {
       throw new DeleteDiaryError('invalid_input', '日记标识无效。');
     }
 

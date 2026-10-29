@@ -45,7 +45,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "postinstall": "node ./tools/fix-expo-modules-jsi-xcode26.js",
+    "postinstall": "node ./tools/fix-expo-modules-jsi-xcode26.js && node ./tools/prune-ios-motion-apis.cjs",
     "start": "node ./tools/run-dev-process.js metro ./node_modules/.bin/expo start --clear",
     "start:dev-client": "node ./tools/run-dev-process.js metro ./node_modules/.bin/expo start --dev-client --clear",
     "diagnostics:collect": "node ./tools/collect-dev-diagnostics.js",

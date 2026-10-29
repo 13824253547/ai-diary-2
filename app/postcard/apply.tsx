@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -13,6 +13,9 @@ import { colors } from '../../src/theme/tokens';
 import type { DiaryPhoto } from '../../src/types/diary';
 import type { PostcardComposition } from '../../src/types/postcard';
 import { createPostcardStampPlacement, getRecentPostcardStampIds, isPostcardStampPlacement } from '../../src/services/postcard-composition';
+import { requestAIConsent } from '../../src/services/ai-consent';
+import { generatePostcardMessage } from '../../src/services/postcard-message-api';
+import { createPostcardMessageHandoff } from '../../src/services/postcard-message-handoff';
 
 type Step = 'photo' | 'sticker' | 'stamp';
 const steps = [
@@ -74,6 +77,14 @@ export default function PostcardApplyScreen() {
   const selectedPhoto = photos.find(photo => photo.id === composition.photoId);
   const selectedSticker = stickerItems.find(item => item.artKey === composition.stickerId);
   const selectedCityStamp = cityStamps.find(stamp => stamp.id === composition.cityStampId);
+  const postcardLocation = selectedPhoto?.location?.trim();
+  const messageLocation = postcardLocation && postcardLocation !== '未知地点' ? postcardLocation : '';
+  const previewInputKey = `${selectedPhoto?.id ?? ''}:${selectedPhoto?.localUri ?? selectedPhoto?.uri ?? ''}:${messageLocation}`;
+  const previewInputKeyRef = useRef(previewInputKey);
+  previewInputKeyRef.current = previewInputKey;
+  const previewControllerRef = useRef<AbortController | null>(null);
+  const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
+  const [previewError, setPreviewError] = useState('');
 
   useEffect(() => {
     setComposition(current => ({
@@ -97,17 +108,53 @@ export default function PostcardApplyScreen() {
     }
   }, [composition.cityStampId, unlockedCityStampIds]);
 
-  const previewPostcard = (skipStamp = false) => {
-    if (!selectedPhoto) return;
-    router.push({
-      pathname: '/postcard',
-      params: {
-        photoId: selectedPhoto.id,
-        ...(selectedSticker ? { stickerId: selectedSticker.artKey } : {}),
-        ...(!skipStamp && selectedCityStamp ? { cityStampId: selectedCityStamp.id } : {}),
-        stampPlacement,
-      },
-    });
+  useEffect(() => {
+    setPreviewError('');
+    setIsGeneratingMessage(false);
+    return () => {
+      previewControllerRef.current?.abort();
+      previewControllerRef.current = null;
+    };
+  }, [previewInputKey]);
+
+  const previewPostcard = async (skipStamp = false) => {
+    if (!selectedPhoto || previewControllerRef.current) return;
+    const inputKey = previewInputKey;
+    const controller = new AbortController();
+    previewControllerRef.current = controller;
+    setIsGeneratingMessage(true);
+    setPreviewError('');
+    try {
+      const allowed = await requestAIConsent('postcard', controller.signal);
+      if (!allowed) {
+        if (!controller.signal.aborted && previewInputKeyRef.current === inputKey) {
+          setPreviewError('请授权明信片寄语后再预览。');
+        }
+        return;
+      }
+      const message = await generatePostcardMessage(selectedPhoto.id, messageLocation, controller.signal);
+      if (controller.signal.aborted || previewInputKeyRef.current !== inputKey) return;
+      const messageToken = createPostcardMessageHandoff(selectedPhoto.id, messageLocation, message);
+      router.push({
+        pathname: '/postcard',
+        params: {
+          photoId: selectedPhoto.id,
+          ...(selectedSticker ? { stickerId: selectedSticker.artKey } : {}),
+          ...(!skipStamp && selectedCityStamp ? { cityStampId: selectedCityStamp.id } : {}),
+          stampPlacement,
+          messageToken,
+        },
+      });
+    } catch {
+      if (!controller.signal.aborted && previewInputKeyRef.current === inputKey) {
+        setPreviewError('寄语暂时无法生成，请稍后重试。');
+      }
+    } finally {
+      if (previewControllerRef.current === controller) {
+        previewControllerRef.current = null;
+        setIsGeneratingMessage(false);
+      }
+    }
   };
   const nextStep = () => {
     if (step === 'photo') {
@@ -139,6 +186,7 @@ export default function PostcardApplyScreen() {
 
   return <Screen key={step}
     header={<TopBar title="应用到明信片" centered onBackPress={() => {
+        if (isGeneratingMessage) return;
         if (step === 'stamp') setStep('sticker');
         else if (step === 'sticker') setStep('photo');
         else router.back();
@@ -148,16 +196,23 @@ export default function PostcardApplyScreen() {
         key={item.id}
         accessibilityRole="button"
         accessibilityLabel={`明信片步骤：${item.title}`}
-        accessibilityState={{ selected: step === item.id, disabled: item.id !== 'photo' && !selectedPhoto }}
-        disabled={item.id !== 'photo' && !selectedPhoto}
+        accessibilityState={{ selected: step === item.id, disabled: isGeneratingMessage || (item.id !== 'photo' && !selectedPhoto) }}
+        disabled={isGeneratingMessage || (item.id !== 'photo' && !selectedPhoto)}
         onPress={() => setStep(item.id)}
         style={s.stepItem}
       ><Text style={[s.stepText, step === item.id && s.activeStep]}>{index + 1}. {item.title}</Text></Pressable>)}</View>
       <Text style={s.summary}>照片：{selectedPhoto?.title ?? '请选择'}　贴纸：{selectedSticker?.title ?? '未选择'}　印章：{selectedCityStamp?.cityName ?? '未选择'}</Text>
       <View style={s.actions}>
-        {step !== 'photo' ? <Button label="跳过" variant="secondary" onPress={skipStep} /> : null}
-        <View style={s.nextAction}><Button disabled={!selectedPhoto} label={step === 'stamp' ? '预览明信片' : '下一步'} onPress={nextStep} /></View>
+        {step !== 'photo' ? <Button disabled={isGeneratingMessage} label="跳过" variant="secondary" onPress={skipStep} /> : null}
+        <View style={s.nextAction}><Button
+          disabled={!selectedPhoto || isGeneratingMessage}
+          loading={isGeneratingMessage && step === 'stamp'}
+          loadingLabel="正在生成明信片寄语"
+          label={isGeneratingMessage && step === 'stamp' ? '正在生成寄语…' : step === 'stamp' ? '预览明信片' : '下一步'}
+          onPress={nextStep}
+        /></View>
       </View>
+      {previewError ? <Text accessibilityLiveRegion="polite" style={s.previewError}>{previewError}</Text> : null}
     </View>}
   >
     {step === 'photo' ? <View style={s.section}>
@@ -169,7 +224,8 @@ export default function PostcardApplyScreen() {
             key={photo.id}
             accessibilityRole="button"
             accessibilityLabel={`选择明信片照片：${photo.title}`}
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled: isGeneratingMessage }}
+            disabled={isGeneratingMessage}
             onPress={() => setComposition(current => ({
               ...current,
               photoId: photo.id,
@@ -193,7 +249,8 @@ export default function PostcardApplyScreen() {
             key={item.artKey}
             accessibilityRole="button"
             accessibilityLabel={`选择贴纸：${item.title}`}
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled: isGeneratingMessage }}
+            disabled={isGeneratingMessage}
             onPress={() => setComposition(current => ({
               ...current,
               stickerId: current.stickerId === item.artKey ? undefined : item.artKey,
@@ -210,7 +267,7 @@ export default function PostcardApplyScreen() {
 
     {step === 'stamp' ? <View style={s.section}>
       <View style={s.sectionHeader}><Text style={s.heading}>城市印章</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="按地区浏览城市印章" onPress={browseStamps}><Text style={s.browse}>按地区浏览 ›</Text></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel="按地区浏览城市印章" accessibilityState={{ disabled: isGeneratingMessage }} disabled={isGeneratingMessage} onPress={browseStamps}><Text style={s.browse}>按地区浏览 ›</Text></Pressable>
       </View>
       {cityStamps.length ? <View style={s.decorationRow}>
         {cityStamps.map(stamp => {
@@ -219,7 +276,8 @@ export default function PostcardApplyScreen() {
             key={stamp.id}
             accessibilityRole="button"
             accessibilityLabel={`选择城市印章：${stamp.cityName}`}
-            accessibilityState={{ selected }}
+            accessibilityState={{ selected, disabled: isGeneratingMessage }}
+            disabled={isGeneratingMessage}
             onPress={() => setComposition(current => ({
               ...current,
               cityStampId: current.cityStampId === stamp.id ? undefined : stamp.id,
@@ -261,4 +319,5 @@ const s = StyleSheet.create({
   empty: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
   hint: { color: colors.textMuted, fontSize: 11, lineHeight: 16 },
   summary: { color: colors.textSecondary, fontSize: 11, lineHeight: 16 },
+  previewError: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, textAlign: 'center' },
 });

@@ -6,13 +6,24 @@ import { cityStampCatalogCities, getCityStampConfig, getVisitedCityStampIds } fr
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryPhoto } from '../../src/types/diary';
+import { consumePostcardMessageHandoff } from '../../src/services/postcard-message-handoff';
 
 const mockRouter = { push: jest.fn(), back: jest.fn() };
+const mockRequestAIConsent = jest.fn();
+const mockGeneratePostcardMessage = jest.fn();
 let mockParams: { photoId?: string; stickerId?: string; cityStampId?: string; step?: 'photo' | 'sticker' | 'stamp'; stampPlacement?: string; selectionToken?: string } = {};
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
   useLocalSearchParams: () => mockParams,
+}));
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: (...args: unknown[]) => mockRequestAIConsent(...args),
+}));
+
+jest.mock('../../src/services/postcard-message-api', () => ({
+  generatePostcardMessage: (...args: unknown[]) => mockGeneratePostcardMessage(...args),
 }));
 
 jest.mock('../../src/components/layout/screen', () => ({
@@ -27,9 +38,17 @@ jest.mock('../../src/components/layout/screen', () => ({
 }));
 
 jest.mock('../../src/components/common/button', () => ({
-  Button: ({ label, onPress, disabled = false }: { label: string; onPress?: () => void; disabled?: boolean }) => {
-    const { Pressable, Text } = require('react-native');
-    return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}><Text>{label}</Text></Pressable>;
+  Button: ({ label, onPress, disabled = false, loading = false, loadingLabel }: {
+    label: string;
+    onPress?: () => void;
+    disabled?: boolean;
+    loading?: boolean;
+    loadingLabel?: string;
+  }) => {
+    const { ActivityIndicator, Pressable, Text, View } = require('react-native');
+    return <Pressable accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled, busy: loading }} disabled={disabled} onPress={onPress}>
+      <View>{loading ? <ActivityIndicator accessibilityRole="progressbar" accessibilityLabel={loadingLabel} /> : null}<Text>{label}</Text></View>
+    </Pressable>;
   },
 }));
 
@@ -86,6 +105,8 @@ describe('Postcard material application page', () => {
     resetAppStore();
     jest.clearAllMocks();
     mockParams = {};
+    mockRequestAIConsent.mockResolvedValue(true);
+    mockGeneratePostcardMessage.mockResolvedValue('京都午后微风');
     useAppStore.getState().registerPhotos([buildMaterialPhoto('photo-1'), buildMaterialPhoto('photo-2', 'generated')]);
     useAppStore.setState({ materialPhotoIds: ['photo-1', 'photo-2'] });
   });
@@ -121,10 +142,13 @@ describe('Postcard material application page', () => {
     await act(async () => {
       fireEvent.press(screen.getByLabelText('预览明信片'));
     });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalled());
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/postcard',
-      params: { photoId: 'photo-1', stickerId: 'stickerLove', cityStampId, stampPlacement: expect.stringMatching(/^v2:/) },
+      params: { photoId: 'photo-1', stickerId: 'stickerLove', cityStampId, stampPlacement: expect.stringMatching(/^v2:/), messageToken: expect.any(String) },
     });
+    const messageToken = mockRouter.push.mock.calls.at(-1)?.[0].params.messageToken as string;
+    expect(consumePostcardMessageHandoff(messageToken, 'photo-1', '京都')).toBe('京都午后微风');
   });
 
   test('requires a photo while allowing optional decorations to be removed', async () => {
@@ -169,9 +193,10 @@ describe('Postcard material application page', () => {
       fireEvent.press(screen.getByLabelText('预览明信片'));
     });
 
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalled());
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/postcard',
-      params: { photoId: 'photo-2', stickerId: 'stickerCool', cityStampId, stampPlacement: expect.stringMatching(/^v2:/) },
+      params: { photoId: 'photo-2', stickerId: 'stickerCool', cityStampId, stampPlacement: expect.stringMatching(/^v2:/), messageToken: expect.any(String) },
     });
   });
 
@@ -197,9 +222,10 @@ describe('Postcard material application page', () => {
       fireEvent.press(screen.getByLabelText('预览明信片'));
     });
 
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalled());
     expect(mockRouter.push).toHaveBeenCalledWith({
       pathname: '/postcard',
-      params: { photoId: 'photo-1', stickerId: 'stickerCamera', cityStampId, stampPlacement: expect.stringMatching(/^v2:/) },
+      params: { photoId: 'photo-1', stickerId: 'stickerCamera', cityStampId, stampPlacement: expect.stringMatching(/^v2:/), messageToken: expect.any(String) },
     });
   });
 
@@ -240,10 +266,103 @@ describe('Postcard material application page', () => {
     await act(async () => { fireEvent.press(screen.getByLabelText('跳过')); });
     expect(screen.getByText(/贴纸：未选择/)).toBeTruthy();
     await act(async () => { fireEvent.press(screen.getByLabelText('跳过')); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalled());
     expect(mockRouter.push).toHaveBeenLastCalledWith({
       pathname: '/postcard',
-      params: { photoId: 'photo-1', stampPlacement: '2' },
+      params: { photoId: 'photo-1', stampPlacement: '2', messageToken: expect.any(String) },
     });
+  });
+
+  test('shows loading and waits for the greeting before navigating without duplicate requests', async () => {
+    let resolveMessage!: (message: string) => void;
+    mockGeneratePostcardMessage.mockImplementation(() => new Promise(resolve => {
+      resolveMessage = resolve;
+    }));
+    mockParams = { photoId: 'photo-1', step: 'stamp' };
+    const screen = await render(<PostcardApplyScreen />);
+
+    await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockGeneratePostcardMessage).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText('正在生成寄语…').props.accessibilityState).toMatchObject({
+      disabled: true,
+      busy: true,
+    });
+    expect(screen.getByLabelText('正在生成明信片寄语')).toBeTruthy();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.press(screen.getByLabelText('正在生成寄语…')); });
+    expect(mockGeneratePostcardMessage).toHaveBeenCalledTimes(1);
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    await act(async () => { resolveMessage('京都午后微风'); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(1));
+    const route = mockRouter.push.mock.calls[0]?.[0];
+    expect(route).toMatchObject({
+      pathname: '/postcard',
+      params: { photoId: 'photo-1', messageToken: expect.any(String) },
+    });
+    expect(JSON.stringify(route)).not.toContain('京都午后微风');
+    expect(mockRequestAIConsent).toHaveBeenCalledWith('postcard', expect.any(AbortSignal));
+  });
+
+  test('stays on the selection page when greeting authorization is refused', async () => {
+    mockRequestAIConsent.mockResolvedValue(false);
+    mockParams = { photoId: 'photo-1', step: 'stamp' };
+    const screen = await render(<PostcardApplyScreen />);
+
+    await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(screen.getByText('请授权明信片寄语后再预览。')).toBeTruthy());
+    expect(mockGeneratePostcardMessage).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  test('stays on the selection page when greeting generation fails', async () => {
+    mockGeneratePostcardMessage.mockRejectedValue(new Error('provider unavailable'));
+    mockParams = { photoId: 'photo-1', step: 'stamp' };
+    const screen = await render(<PostcardApplyScreen />);
+
+    await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(screen.getByText('寄语暂时无法生成，请稍后重试。')).toBeTruthy());
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  test('cancels a pending greeting when the selected photo location changes', async () => {
+    let resolveMessage!: (message: string) => void;
+    let requestSignal: AbortSignal | undefined;
+    mockGeneratePostcardMessage.mockImplementation((_photoId: string, _location: string, signal: AbortSignal) => {
+      requestSignal = signal;
+      return new Promise(resolve => { resolveMessage = resolve; });
+    });
+    mockParams = { photoId: 'photo-1', step: 'stamp' };
+    const screen = await render(<PostcardApplyScreen />);
+    await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockGeneratePostcardMessage).toHaveBeenCalledTimes(1));
+
+    const updatedPhoto = { ...useAppStore.getState().photos.find(photo => photo.id === 'photo-1')!, location: '杭州' };
+    await act(async () => { useAppStore.getState().registerPhotos([updatedPhoto]); });
+    await waitFor(() => expect(requestSignal?.aborted).toBe(true));
+    await act(async () => { resolveMessage('旧地点寄语'); });
+
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('预览明信片').props.accessibilityState.disabled).toBe(false);
+  });
+
+  test('aborts a pending greeting when leaving the selection page', async () => {
+    let resolveMessage!: (message: string) => void;
+    let requestSignal: AbortSignal | undefined;
+    mockGeneratePostcardMessage.mockImplementation((_photoId: string, _location: string, signal: AbortSignal) => {
+      requestSignal = signal;
+      return new Promise(resolve => { resolveMessage = resolve; });
+    });
+    mockParams = { photoId: 'photo-1', step: 'stamp' };
+    const screen = await render(<PostcardApplyScreen />);
+    await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockGeneratePostcardMessage).toHaveBeenCalledTimes(1));
+
+    await screen.unmount();
+    expect(requestSignal?.aborted).toBe(true);
+    await act(async () => { resolveMessage('离开页面后的寄语'); });
+    expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
   test('keeps the step controls, summary and actions in the fixed footer instead of the header', async () => {
@@ -311,22 +430,25 @@ describe('Postcard material application page', () => {
     await act(async () => { fireEvent.press(screen.getByLabelText('选择贴纸：比心小橘')); });
     await act(async () => { fireEvent.press(screen.getByLabelText('明信片步骤：城市印章')); });
     await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalled());
     expect(mockRouter.push).toHaveBeenLastCalledWith({
       pathname: '/postcard',
-      params: { photoId: 'photo-1', stickerId: 'stickerLove', stampPlacement: 'v2:430:640:-13' },
+      params: { photoId: 'photo-1', stickerId: 'stickerLove', stampPlacement: 'v2:430:640:-13', messageToken: expect.any(String) },
     });
     expect(random).not.toHaveBeenCalled();
     await act(async () => { fireEvent.press(screen.getByLabelText('明信片步骤：照片')); });
     await act(async () => { fireEvent.press(screen.getByLabelText('选择明信片照片：photo-2')); });
     await act(async () => { fireEvent.press(screen.getByLabelText('明信片步骤：城市印章')); });
     await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(2));
     expect(mockRouter.push).toHaveBeenLastCalledWith({
       pathname: '/postcard',
-      params: { photoId: 'photo-2', stickerId: 'stickerLove', stampPlacement: 'v2:250:250:-9' },
+      params: { photoId: 'photo-2', stickerId: 'stickerLove', stampPlacement: 'v2:250:250:-9', messageToken: expect.any(String) },
     });
     random.mockClear();
     await screen.rerender(<PostcardApplyScreen />);
     await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(3));
     expect(random).not.toHaveBeenCalled();
     expect(mockRouter.push.mock.calls.at(-1)?.[0].params.stampPlacement).toBe('v2:250:250:-9');
   });
@@ -350,6 +472,7 @@ describe('Postcard material application page', () => {
     random.mockClear();
     await screen.rerender(<PostcardApplyScreen />);
     await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(2));
     expect(random).not.toHaveBeenCalled();
     expect(mockRouter.push.mock.calls.at(-1)?.[0].params.stampPlacement).toBe('v2:200:200:-11');
 
@@ -358,12 +481,14 @@ describe('Postcard material application page', () => {
     random.mockReturnValue(0.7);
     await act(async () => { fireEvent.press(screen.getByLabelText(`选择城市印章：${second.cityName}`)); });
     await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(3));
     expect(mockRouter.push.mock.calls.at(-1)?.[0].params.stampPlacement).toBe('v2:700:700:7');
 
     random.mockReturnValue(0.4);
     mockParams = { ...mockParams, cityStampId: first.id, selectionToken: 'different-stamp' };
     await screen.rerender(<PostcardApplyScreen />);
     await act(async () => { fireEvent.press(screen.getByLabelText('预览明信片')); });
+    await waitFor(() => expect(mockRouter.push).toHaveBeenCalledTimes(4));
     expect(mockRouter.push.mock.calls.at(-1)?.[0].params).toMatchObject({
       photoId: 'photo-1', cityStampId: first.id, stampPlacement: 'v2:400:400:-4',
     });

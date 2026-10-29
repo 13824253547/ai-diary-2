@@ -1,7 +1,7 @@
-import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import type { DiscoveryStoryContract } from '../../contracts/discovery-contract';
 import type { ContentBlock, DiaryItem } from '../../types/diary';
-import { resolveDiscoveryMediaUri } from '../../services/discovery-media';
+import { DiscoveryPhoto } from './discovery-photo';
 import { DiaryPaper } from './diary-paper';
 
 function formatStoryDate(value: string) {
@@ -54,10 +54,9 @@ export function DiscoveryStoryPaper({ story }: { story: DiscoveryStoryContract }
     if (!photo) return null;
     return (
       <View style={[s.photoFrame, style]}>
-        <Image
+        <DiscoveryPhoto
           accessibilityLabel={photo.caption || '故事配图'}
-          source={{ uri: resolveDiscoveryMediaUri(photo.uri) }}
-          resizeMode="cover"
+          uri={photo.uri}
           style={s.image}
         />
       </View>
@@ -71,10 +70,9 @@ export function DiscoveryStoryPaper({ story }: { story: DiscoveryStoryContract }
       showCover={Boolean(story.coverUri)}
       renderCoverPhoto={() => (
         <View style={[s.photoFrame, s.hero]}>
-          <Image
+          <DiscoveryPhoto
             accessibilityLabel="故事封面"
-            source={{ uri: resolveDiscoveryMediaUri(story.coverUri) }}
-            resizeMode="cover"
+            uri={story.coverUri}
             style={s.image}
           />
         </View>

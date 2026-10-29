@@ -44,6 +44,11 @@ describe('installation authentication', () => {
       },
       appAttestRateLimit: {
         deleteMany: jest.fn(),
+        update: jest.fn(({ where }) => {
+          const bucket = buckets.get(where.id);
+          bucket.count++;
+          return bucket;
+        }),
         upsert: jest.fn(({ where, create }) => {
           const bucket = buckets.get(where.id) ?? { ...create, count: 0 };
           bucket.count++;
@@ -111,6 +116,7 @@ describe('installation authentication', () => {
 
   it.each([
     '/api/generation/jobs', '/api/generation/rewrite', '/api/photos/materials/ai',
+    '/api/postcards/message',
     '/api/chat/conversations/c/turns/t/generate/stream', '/api/growth/reports/ensure-current',
   ])('limits costly route %s and keeps cancellation available', async path => {
     for (let n = 0; n < 6; n++) await service.limitBusiness('device-test', '192.0.2.5', 'POST', path);
@@ -123,5 +129,22 @@ describe('installation authentication', () => {
     delete process.env.INSTALLATION_AUTH_PRIVATE_KEY;
     await expect(service.createChallenge({ publicKey })).rejects.toMatchObject({ status: 503 });
     expect(() => signInstallationToken('device-test', 'key', 1)).toThrow();
+  });
+
+  it('recovers first-bucket MySQL unique races without losing counts or bypassing limits', async () => {
+    await service.limit('race', 'device', 1, 60_000);
+    prisma.appAttestRateLimit.upsert.mockRejectedValueOnce({ code: 'P2002' });
+    await expect(service.limit('race', 'device', 1, 60_000)).rejects.toMatchObject({ status: 429 });
+    expect(prisma.appAttestRateLimit.update).toHaveBeenCalled();
+    prisma.appAttestRateLimit.upsert.mockRejectedValueOnce(new Error('database down'));
+    await expect(service.limit('race', 'device', 10, 60_000)).rejects.toThrow('database down');
+  });
+
+  it('recovers a concurrently registered public key without allocating another identity', async () => {
+    const first = await service.exchange(await proof());
+    prisma.appAttestDevice.upsert.mockRejectedValueOnce({ code: 'P2002' });
+    const second = await service.exchange(await proof());
+    expect(second.deviceId).toBe(first.deviceId);
+    expect(devices.size).toBe(1);
   });
 });

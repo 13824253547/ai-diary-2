@@ -296,25 +296,28 @@ export class GrowthInsightsService implements OnModuleInit {
     if (!source) return;
     const sourceHash = makeDiarySourceHash(source);
     const runKey = `diary:${diaryId}:${diaryVersion}`;
-    const existing = await this.prisma.growthRecognitionRun.findUnique({
-      where: { ownerDeviceId_runKey: { ownerDeviceId, runKey } },
+    const run = await this.prisma.$transaction(async transaction => {
+      await this.lockDiaryRefs(transaction, ownerDeviceId, [{ id: diaryId, version: diaryVersion }]);
+      const existing = await transaction.growthRecognitionRun.findUnique({
+        where: { ownerDeviceId_runKey: { ownerDeviceId, runKey } },
+      });
+      if (existing) return undefined;
+      const batchCount = makeDiaryBatches([source]).length;
+      return transaction.growthRecognitionRun.create({
+        data: {
+          ownerDeviceId,
+          runKey,
+          kind: 'diary',
+          sourceVersion: sourceHash,
+          sourceDiaryId: diaryId,
+          sourceDiaryVersion: diaryVersion,
+          sourceDiaryRefs: inputJson([{ id: diaryId, version: diaryVersion }]),
+          status: batchCount ? 'pending' : 'succeeded',
+          batchCount,
+        },
+      });
     });
-    if (existing) return;
-    const run = await this.prisma.growthRecognitionRun.create({
-      data: {
-        ownerDeviceId,
-        runKey,
-        kind: 'diary',
-        sourceVersion: sourceHash,
-        sourceDiaryId: diaryId,
-        sourceDiaryVersion: diaryVersion,
-        sourceDiaryRefs: inputJson([{ id: diaryId, version: diaryVersion }]),
-        status: 'pending',
-        batchCount: makeDiaryBatches([source]).length,
-        ...(makeDiaryBatches([source]).length === 0 ? { status: 'succeeded' } : {}),
-      },
-    });
-    this.scheduleRecognitionRun(run.id, ownerDeviceId);
+    if (run) this.scheduleRecognitionRun(run.id, ownerDeviceId);
   }
 
   enqueueAfterDiarySaved(ownerDeviceId: string, diaryId: string, diaryVersion: number) {
@@ -325,28 +328,42 @@ export class GrowthInsightsService implements OnModuleInit {
   }
 
   async initializeFlowers(ownerDeviceId: string) {
-    const existing = await this.prisma.growthRecognitionRun.findUnique({
-      where: { ownerDeviceId_runKey: { ownerDeviceId, runKey: BASELINE_RUN_KEY } },
+    const run = await this.prisma.$transaction(async transaction => {
+      await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT \`id\`
+        FROM \`Diary\`
+        WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+        ORDER BY \`id\`
+        FOR UPDATE
+      `);
+      const diaries = await transaction.diary.findMany({
+        where: { ownerDeviceId },
+        select: { id: true, version: true, title: true, contentSnapshot: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      const allSources = diaries.flatMap(diary => {
+        const blocks = sourceBlocks(diary.contentSnapshot);
+        return blocks.length ? [{ id: diary.id, version: diary.version, title: diary.title, blocks }] : [];
+      });
+      const refs = allSources.map(({ id, version }) => ({ id, version }));
+      const existing = await transaction.growthRecognitionRun.findUnique({
+        where: { ownerDeviceId_runKey: { ownerDeviceId, runKey: BASELINE_RUN_KEY } },
+      });
+      if (existing) return existing;
+      const batches = makeDiaryBatches(allSources);
+      return transaction.growthRecognitionRun.create({
+        data: {
+          ownerDeviceId,
+          runKey: BASELINE_RUN_KEY,
+          kind: 'baseline',
+          sourceVersion: makeSourceVersion(refs),
+          sourceDiaryRefs: inputJson(refs),
+          status: batches.length ? 'pending' : 'succeeded',
+          batchCount: batches.length,
+        },
+      });
     });
-    if (existing) {
-      if (existing.status === 'pending') this.scheduleRecognitionRun(existing.id, ownerDeviceId);
-      return this.getState(ownerDeviceId);
-    }
-    const allSources = await this.listCurrentDiarySources(ownerDeviceId);
-    const refs = allSources.map(({ id, version }) => ({ id, version }));
-    const batches = makeDiaryBatches(allSources);
-    const run = await this.prisma.growthRecognitionRun.create({
-      data: {
-        ownerDeviceId,
-        runKey: BASELINE_RUN_KEY,
-        kind: 'baseline',
-        sourceVersion: makeSourceVersion(refs),
-        sourceDiaryRefs: inputJson(refs),
-        status: batches.length ? 'pending' : 'succeeded',
-        batchCount: batches.length,
-      },
-    });
-    this.scheduleRecognitionRun(run.id, ownerDeviceId);
+    if (run.status === 'pending') this.scheduleRecognitionRun(run.id, ownerDeviceId);
     return this.getState(ownerDeviceId);
   }
 
@@ -547,17 +564,33 @@ export class GrowthInsightsService implements OnModuleInit {
     }
     const batches = makeDiaryBatches(sourceSnapshot);
     const requestId = `growth-report-${randomUUID()}`;
-    const job = await this.prisma.growthReportJob.create({
-      data: {
-        ownerDeviceId,
-        requestId,
-        sourceVersion,
-        sourceDiaryRefs: inputJson(sourceSnapshot.map(({ id, version }) => ({ id, version }))),
-        status: 'pending',
-        batchCount: batches.length,
-      },
+    const job = await this.prisma.$transaction(async transaction => {
+      const lockedDiaries = await transaction.$queryRaw<Array<{ id: string; version: number }>>(Prisma.sql`
+        SELECT \`id\`, \`version\`
+        FROM \`Diary\`
+        WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+        ORDER BY \`id\`
+        FOR UPDATE
+      `);
+      if (makeSourceVersion(lockedDiaries) !== sourceVersion) {
+        throw new GrowthInsightServiceError('source_changed');
+      }
+      const racedJob = await transaction.growthReportJob.findUnique({
+        where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion } },
+      });
+      if (racedJob) return racedJob;
+      return transaction.growthReportJob.create({
+        data: {
+          ownerDeviceId,
+          requestId,
+          sourceVersion,
+          sourceDiaryRefs: inputJson(sourceSnapshot.map(({ id, version }) => ({ id, version }))),
+          status: 'pending',
+          batchCount: batches.length,
+        },
+      });
     });
-    this.scheduleReportJob(job.id, ownerDeviceId);
+    if (job.status === 'pending') this.scheduleReportJob(job.id, ownerDeviceId);
     return this.getState(ownerDeviceId);
   }
 

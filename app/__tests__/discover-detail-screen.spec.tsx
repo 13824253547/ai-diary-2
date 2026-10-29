@@ -26,6 +26,13 @@ jest.mock('../../src/store/adapters/backend-discovery-adapter', () => ({
   }),
 }));
 
+jest.mock('../../src/services/device-identity', () => ({
+  getDeviceIdentityHeaders: jest.fn(async () => ({
+    'x-device-id': 'device-discovery-test',
+    Authorization: 'Bearer discovery-test-token',
+  })),
+}));
+
 jest.mock('../../src/components/layout/screen', () => ({
   Screen: ({ children, header }: { children: React.ReactNode; header?: React.ReactNode }) => {
     const { createElement } = require('react');
@@ -114,8 +121,10 @@ describe('Discovery story detail layout', () => {
     expect(screen.getByText(/2026\.04\.25/)).toBeTruthy();
     expect(within(screen.getByTestId('discovery-paper-story-1')).queryByText(/日记作者/)).toBeNull();
     expect(screen.queryByText(story.date)).toBeNull();
-    expect(screen.getByLabelText('故事封面').props.source.uri).toBe(story.coverUri);
-    expect(screen.getByLabelText('路口的灯光').props.source.uri).toBe(story.blocks[0]?.photos[0]?.uri);
+    await waitFor(() => {
+      expect(screen.getByLabelText('故事封面').props.source.uri).toBe(story.coverUri);
+      expect(screen.getByLabelText('路口的灯光').props.source.uri).toBe(story.blocks[0]?.photos[0]?.uri);
+    });
     expect(screen.getByText('雨后的霓虹映在湿润的路面上。')).toBeTruthy();
     expect(screen.getByText('灯火渐远，心也慢慢安静下来。')).toBeTruthy();
     expect(screen.getByText(/留给夜晚一点安静/)).toBeTruthy();
@@ -164,5 +173,36 @@ describe('Discovery story detail layout', () => {
     });
     expect(StyleSheet.flatten(screen.getByTestId('discovery-hero-frame-story-1').props.style).transform)
       .toEqual([{ rotate: '0deg' }]);
+  });
+
+  test('loads protected discovery cover and inline photos with current device credentials', async () => {
+    const protectedCover = '/photos/discovery/story-1/photo-content?photoId=photo-1';
+    const protectedInline = '/photos/discovery/story-1/photo-content?photoId=photo-2';
+    mockGetStory.mockResolvedValue({
+      ...story,
+      coverUri: protectedCover,
+      blocks: [{
+        ...story.blocks[0],
+        photos: [{ photoId: 'photo-2', caption: '路口的灯光', uri: protectedInline }],
+      }],
+    });
+
+    const screen = await render(<DiscoverDetail />);
+    await waitFor(() => {
+      expect(screen.getByLabelText('故事封面').props.source).toMatchObject({
+        uri: expect.stringContaining('/photos/discovery/story-1/photo-content?photoId=photo-1'),
+        headers: expect.objectContaining({
+          'x-device-id': 'device-discovery-test',
+          Authorization: 'Bearer discovery-test-token',
+        }),
+      });
+      expect(screen.getByLabelText('路口的灯光').props.source).toMatchObject({
+        uri: expect.stringContaining('/photos/discovery/story-1/photo-content?photoId=photo-2'),
+        headers: expect.objectContaining({
+          'x-device-id': 'device-discovery-test',
+          Authorization: 'Bearer discovery-test-token',
+        }),
+      });
+    });
   });
 });

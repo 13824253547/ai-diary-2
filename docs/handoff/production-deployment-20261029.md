@@ -2,6 +2,17 @@
 
 日期：2026-10-29。产品显示名称：AI旅行日记。部署项目标识仍为`orange-glow`。
 
+## 当前认证过渡方案（2026-10-29）
+
+- 用户授权暂不使用 App Attest；当前线上为 `DEVICE_IDENTITY_MODE=installation`，前端 `identityMode=installation`。独立安装 Ed25519 私钥存 Keychain，服务端分配身份，一次性挑战+签名换取一小时 EdDSA JWT；分层限流、归属/tokenVersion/撤销校验保持启用，不采集硬件指纹、不使用共享长期通行证。未来 Apple 登录绑定设计见安装身份契约，尚未实现账号登录。
+- 仍运行原镜像 `orange-glow-backend:20261029-01`，但 Compose 将 `identity-releases/20261029-installation-04/` 下六个已在本机编译的 JS 只读挂载到 `/app/dist/modules/identity/`。只替换认证模块；新业务、删除功能等其他并行任务不在本次线上发布中。无 schema 迁移，生产不构建。
+- 初次 03 包：`13b7b75dd5fff0d4b6b38c22940a485b7f186525e3bb9f88cfd6dde72276e99f`；修复 MySQL 首次 upsert P2002 后的 04 包：`126531998dd77bfe0eec8fb86456f500a8c8d43daa0b48652b406085c6a84fcd`。新安装并发读取 20/20 HTTP 200；挑战/交换/续期 201，身份/回忆/素材/聊天读取 200，缺凭证/替换 owner/重放 401。两个独立烟测身份已精确撤销，不包含用户照片/模型调用。
+- 原环境与 Compose 先备份到本机 `/tmp/orange-glow-installation-ops-ARVtXg/` 受限目录；服务器 `backups/installation-20261029-installation-03/` 保存 App Attest-only 原配置，`backups/installation-20261029-installation-04/` 保存上一个安装认证配置，环境/Compose 均 0600。新私钥仅在服务器生成，更新时不轮换。
+- 完整回滚恢复 03 备份的 `backend.env` 与 `compose.production.yml`，只重建 backend；回滚并发补丁则恢复 04 备份。均不还原/删除数据库；App Attest-only 原代码会拒绝安装凭证。后续发布完整新镜像时必须备份并移除六个挂载，否则旧文件覆盖新镜像。运维脚本更新需显式给出 `PREVIOUS_INSTALLATION_RELEASE`，并校验全部旧挂载。
+- ExpoCrypto 已加入依赖，新的 iPhone 17 模拟器开发包已本地编译/安装；终端 Metro 8081 运行中。App 完成真实 HTTPS 注册，重启后从 Keychain 恢复，素材/回忆/聊天/锚点摘要 200，首页显示真实空态。正式 EAS 包仍需用户重新构建以包含新原生模块；未执行 EAS 发布或真机计费业务验收。
+- 首次模拟器启动触发现有旧本地草稿恢复同步；现已按服务地址+服务端身份隔离草稿缓存，保留旧快照，不再自动恢复到新身份。最后盘点生产草稿 19、已保存日记 0、有效安装身份 1；未删除这些草稿，不能沿用此前“生产空库”结论。没有上传照片或调用计费模型。
+- 本轮未更改 Nginx、隐私 HTML 或其他业务模块。后端/MySQL/Redis healthy，隐私页 200。细节及限额见 `docs/reference/delivery/contracts/installation-identity-v1.md`；专项证据不代表全业务或 Apple 登录验收。
+
 ## 部署目标与状态
 
 - 主机：`152.32.225.67`，Ubuntu 24.04，x86_64，约1GB内存、19GB根盘。
@@ -140,3 +151,34 @@ Nginx修改后先`nginx -t`再reload；出错还原备份配置。镜像以版�
 - 在个人主页“月度装订”下方增加“隐私政策”行，使用系统外链打开`https://www.comiaite.com/privacy-policy`，打开失败显示提示；补充个人主页定向测试。
 - 按用户最新源稿标题“AI旅行日记”重建Word/HTML，并同步更新线上政策页。替换前备份旧页至`/opt/orange-glow/backups/privacy-policy-before-current-product-title-20261029.html`（权限0600）。线上HTTPS返回200，SHA-256为`1deedfaa8066881e48e3b950cfebd0815730070443f721590331411f1e3062b1`，与本地HTML一致。
 - 验证：个人主页1 suite / 5 tests通过，`npm run typecheck`、`git diff --check`通过。协议检查保留尚未确定的年龄占位；授权撤回/关联数据删除仍须待应用能力落实后再声明为可用。本次未实现删除后端功能。
+
+## 隐私政策主体名称改为应用名（2026-10-29）
+
+- 按用户要求将开篇改为“AI旅行日记（以下简称‘我们’）”，并将运营主体字段改为“AI旅行日记”；同步重建源稿对应的Word和HTML，备份线上旧页后原子发布。
+- 线上返回200，SHA-256为`586dcac5e6938f0a72599c01e07ee7d375d926813046e86686e1f964a5a80b29`，与本地HTML一致。应用名称不一定等同于法定运营主体名称，正式提交前需确认披露主体。
+
+## 隐私政策年龄分级说明更新（2026-10-29）
+
+- 按用户提供的App Store分级截图，将原“适用年龄”待填项改为：年龄分级以各地区App Store展示为准，未成年人遵守适用法律并在依法需要时取得监护人同意；监护人可通过客服邮箱反映未成年人个人信息处理问题。未将商店分级推定为最低服务年龄。
+- 重建Word与HTML，替换前备份线上旧页至`/opt/orange-glow/backups/privacy-policy-before-age-clause-update-20261029.html`（权限0600）后原子发布。线上返回200，SHA-256 `b7b4d6c1ac9fff17c9eec0ed18f5296d5f02efb635cd32aac8f60435fc2a5cfc`与本地一致。
+
+## DIA-008 单篇日记删除后端部署（2026-10-29）
+
+- 原生产镜像`orange-glow-backend:20261029-01`不含删除 handler。本次未重建镜像或部署并行服务改动；将生产 `src` 编译得到的五个 JS 模块发布到`/opt/orange-glow/backend-releases/20261029-diary-delete-01/`，以只读挂载提供删除 controller、事务清理、日记照片副本清理，以及锚点/成长迟到任务保护。
+- Compose 原配置先备份到本机`/tmp/orange-glow-delete-deploy-20261029/compose.production.yml`（0600）及服务器`/opt/orange-glow/backups/diary-delete-20261029-01/compose.production.yml`（0600），随后原子更新。六个`installation-04`认证挂载、生产镜像标签、环境文件、数据库/Redis/照片卷与Nginx均保持不变；只重建backend，不执行schema migration。
+- 定向验证：后端5 suites / 27 tests通过，`backend npm run build`及仅编译生产`src`的候选构建通过。部署后 backend、MySQL、Redis healthy；运行容器中五个文件与本地产物SHA-256一致，`DiariesController.deleteDiary`运行时元数据为`DELETE /api/diaries/:id`。`GET https://www.comiaite.com/api/health`无身份返回预期401，确认HTTPS入口可达。
+- 未向生产发送DELETE请求，未删除或修改生产日记；未运行生产或真实MySQL E2E，真机系统确认仍待验。生产健康/路由检查不计为删除 CASE 完整通过。回滚只需恢复上述Compose备份并运行`docker compose --project-directory /opt/orange-glow -f /opt/orange-glow/compose.production.yml up -d --no-deps backend`，不恢复数据库。
+
+## PCD-001 明信片 AI 寄语后端部署（2026-10-29）
+
+- 发布 `20261029-postcard-message-01`：本机按生产 `src` 目录结构编译六个 JS 文件，放入 `/opt/orange-glow/backend-releases/20261029-postcard-message-01/` 并只读挂载。注册 `POST /api/postcards/message`，安装身份校验及 AI 限流保持启用；Provider 使用既有 `PET_CHAT_*` 生产配置。未更换镜像、未生产构建、无数据库迁移。
+- Compose 原配置备份于本机受限目录 `/private/tmp/orange-glow-postcard-deploy-20261029/compose.production.yml` 和服务器 `/opt/orange-glow/backups/postcard-message-20261029-01/compose.production.yml`，权限均为 `0600`。原配置 SHA-256 `ab3f6e2b5f37a049c1b8d536375af99b5a876a718e18eb5f92b537c1ecc1c020`；部署后 Compose SHA-256 `1bf5acf76dd2cc7898dc30d4db4ec38e24dfe8df51dc99237aa60cf95acc2950`。仅更新 backend 挂载并重建 backend；MySQL、Redis、数据卷和 Nginx 未变。
+- 发布模块：`app.module.js` `545e1a6bf89cc65ab8aa754c186bb70901eafc512a734ee7d38b9663da84996c`；`installation-auth.service.js` `2b347bfb7bd874d07e6d9b71bb9cb5fa6c0a1c0a394c49440c1129322d7799f9`；Provider `acfe59469fd80267abdad851877ecf13545bd1f372677b780a1d586912ecf706`；controller `0a7f198a3f246baf99cdbfa9107586051d82464a4e3a1ba9d37f54a3c7107d5d`；module `90632b1c10b8d210ba0baa00b80a13df01aa411851fbbb696bffa29750b13ff0`；service `c5217de018af3cba6af8c7f8738009fba442652a7aecfa4bac965af8d4e03690`。运行容器校验值与本机编译产物一致。
+- 部署后 backend、MySQL、Redis 均 healthy；HTTPS 未授权 POST 返回预期 401，证明路由已注册并受身份保护。没有使用有效身份读取生产素材，没有调用计费模型；真实生成结果、生产素材处理及 iOS 真机授权/PNG 验收仍未执行，CASE-PCD-001-011/012 继续标记部分执行。
+- 回滚只需将服务器备份 Compose 原子恢复到 `/opt/orange-glow/compose.production.yml` 并运行 `docker compose --project-directory /opt/orange-glow -f /opt/orange-glow/compose.production.yml up -d --no-deps backend`；不恢复数据库。保留版本文件目录直到回滚期结束。
+
+## 隐私政策移除存储地区声明（2026-10-29）
+
+- 按用户要求从隐私政策移除“服务和备份存储地区：中国大陆。”；保留必要期限内的数据保存及安全措施说明。已同步源Markdown、Word和HTML。
+- 更新前备份线上HTML至`/opt/orange-glow/backups/privacy-policy-before-storage-region-removal-20261029.html`（权限0600）及本机受限目录`/tmp/orange-glow-privacy-region-20261029/`；备份内容与旧线上页面SHA-256一致。
+- 原子替换`/var/www/orange-glow/privacy-policy.html`后，线上HTTPS返回200；线上与本地HTML SHA-256均为`b345adedb9d232bdb461f51e0e8332245aff6d0a7129e5bd677c704b87bbe0c9`。检查确认地区声明已移除，保留期限说明仍在；未改Nginx配置或后端。

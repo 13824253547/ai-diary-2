@@ -9,18 +9,22 @@ import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryPhoto } from '../../src/types/diary';
 import { getPostcardStampPosition, postcardStampPlacements } from '../../src/services/postcard-composition';
+import { createPostcardMessageHandoff } from '../../src/services/postcard-message-handoff';
 import { StyleSheet } from 'react-native';
 
 const mockRouter = {
   push: jest.fn(),
   back: jest.fn(),
 };
+const mockRequestAIConsent = jest.fn();
+const mockGeneratePostcardMessage = jest.fn();
 
 let mockPhotoId: string | undefined;
 let mockDecoration: string | undefined;
 let mockStickerId: string | undefined;
 let mockCityStampId: string | undefined;
 let mockStampPlacement: string | undefined;
+let mockMessageToken: string | undefined;
 
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
@@ -30,6 +34,7 @@ jest.mock('expo-router', () => ({
     stickerId: mockStickerId,
     cityStampId: mockCityStampId,
     stampPlacement: mockStampPlacement,
+    messageToken: mockMessageToken,
   }),
 }));
 
@@ -38,6 +43,14 @@ jest.mock('../../src/services/postcard-export', () => ({
   discardPostcard: jest.fn(),
   savePostcard: jest.fn(),
   sharePostcard: jest.fn(),
+}));
+
+jest.mock('../../src/services/ai-consent', () => ({
+  requestAIConsent: (...args: unknown[]) => mockRequestAIConsent(...args),
+}));
+
+jest.mock('../../src/services/postcard-message-api', () => ({
+  generatePostcardMessage: (...args: unknown[]) => mockGeneratePostcardMessage(...args),
 }));
 
 jest.mock('../../src/components/layout/screen', () => ({
@@ -101,11 +114,14 @@ describe('Postcard screen material assets', () => {
   beforeEach(() => {
     resetAppStore();
     jest.clearAllMocks();
+    mockRequestAIConsent.mockResolvedValue(true);
+    mockGeneratePostcardMessage.mockResolvedValue('海风轻吻落日');
     mockPhotoId = 'device-photo-p1';
     mockDecoration = undefined;
     mockStickerId = undefined;
     mockCityStampId = undefined;
     mockStampPlacement = undefined;
+    mockMessageToken = undefined;
     useAppStore.getState().registerPhotos([buildDevicePhoto()]);
     jest.mocked(capturePostcard).mockResolvedValue('file:///cache/postcard.png');
     jest.mocked(sharePostcard).mockResolvedValue('opened');
@@ -118,12 +134,93 @@ describe('Postcard screen material assets', () => {
 
     await waitFor(() => {
       expect(screen.getByText('苏州')).toBeTruthy();
+      expect(screen.getByTestId('postcard-message').props.children).toBe('海风轻吻落日');
       expect(screen.queryByText('2026.10.15')).toBeNull();
       expect(screen.getByTestId('postcard-photo').props.source).toEqual({
         uri: 'file:///device/device-p1.jpg',
       });
     });
     expect(screen.queryByTestId('postcard-decoration')).toBeNull();
+  });
+
+  test('generates the greeting from the selected material and place, and uses the full width without a sticker', async () => {
+    const screen = await render(<PostcardScreen />);
+
+    await waitFor(() => expect(mockGeneratePostcardMessage).toHaveBeenCalledWith(
+      'device-photo-p1',
+      '苏州',
+      expect.any(AbortSignal),
+    ));
+    expect(mockRequestAIConsent).toHaveBeenCalledWith('postcard', expect.any(AbortSignal));
+    expect(screen.getByTestId('postcard-message').props.children).toBe('海风轻吻落日');
+    expect(StyleSheet.flatten(screen.getByTestId('postcard-message-container').props.style).marginRight).toBe(0);
+    expect(screen.queryByText('把这段真实回忆，')).toBeNull();
+  });
+
+  test('uses the selection-page greeting handoff without prompting or generating again', async () => {
+    mockMessageToken = createPostcardMessageHandoff('device-photo-p1', '苏州', '苏州晚风正好');
+    const screen = await render(<PostcardScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('postcard-message').props.children).toBe('苏州晚风正好');
+    });
+    expect(mockRequestAIConsent).not.toHaveBeenCalled();
+    expect(mockGeneratePostcardMessage).not.toHaveBeenCalled();
+  });
+
+  test('reserves the sticker area and blocks export until the greeting authorization is granted', async () => {
+    mockStickerId = 'stickerCool';
+    const screenWithSticker = await render(<PostcardScreen />);
+    expect(StyleSheet.flatten(screenWithSticker.getByTestId('postcard-message-container').props.style).marginRight).toBe(66);
+    await screenWithSticker.unmount();
+
+    resetAppStore();
+    useAppStore.getState().registerPhotos([buildDevicePhoto()]);
+    mockGeneratePostcardMessage.mockClear();
+    mockRequestAIConsent.mockResolvedValue(false);
+    const refused = await render(<PostcardScreen />);
+    await waitFor(() => expect(refused.getByText('请先授权生成寄语')).toBeTruthy());
+    expect(mockGeneratePostcardMessage).not.toHaveBeenCalled();
+    expect(refused.getByLabelText('分享明信片').props.accessibilityState.disabled).toBe(true);
+    expect(refused.getByLabelText('保存到相册').props.accessibilityState.disabled).toBe(true);
+  });
+
+  test('does not let a late greeting for the previous photo replace the current greeting', async () => {
+    const completions = new Map<string, (value: string) => void>();
+    mockGeneratePostcardMessage.mockImplementation((photoId: string) => new Promise(resolve => {
+      completions.set(photoId, resolve);
+    }));
+    const screen = await render(<PostcardScreen />);
+    await waitFor(() => expect(completions.has('device-photo-p1')).toBe(true));
+
+    const next = {
+      ...buildDevicePhoto(),
+      id: 'device-photo-p2',
+      location: '杭州',
+      uri: 'file:///device/device-p2.jpg',
+      localUri: 'file:///device/device-p2.jpg',
+    };
+    useAppStore.getState().registerPhotos([next]);
+    mockPhotoId = next.id;
+    screen.rerender(<PostcardScreen />);
+    await waitFor(() => expect(completions.has('device-photo-p2')).toBe(true));
+
+    await act(async () => { completions.get('device-photo-p2')?.('西湖晚风'); });
+    await waitFor(() => expect(screen.getByTestId('postcard-message').props.children).toBe('西湖晚风'));
+    await act(async () => { completions.get('device-photo-p1')?.('旧照片寄语'); });
+    expect(screen.getByTestId('postcard-message').props.children).toBe('西湖晚风');
+    expect(screen.getByLabelText('分享明信片').props.accessibilityState.disabled).toBe(true);
+  });
+
+  test('shows generation failure without using a fixed greeting or allowing export', async () => {
+    mockGeneratePostcardMessage.mockRejectedValue(new Error('provider unavailable'));
+    const screen = await render(<PostcardScreen />);
+
+    await waitFor(() => expect(screen.getByTestId('postcard-message').props.children).toBe('寄语生成失败'));
+    expect(screen.getByText('寄语暂时无法生成，请重新进入明信片后重试。')).toBeTruthy();
+    expect(screen.queryByText('把这段真实回忆，')).toBeNull();
+    expect(screen.getByLabelText('分享明信片').props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByLabelText('保存到相册').props.accessibilityState.disabled).toBe(true);
   });
 
   test('renders the selected city decoration as an SVG stamp', async () => {

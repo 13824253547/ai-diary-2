@@ -109,6 +109,7 @@ describe('Home screen real content', () => {
 
     const screen = await render(<HomeScreen />);
 
+    expect(screen.queryByText('notifications-outline')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('photo-material-real')).toBeTruthy());
     expect(screen.queryByTestId('photo-diary-cache')).toBeNull();
     expect(screen.getByTestId('home-material-photo-row')).toBeTruthy();

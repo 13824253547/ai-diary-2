@@ -330,7 +330,7 @@ export class HttpCoreDiaryRepository implements CoreDiaryRepository {
   }
 
   async deleteDiary(diaryId: string, options?: ApiRequestOptions): Promise<RemoteResult<{ diaryId: string }>> {
-    if (typeof diaryId !== 'string' || !diaryId.trim() || diaryId.length > 191) {
+    if (typeof diaryId !== 'string' || !diaryId.trim() || diaryId !== diaryId.trim() || diaryId.length > 191) {
       return {
         ok: false,
         version: CORE_DIARY_CONTRACT_VERSION,

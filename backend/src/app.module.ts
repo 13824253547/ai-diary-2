@@ -14,6 +14,7 @@ import { AnchorCorrectionsModule } from './modules/anchors/anchor-corrections.mo
 import { ChatSessionsModule } from './modules/chat/chat-sessions.module';
 import { AIImageGenerationModule } from './modules/ai-images/ai-image-generation.module';
 import { GrowthInsightsModule } from './modules/growth/growth-insights.module';
+import { PostcardMessageModule } from './modules/postcards/postcard-message.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { GrowthInsightsModule } from './modules/growth/growth-insights.module';
     ChatSessionsModule,
     AIImageGenerationModule,
     GrowthInsightsModule,
+    PostcardMessageModule,
   ],
   controllers: [HealthController],
 })

@@ -2,7 +2,7 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { configureApiBodyParser } from '../../common/api-body-parser';
-import { MemoryStoreService } from '../../common/memory-store.service';
+import { DeleteDiaryError, MemoryStoreService } from '../../common/memory-store.service';
 import { DiaryAnchorGenerationService } from '../anchors/diary-anchor-generation.service';
 import { PhotoAssetService } from '../photos/photo-asset.service';
 import { GrowthInsightsService } from '../growth/growth-insights.service';
@@ -21,11 +21,14 @@ describe('DiariesController', () => {
   };
   const photoAssets = {
     createDiaryPhotoSaveHook: jest.fn(() => ({ beforeCommit, rollback })),
+    createDiaryPhotoDeleteHook: jest.fn(() => ({ beforeCommit, afterCommit, rollback })),
     ensureDiaryPhotoCopies: jest.fn(),
   };
+  const afterCommit = jest.fn();
   const diaryAnchors = { enqueue: jest.fn() };
   const growthInsights = { enqueueAfterDiarySaved: jest.fn() };
   const store = {
+    deleteDiary: jest.fn(async (diaryId: string) => ({ diaryId })),
     saveDiaryWithCommand: jest.fn(async (_body, _owner, hook) => {
       await hook.beforeCommit({} as never, 'diary-1');
       return {
@@ -56,6 +59,8 @@ describe('DiariesController', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     photoAssets.createDiaryPhotoSaveHook.mockReturnValue({ beforeCommit, rollback });
+    photoAssets.createDiaryPhotoDeleteHook.mockReturnValue({ beforeCommit, afterCommit, rollback });
+    store.deleteDiary.mockImplementation(async (diaryId: string) => ({ diaryId }));
     store.saveDiaryWithCommand.mockImplementation(async (_body, _owner, hook) => {
       await hook.beforeCommit({} as never, 'diary-1');
       return {
@@ -120,5 +125,36 @@ describe('DiariesController', () => {
     expect(beforeCommit).toHaveBeenCalled();
     expect(photoAssets.ensureDiaryPhotoCopies).toHaveBeenCalledWith('device-1', 'diary-1', savedPhotoIds);
     expect(growthInsights.enqueueAfterDiarySaved).toHaveBeenCalledWith('device-1', 'diary-1', 1);
+  });
+
+  test('deletes one diary only after resolving the current device identity', async () => {
+    const response = await request(app.getHttpServer())
+      .delete('/api/diaries/diary-1')
+      .set('x-device-id', 'device-1')
+      .expect(200);
+
+    expect(response.body).toEqual({ ok: true, data: { diaryId: 'diary-1' } });
+    expect(photoAssets.createDiaryPhotoDeleteHook).toHaveBeenCalledWith('device-1', 'diary-1');
+    expect(store.deleteDiary).toHaveBeenCalledWith(
+      'diary-1',
+      'device-1',
+      expect.objectContaining({ beforeCommit: expect.any(Function), afterCommit: expect.any(Function) }),
+    );
+
+    await request(app.getHttpServer())
+      .delete('/api/diaries/diary-1')
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('device_identity_required'));
+    expect(store.deleteDiary).toHaveBeenCalledTimes(1);
+  });
+
+  test('returns not found for an unavailable diary and does not expose its content', async () => {
+    store.deleteDiary.mockRejectedValueOnce(new DeleteDiaryError('not_found', '没有找到这篇日记。'));
+
+    await request(app.getHttpServer())
+      .delete('/api/diaries/diary-missing')
+      .set('x-device-id', 'device-1')
+      .expect(404)
+      .expect(({ body }) => expect(body.error.code).toBe('not_found'));
   });
 });

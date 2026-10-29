@@ -1218,6 +1218,40 @@ describe('HttpCoreDiaryRepository', () => {
     });
   });
 
+  test('deletes one diary through the device-scoped DELETE endpoint and validates the response ID', async () => {
+    const repository = new HttpCoreDiaryRepository(new ApiClient({
+      baseUrl: 'http://127.0.0.1:3001/api',
+      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+    }));
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, data: { diaryId: 'diary-1' } }),
+    });
+
+    await expect(repository.deleteDiary('diary-1')).resolves.toMatchObject({
+      ok: true,
+      data: { diaryId: 'diary-1' },
+    });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:3001/api/diaries/diary-1',
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({ 'x-device-id': 'device-test-1' }),
+      }),
+    );
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, data: { diaryId: 'diary-other' } }),
+    });
+    await expect(repository.deleteDiary('diary-1')).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'provider_failed', retryable: false },
+    });
+  });
+
   test('rejects empty diary bodies and photo references outside the saved diary', async () => {
     const validSnapshot = {
       type: 'travel',

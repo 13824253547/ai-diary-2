@@ -87,13 +87,66 @@ This patch needs no schema migration; the existing identity tables separate
 installation records with `environment=installation-ed25519-v1`.
 
 Before changing server configuration, download a protected backup locally.
+The current release uses read-only mounts instead of replacing the base image:
+six locally compiled identity JS files live under
+`/opt/orange-glow/identity-releases/20261029-installation-04/`.
 `tools/configure-installation-auth.cjs` can then run via SSH stdin in a Node
-container with `/opt/orange-glow` mounted at `/deployment` and
-`INSTALLATION_RELEASE` set to the new image tag. It backs up both environment
-files before atomic replacement, generates the signing key server-side, and
-does not print secrets. Retain the prior image and both environment backups.
-Restoring the old release and environment does not delete installation data,
-but old App Attest-only code will reject installation credentials.
+container as the one-off maintenance user `0`, with `/opt/orange-glow` mounted
+at `/deployment` and `INSTALLATION_RELEASE` set to the module release directory.
+It verifies the modules, backs up environment and Compose files, adds the
+read-only mounts, generates the signing key server-side, and does not print secrets.
+The application container still runs as the original unprivileged user.
+To update existing mounts, explicitly set `PREVIOUS_INSTALLATION_RELEASE` to the
+current module tag. The script checks all six exact previous mounts before
+replacement and refuses unexpected layouts. Existing signing keys are retained.
+
+Rollback this release by restoring `backend.env` and `compose.production.yml`
+from `backups/installation-20261029-installation-03/`, then recreating only the
+backend with `docker compose ... up -d --no-deps backend`. No database restore
+is needed. Retain installation records, signing keys and prior images.
+The `installation-20261029-installation-04` backup restores the previous
+installation release instead, if only the concurrent-counter fix must be rolled back.
+Restoring App Attest-only code will reject installation credentials.
+For a future full image release that incorporates this code, remove all six
+mounts after backup and validation, or mounted old files will override the new image.
+
+## Diary Deletion Module Release
+
+Release `20261029-diary-delete-01` keeps the production image tag unchanged and
+adds five locally compiled, read-only JS mounts under
+`/opt/orange-glow/backend-releases/20261029-diary-delete-01/`. The modules cover
+the diary route, transactional cleanup, diary-photo-copy cleanup, and guards
+against late anchor/growth writes. The existing six `installation-04` mounts
+remain in place; do not replace the server Compose file with the repository copy.
+
+The original Compose file is backed up locally and at
+`/opt/orange-glow/backups/diary-delete-20261029-01/compose.production.yml`
+with mode `0600`. Roll back by restoring that Compose backup atomically and
+recreating only `backend` with `docker compose ... up -d --no-deps backend`.
+No database restore is needed. Keep the release files until rollback is no
+longer required. A future full image that includes these modules must remove
+their five mounts after backup and validation, or the mounted files override
+the image contents.
+
+## Postcard Message Module Release
+
+Release `20261029-postcard-message-01` keeps the production image unchanged and
+adds six locally compiled, read-only JS mounts under
+`/opt/orange-glow/backend-releases/20261029-postcard-message-01/`. The release
+registers the postcard module, adds the authenticated/rate-limited endpoint, and
+uses the existing `PET_CHAT_*` provider configuration. The four postcard module
+files are stored under `modules/postcards/`; the installation rate-limit service
+is updated from this release directory. No schema migration is required.
+
+The original Compose file is backed up locally and at
+`/opt/orange-glow/backups/postcard-message-20261029-01/compose.production.yml`
+with mode `0600`. Roll back by atomically restoring that Compose backup and
+recreating only `backend` with
+`docker compose --project-directory /opt/orange-glow -f /opt/orange-glow/compose.production.yml up -d --no-deps backend`.
+No database restore is needed. Keep the release files until rollback is no
+longer required. A future full image that includes these modules must remove
+their six mounts after backup and validation, or the mounted files override
+the image contents.
 
 ## Privacy Policy Page
 

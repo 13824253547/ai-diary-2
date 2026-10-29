@@ -76,6 +76,37 @@ describe('AI consent', () => {
     expect(f.prompt).toHaveBeenCalledTimes(4);
   });
 
+  test('preserves v3 grants while requesting a separate postcard grant', async () => {
+    const f = fixture();
+    f.records.set('device-1', {
+      deviceId: 'device-1',
+      service: 'https://api.test',
+      version: '2026-10-29-v3',
+      grants: {
+        diary: '2026-10-29T00:00:00.000Z',
+        chat: '2026-10-29T00:00:00.000Z',
+        image: '2026-10-29T00:00:00.000Z',
+        insights: '2026-10-29T00:00:00.000Z',
+      },
+    });
+    const service = createAIConsentService(f.deps);
+
+    expect(await service.request('chat')).toBe(true);
+    expect(f.prompt).not.toHaveBeenCalled();
+    expect(await service.request('postcard')).toBe(true);
+    expect(f.prompt).toHaveBeenCalledWith('postcard', undefined);
+    expect(f.records.get('device-1')).toMatchObject({
+      version: AI_CONSENT_VERSION,
+      grants: {
+        diary: expect.any(String),
+        chat: expect.any(String),
+        image: expect.any(String),
+        insights: expect.any(String),
+        postcard: expect.any(String),
+      },
+    });
+  });
+
   test('keeps prompts short, purpose-specific and free of provider names', () => {
     for (const notice of Object.values(AI_CONSENT_NOTICES)) {
       expect(notice.message.length).toBeLessThan(100);
@@ -86,11 +117,15 @@ describe('AI consent', () => {
     expect(AI_CONSENT_NOTICES.chat.message).toContain('AI会处理');
     expect(AI_CONSENT_NOTICES.image.message).toContain('AI会根据你的描述生成图片');
     expect(AI_CONSENT_NOTICES.insights.message).toContain('AI会分析');
+    expect(AI_CONSENT_NOTICES.postcard.message).toContain('素材照片画面');
+    expect(AI_CONSENT_NOTICES.postcard.message).toContain('可用地点');
+    expect(AI_CONSENT_NOTICES.postcard.message).toContain('不超过12字');
     expect(AI_CONSENT_NOTICES.diary.message).toContain('照片');
     expect(AI_CONSENT_NOTICES.diary.message).toContain('保存后');
     expect(AI_CONSENT_NOTICES.chat.message).toContain('近期日记摘要');
     expect(AI_CONSENT_NOTICES.image.message).toContain('描述');
     expect(AI_CONSENT_NOTICES.insights.message).toContain('日记正文');
+    expect(AI_CONSENT_NOTICES.postcard.message).toMatch(/照片画面.*地点/);
   });
 
   test('does not persist acceptance for a different identity or after leaving the page', async () => {

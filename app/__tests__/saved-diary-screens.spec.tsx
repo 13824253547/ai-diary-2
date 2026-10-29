@@ -177,6 +177,18 @@ describe('Saved diary screens', () => {
     expect(screen.getByText('这条锚点提示也要跟着已保存内容出现。')).toBeTruthy();
   });
 
+  test('detail screen opens the diary actions menu for the current diary', async () => {
+    mockParams.id = 'diary-2';
+
+    const screen = await render(<DetailScreen />);
+    fireEvent.press(screen.getByLabelText('更多操作'));
+
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/modal/more-actions',
+      params: { diaryId: 'diary-2' },
+    });
+  });
+
   test('detail screen can still read a historical emotion diary', async () => {
     mockParams.id = 'diary-3';
 

@@ -3,8 +3,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { appConfig } from '../config/app-config';
 import { ensureDeviceIdentity } from './device-identity';
 
-export type AIConsentPurpose = 'diary' | 'chat' | 'image' | 'insights';
-export const AI_CONSENT_VERSION = '2026-10-29-v3';
+export type AIConsentPurpose = 'diary' | 'chat' | 'image' | 'insights' | 'postcard';
+export const AI_CONSENT_VERSION = '2026-10-29-v4';
+const PREVIOUS_AI_CONSENT_VERSION = '2026-10-29-v3';
+const PREVIOUS_AI_CONSENT_PURPOSES: AIConsentPurpose[] = ['diary', 'chat', 'image', 'insights'];
 
 export const AI_CONSENT_NOTICES: Record<AIConsentPurpose, { title: string; message: string }> = {
   diary: {
@@ -22,6 +24,10 @@ export const AI_CONSENT_NOTICES: Record<AIConsentPurpose, { title: string; messa
   insights: {
     title: '全库日记分析授权',
     message: 'AI会分析本设备已保存的日记正文，用于成长记录和个人洞察。新保存或修改的日记也会用于后续分析。是否同意？',
+  },
+  postcard: {
+    title: '明信片寄语授权',
+    message: 'AI会读取你选择的素材照片画面，并参考可用地点，生成不超过12字的明信片寄语。是否同意？',
   },
 };
 
@@ -45,10 +51,16 @@ type ConsentDependencies = {
 function readGrants(value: unknown, deviceId: string, service: string): ConsentRecord['grants'] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const record = value as Partial<ConsentRecord>;
-  if (record.deviceId !== deviceId || record.service !== service || record.version !== AI_CONSENT_VERSION
+  const allowedPurposes = record.version === AI_CONSENT_VERSION
+    ? Object.keys(AI_CONSENT_NOTICES)
+    : record.version === PREVIOUS_AI_CONSENT_VERSION
+      ? PREVIOUS_AI_CONSENT_PURPOSES
+      : [];
+  if (record.deviceId !== deviceId || record.service !== service || !allowedPurposes.length
     || !record.grants || typeof record.grants !== 'object' || Array.isArray(record.grants)) return {};
   return Object.fromEntries(Object.entries(record.grants).filter(([purpose, time]) =>
-    purpose in AI_CONSENT_NOTICES && typeof time === 'string' && Number.isFinite(Date.parse(time)),
+    allowedPurposes.includes(purpose as AIConsentPurpose)
+      && typeof time === 'string' && Number.isFinite(Date.parse(time)),
   ));
 }
 

@@ -1,5 +1,6 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 import MoreActionsScreen from '../modal/more-actions';
 import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
@@ -54,32 +55,57 @@ describe('More actions modal', () => {
     expect(mockRouter.back).toHaveBeenCalledTimes(1);
   });
 
-  test('continues editing with the same existing draft instead of creating a duplicate draft', async () => {
-    const existingDraftId = useAppStore.getState().beginEdit('diary-1')!;
+  test('does not offer continue editing in the diary actions menu', async () => {
     mockParams.diaryId = 'diary-1';
 
     const screen = await render(<MoreActionsScreen />);
-    fireEvent.press(screen.getByLabelText('继续编辑'));
-
-    const editDrafts = Object.values(useAppStore.getState().drafts).filter(draft => draft.sourceDiaryId === 'diary-1' && !draft.savedDiaryId);
-
-    expect(editDrafts).toHaveLength(1);
-    expect(useAppStore.getState().activeDraftId).toBe(existingDraftId);
-    expect(mockRouter.replace).toHaveBeenCalledWith({
-      pathname: '/diary/[id]/edit',
-      params: { id: 'diary-1', draftId: existingDraftId },
-    });
+    expect(screen.queryByLabelText('继续编辑')).toBeNull();
+    expect(screen.queryByText('继续编辑')).toBeNull();
   });
 
-  test('routes privacy and share actions with the current diary id', async () => {
+  test('routes privacy and share actions and confirms deletion for the current diary', async () => {
     mockParams.diaryId = 'diary-2';
 
     const screen = await render(<MoreActionsScreen />);
+    expect(screen.getByText('这篇日记')).toBeTruthy();
 
     fireEvent.press(screen.getByLabelText('设置公开范围'));
-    expect(mockRouter.replace).toHaveBeenCalledWith('/share/privacy?diaryId=diary-2');
+    expect(mockRouter.replace).toHaveBeenCalledWith({
+      pathname: '/share/privacy',
+      params: { diaryId: 'diary-2', returnTo: 'detail' },
+    });
 
     fireEvent.press(screen.getByLabelText('分享这篇日记'));
     expect(mockRouter.replace).toHaveBeenCalledWith('/share/result?diaryId=diary-2');
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    fireEvent.press(screen.getByText('删除日记'));
+
+    expect(useAppStore.getState().diaries.some(diary => diary.id === 'diary-2')).toBe(true);
+    expect(alertSpy).toHaveBeenCalledWith(
+      '删除这篇日记？',
+      expect.stringContaining('发现页公开内容'),
+      expect.arrayContaining([
+        expect.objectContaining({ text: '取消' }),
+        expect.objectContaining({ text: '删除日记', style: 'destructive' }),
+      ]),
+      { cancelable: true },
+    );
+
+    alertSpy.mock.calls[0][2]?.find(button => button.text === '取消')?.onPress?.();
+    expect(useAppStore.getState().diaries.some(diary => diary.id === 'diary-2')).toBe(true);
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByText('删除日记'));
+    const buttons = alertSpy.mock.calls[1][2];
+    const confirm = buttons?.find(button => button.text === '删除日记');
+    await act(async () => {
+      confirm?.onPress?.();
+    });
+
+    await waitFor(() => {
+      expect(useAppStore.getState().diaries.some(diary => diary.id === 'diary-2')).toBe(false);
+      expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/memories');
+    });
+    alertSpy.mockRestore();
   });
 });

@@ -95,4 +95,27 @@ describe('local draft snapshot storage', () => {
       { idempotent: true },
     );
   });
+
+  test('isolates installation snapshots without reading or deleting the old shared snapshot', async () => {
+    jest.mocked(FileSystem.readAsStringAsync).mockResolvedValue('{}');
+    const first = createLocalDraftSnapshotStore(async () => 'https://production/api:device-one');
+    const second = createLocalDraftSnapshotStore(async () => 'https://staging/api:device-one');
+    const third = createLocalDraftSnapshotStore(async () => 'https://production/api:device-two');
+    await first.load();
+    await second.load();
+    await third.load();
+    const paths = jest.mocked(FileSystem.readAsStringAsync).mock.calls.map(([uri]) => uri);
+    expect(new Set(paths).size).toBe(3);
+    expect(paths.every(uri => uri.includes('orange-glow-drafts-installation-v1-'))).toBe(true);
+    expect(paths).not.toContain('file:///documents/orange-glow-drafts-v1.json');
+    await first.clear();
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(paths[0], { idempotent: true });
+  });
+
+  test('does not access shared snapshots when installation identity cannot be resolved', async () => {
+    const storage = createLocalDraftSnapshotStore(async () => { throw new Error('identity unavailable'); });
+    await expect(storage.load()).rejects.toThrow('identity unavailable');
+    expect(FileSystem.readAsStringAsync).not.toHaveBeenCalled();
+    expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+  });
 });

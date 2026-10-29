@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../src/components/layout/screen';
@@ -9,7 +9,7 @@ import { BottomTabs } from '../../src/components/navigation/bottom-tabs';
 import { createBackendDiscoveryRepository } from '../../src/store/adapters/backend-discovery-adapter';
 import type { DiscoveryStoryContract } from '../../src/contracts/discovery-contract';
 import { DeviceCityError, getCurrentDeviceCity } from '../../src/services/device-city';
-import { resolveDiscoveryMediaUri } from '../../src/services/discovery-media';
+import { DiscoveryPhoto } from '../../src/components/diary/discovery-photo';
 import { colors } from '../../src/theme/tokens';
 
 type DiscoveryCategory = 'latest' | 'same-city';
@@ -140,7 +140,7 @@ export default function DiscoverScreen() {
           ? <EmptyResult title="发现内容暂时无法加载" />
           : items.length === 0
             ? <EmptyResult title={search ? '没有找到相关故事' : category === 'same-city' ? '暂时还没有同城故事' : '暂时还没有公开故事'} />
-            : <View style={s.grid}>{[0, 1].map(column => <View key={column} style={s.column}>{items.filter((_, index) => index % 2 === column).map((item, index) => <View key={item.id} style={s.card}><Pressable accessibilityRole="button" accessibilityLabel={`阅读${item.title}`} onPress={() => router.push(`/discover/${item.id}`)}>{item.coverUri ? <Image source={{ uri: resolveDiscoveryMediaUri(item.coverUri) }} style={[s.image, { height: column === 0 && index === 0 ? 206 : 171 }]} /> : null}<Text style={s.cardTitle}>{item.title}</Text></Pressable><View style={s.metadata}><View style={s.avatar}><Text style={s.avatarText}>{item.author.slice(0, 1) || ' '}</Text></View><Text numberOfLines={1} style={s.author}>{item.author}</Text>{item.likesEnabled ? <Pressable accessibilityLabel={item.liked ? '取消点赞' : '点赞'} accessibilityState={{ selected: item.liked, disabled: likingIds.includes(item.id) }} disabled={likingIds.includes(item.id)} onPress={() => { void toggleLike(item); }} hitSlop={7} style={s.like}><Ionicons name={item.liked ? 'heart' : 'heart-outline'} size={14} color={item.liked ? colors.brand : colors.textMuted} /><Text style={s.count}>{item.likeCount}</Text></Pressable> : null}</View></View>)}</View>)}</View>}
+          : <View style={s.grid}>{[0, 1].map(column => <View key={column} style={s.column}>{items.filter((_, index) => index % 2 === column).map((item, index) => <View key={item.id} style={s.card}><Pressable accessibilityRole="button" accessibilityLabel={`阅读${item.title}`} onPress={() => router.push(`/discover/${item.id}`)}>{item.coverUri ? <DiscoveryPhoto accessibilityLabel={`${item.title}封面`} uri={item.coverUri} style={[s.image, { height: column === 0 && index === 0 ? 206 : 171 }]} /> : null}<Text style={s.cardTitle}>{item.title}</Text></Pressable><View style={s.metadata}><View style={s.avatar}><Text style={s.avatarText}>{item.author.slice(0, 1) || ' '}</Text></View><Text numberOfLines={1} style={s.author}>{item.author}</Text>{item.likesEnabled ? <Pressable accessibilityLabel={item.liked ? '取消点赞' : '点赞'} accessibilityState={{ selected: item.liked, disabled: likingIds.includes(item.id) }} disabled={likingIds.includes(item.id)} onPress={() => { void toggleLike(item); }} hitSlop={7} style={s.like}><Ionicons name={item.liked ? 'heart' : 'heart-outline'} size={14} color={item.liked ? colors.brand : colors.textMuted} /><Text style={s.count}>{item.likeCount}</Text></Pressable> : null}</View></View>)}</View>)}</View>}
   </Screen>;
 }
 

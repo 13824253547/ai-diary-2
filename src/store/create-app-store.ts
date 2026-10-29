@@ -94,6 +94,10 @@ type DiaryVisibilitySaveResult =
   | { ok: true; privacy: DiaryPrivacy; publicBlockIds?: string[] }
   | { ok: false; reason: 'not_found' | 'invalid_input' | 'publication_blocked' | 'save_failed'; message: string };
 
+type DiaryDeleteActionResult =
+  | { ok: true; diaryId: string }
+  | { ok: false; reason: 'not_found' | 'busy' | 'delete_failed'; message: string };
+
 type MonthlyExportState = {
   requestId: number;
   status: 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -218,6 +222,7 @@ export type AppStore = {
   discardDraft: (draftId: string) => void;
   savePrivacy: (diaryId: string, privacy: DiaryPrivacy, publicBlockIds?: string[]) => boolean;
   setDiaryVisibility: (diaryId: string, privacy: DiaryPrivacy, publicBlockIds?: string[]) => Promise<DiaryVisibilitySaveResult>;
+  deleteDiary: (diaryId: string) => Promise<DiaryDeleteActionResult>;
   confirmShareDelivery: (input: { diaryId: string; mode: ShareMode; operationId: string; version: number }) => boolean;
   sendChat: (text: string) => void;
   loadChatConversation: (conversationId: string) => Promise<boolean>;
@@ -529,6 +534,8 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
     let activeInsightReportRequestId: string | undefined;
     const pendingDiscardDraftIds = new Set<string>();
     const pendingVisibilityRequests = new Map<string, Promise<DiaryVisibilitySaveResult>>();
+    const pendingDiaryDeletionRequests = new Map<string, Promise<DiaryDeleteActionResult>>();
+    const deletedDiaryIds = new Set<string>();
     const confirmedShareOperations = new Map<string, string>();
     const pendingRewriteRequestIds = new Map<string, number>();
     const pendingRewriteFingerprints = new Map<string, string>();
@@ -2310,6 +2317,112 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         pendingVisibilityRequests.set(id, request);
         return request;
       },
+      deleteDiary: async id => {
+        const existingRequest = pendingDiaryDeletionRequests.get(id);
+        if (existingRequest) return existingRequest;
+
+        const request = (async (): Promise<DiaryDeleteActionResult> => {
+          const diary = get().diaries.find(item => item.id === id);
+          if (!diary) {
+            return { ok: false, reason: 'not_found', message: '没有找到这篇日记。' };
+          }
+          const linkedDrafts = Object.values(get().drafts).filter(draft =>
+            draft.sourceDiaryId === id || draft.savedDiaryId === id,
+          );
+          if (linkedDrafts.some(draft => get().savingDraftIds.includes(draft.id))) {
+            return { ok: false, reason: 'busy', message: '这篇日记正在保存，请稍后再删除。' };
+          }
+
+          const repository = resolved.adapters.diaryRepository;
+          if (repository && !repository.deleteDiary) {
+            return { ok: false, reason: 'delete_failed', message: '删除服务暂不可用，请稍后重试。' };
+          }
+          try {
+            if (repository?.deleteDiary) {
+              const result = await repository.deleteDiary(id);
+              if (!result.ok) {
+                const message = result.error.code === 'not_found' || result.error.code === 'permission_denied'
+                  ? '没有找到这篇日记。'
+                  : '删除失败，请稍后重试。';
+                get().logIssue(`日记删除失败：${result.error.message}`);
+                return {
+                  ok: false,
+                  reason: result.error.code === 'not_found' ? 'not_found' : 'delete_failed',
+                  message,
+                };
+              }
+            }
+
+        deletedDiaryIds.add(id);
+        memoriesRequestVersion += 1;
+        growthRequestVersion += 1;
+        for (const controller of insightReportControllers.values()) controller.abort();
+        insightReportControllers.clear();
+        pendingInsightReports.clear();
+        activeInsightReportRequestId = undefined;
+
+        const draftsToRemove = Object.values(get().drafts).filter(draft =>
+          draft.sourceDiaryId === id || draft.savedDiaryId === id,
+        );
+        for (const draft of draftsToRemove) {
+              clearPendingRewriteRequests(draft.id);
+              if (draft.generation.status === 'running') {
+                void cancelGenerationOnRemote(draft.id, draft.generation.round, draft.generation.remoteJobId);
+              }
+            }
+        const removedDraftIds = new Set(draftsToRemove.map(draft => draft.id));
+            const exportState = get().monthlyExport;
+            if (exportState.snapshot?.diaryIds.includes(id)) {
+              activeMonthlyExportController?.abort();
+              activeMonthlyExportController = undefined;
+              set({
+                monthlyExport: {
+                  requestId: nextMonthlyExportRequestId++,
+                  status: 'cancelled',
+                  error: '关联日记已删除，本次导出已取消。',
+                },
+              });
+            }
+            set(state => {
+              const photos = state.photos.filter(photo => photo.diaryId !== id);
+              const drafts = Object.fromEntries(
+                Object.entries(state.drafts).filter(([draftId]) => !removedDraftIds.has(draftId)),
+              );
+              const wasInMemories = state.memoriesItems.some(item => item.id === id);
+              return {
+                diaries: state.diaries.filter(item => item.id !== id),
+                memoriesSourceItems: state.memoriesSourceItems.filter(item => item.id !== id),
+                memoriesItems: state.memoriesItems.filter(item => item.id !== id),
+                memoriesTotal: Math.max(0, state.memoriesTotal - (wasInMemories ? 1 : 0)),
+                photos,
+                photoCatalogVersion: photos.length === state.photos.length
+                  ? state.photoCatalogVersion
+                  : state.photoCatalogVersion + 1,
+                drafts,
+                activeDraftId: state.activeDraftId && removedDraftIds.has(state.activeDraftId)
+                  ? undefined
+                  : state.activeDraftId,
+                savingDraftIds: state.savingDraftIds.filter(draftId => !removedDraftIds.has(draftId)),
+                currentDiaryId: state.currentDiaryId === id ? '' : state.currentDiaryId,
+                growthInsights: undefined,
+                growthInsightsStatus: 'idle',
+                growthInsightsError: undefined,
+                insightReportGeneration: { status: 'idle' },
+                correctedAnchors: {},
+              };
+            });
+            persistDraftSnapshotInBackground();
+            return { ok: true, diaryId: id };
+          } catch (error) {
+            get().logIssue(`日记删除失败：${error instanceof Error ? error.message : 'unknown error'}`);
+            return { ok: false, reason: 'delete_failed', message: '删除失败，请稍后重试。' };
+          }
+        })().finally(() => {
+          pendingDiaryDeletionRequests.delete(id);
+        });
+        pendingDiaryDeletionRequests.set(id, request);
+        return request;
+      },
       confirmShareDelivery: ({ diaryId, mode, operationId, version }) => {
         const diary = get().diaries.find(item => item.id === diaryId);
         const currentVersion = diary?.version ?? 0;
@@ -3115,6 +3228,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       },
       hydrateMemories: async () => {
         if (get().hydratedMemories) return;
+        const requestVersion = ++memoriesRequestVersion;
         const repository = resolved.adapters.memoriesRepository;
         if (!repository) {
           set(state => ({
@@ -3129,6 +3243,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
           const result = repository.listAllMemories
             ? await repository.listAllMemories(query)
             : await repository.listMemories(query);
+          if (requestVersion !== memoriesRequestVersion) return;
           if (!result.ok) {
             get().logIssue(`回忆同步失败：${result.error.message}`);
             set({ memoriesStatus: 'error', memoriesError: '日记暂时无法加载，请稍后重试。' });
@@ -3148,6 +3263,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             contentSnapshotStatus: item.contentSnapshotStatus,
           }));
           const diaryPhotos = await listSavedDiaryPhotoAssets(remoteDiaries.map(diary => diary.id));
+          if (requestVersion !== memoriesRequestVersion) return;
           set(state => {
             const merged = [...state.diaries];
             const photosById = new Map(state.photos.map(photo => [photo.id, photo]));
@@ -3177,11 +3293,15 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             };
           });
         } catch (error) {
+          if (requestVersion !== memoriesRequestVersion) return;
           get().logIssue(`回忆同步失败：${error instanceof Error ? error.message : 'unknown error'}`);
           set({ memoriesStatus: 'error', memoriesError: '日记暂时无法加载，请稍后重试。' });
         }
       },
       readDiaryById: async diaryId => {
+        if (deletedDiaryIds.has(diaryId)) {
+          return { ok: false as const, reason: 'not_found', message: '没有找到这篇日记。' };
+        }
         const localDiary = get().diaries.find(item => item.id === diaryId);
         const repository = resolved.adapters.diaryRepository;
         if (!repository?.getDiary) {
@@ -3192,6 +3312,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
 
         try {
           const result = await repository.getDiary(diaryId);
+          if (deletedDiaryIds.has(diaryId)) {
+            return { ok: false as const, reason: 'not_found', message: '没有找到这篇日记。' };
+          }
           if (!result.ok) {
             if (result.error.code === 'not_found' || result.error.code === 'permission_denied') {
               return { ok: false as const, reason: 'not_found', message: '没有找到这篇日记。' };
@@ -3206,6 +3329,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             diaryPhotos = await listSavedDiaryPhotoAssets([diaryId]);
           } catch (error) {
             get().logIssue(`日记照片副本读取失败：${error instanceof Error ? error.message : 'unknown error'}`);
+          }
+          if (deletedDiaryIds.has(diaryId)) {
+            return { ok: false as const, reason: 'not_found', message: '没有找到这篇日记。' };
           }
           set(state => {
             const mergeItems = (items: DiaryItem[]) => {
