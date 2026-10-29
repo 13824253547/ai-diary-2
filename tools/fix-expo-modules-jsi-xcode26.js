@@ -65,7 +65,7 @@ if (!fs.existsSync(expoModulesRoot)) {
 }
 
 const xcodeVersion = getXcodeVersion();
-if (!xcodeVersion || !/^26\.0\./.test(xcodeVersion)) {
+if (!xcodeVersion || !/^26\.0(?:\.|$)/.test(xcodeVersion)) {
   console.log(
     `[fix-expo-modules-jsi-xcode26] current Xcode ${xcodeVersion ?? "unknown"} does not need this patch`
   );
@@ -86,6 +86,28 @@ for (const filePath of swiftFiles) {
   if (didChange) {
     changedFiles += 1;
   }
+}
+
+const eventEmitterPath = path.join(
+  projectRoot, "node_modules", "expo-modules-core", "ios", "Core", "Events", "EventEmitter.swift"
+);
+if (replaceInFile(eventEmitterPath, (source) =>
+  source
+    .replaceAll("nonisolated(unsafe) weak let emitter = self", "let emitter = NonisolatedUnsafeWeakVar(self)")
+    .replaceAll("nonisolated(unsafe) weak var emitter = self", "let emitter = NonisolatedUnsafeWeakVar(self)")
+    .replaceAll("guard let emitter else {", "guard let emitter = emitter.value else {")
+    .replaceAll("guard let emitter, let appContext else {", "guard let emitter = emitter.value, let appContext else {")
+)) {
+  changedFiles += 1;
+}
+
+const sharedObjectRegistryPath = path.join(
+  projectRoot, "node_modules", "expo-modules-core", "ios", "Core", "SharedObjects", "SharedObjectRegistry.swift"
+);
+if (replaceInFile(sharedObjectRegistryPath, (source) =>
+  source.replace("private weak let appContext: AppContext?", "nonisolated(unsafe) private weak var appContext: AppContext?")
+)) {
+  changedFiles += 1;
 }
 
 const sendableClassPatches = [
@@ -137,6 +159,37 @@ for (const patch of sendableClassPatches) {
   }
 }
 
+const runtimePath = path.join(
+  expoModulesRoot,
+  "ExpoModulesJSI",
+  "Runtime",
+  "JavaScriptRuntime.swift"
+);
+const jsiVersion = JSON.parse(
+  fs.readFileSync(path.join(projectRoot, "node_modules", "expo-modules-jsi", "package.json"), "utf8")
+).version;
+
+if (jsiVersion === "57.1.0") {
+  // Swift 6.2.1 does not honor unsafe local-let captures here. These JSI
+  // callbacks are synchronous; reuse the library's existing capture wrapper.
+  if (replaceInFile(runtimePath, (source) => {
+    let next = source;
+    for (const pointer of ["thisPtr", "argumentsPtr", "resultPtr"]) {
+      next = next.replaceAll(
+        `nonisolated(unsafe) let ${pointer} = ${pointer}`,
+        `let ${pointer} = NonisolatedUnsafeVar(${pointer})`
+      );
+    }
+    return next
+      .replaceAll("writeJSIValue(to: resultPtr)", "writeJSIValue(to: resultPtr.value)")
+      .replaceAll("UnsafeMutablePointer(mutating: thisPtr).move()", "UnsafeMutablePointer(mutating: thisPtr.value).move()")
+      .replaceAll("JavaScriptValuesBuffer(runtime, start: argumentsPtr, count: argumentsCount)", "JavaScriptValuesBuffer(runtime, start: argumentsPtr.value, count: argumentsCount)")
+      .replaceAll("JavaScriptUnownedValue(runtime.pointee, thisPtr)", "JavaScriptUnownedValue(runtime.pointee, thisPtr.value)");
+  })) {
+    changedFiles += 1;
+  }
+}
+
 const runtimeSchedulerHeader = path.join(
   expoModulesRoot,
   "ExpoModulesJSI-Cxx",
@@ -168,8 +221,12 @@ if (
         "\n"
       )
       .replace(
-        '.unsafeFlags([\n',
-        '.unsafeFlags([\n          "-Xfrontend",\n          "-strict-concurrency=minimal",\n'
+        /(?:          "-Xfrontend",\n          "-strict-concurrency=minimal",\n)+/g,
+        ""
+      )
+      .replace(
+        /(\.interoperabilityMode\(\.Cxx\),\s*\.unsafeFlags\(\[\n)/,
+        '$1          "-Xfrontend",\n          "-strict-concurrency=minimal",\n'
       )
   )
 ) {

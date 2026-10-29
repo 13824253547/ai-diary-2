@@ -56,6 +56,11 @@ function pruneExpoLocation() {
   source = replaceText(source, 'private let EVENT_MOTION_ACTIVITY_CHANGED = "Expo.motionActivityChanged"\n', '');
   source = replaceText(source, '  private lazy var motionActivityStreamers = [Int: MotionActivityStreamer]()\n', '');
   source = replaceText(source, '          MotionActivityPermissionRequester()\n', '');
+  source = replaceText(
+    source,
+    '    Events(EVENT_LOCATION_CHANGED, EVENT_HEADING_CHANGED, EVENT_LOCATION_ERROR, EVENT_MOTION_ACTIVITY_CHANGED)',
+    '    Events(EVENT_LOCATION_CHANGED, EVENT_HEADING_CHANGED, EVENT_LOCATION_ERROR)',
+  );
   source = replaceBlock(
     source,
     modulePath,
@@ -63,7 +68,7 @@ function pruneExpoLocation() {
     '    AsyncFunction("removeWatchAsync")',
   );
   source = replaceText(
-    modulePath,
+    source,
     `      if let streamer = motionActivityStreamers[watchId] {
         streamer.stopStreaming()
       }
@@ -71,6 +76,7 @@ function pruneExpoLocation() {
 `,
     '',
   );
+  source = replaceText(source, '      locationStreamers[watchId] = nil\n\n    }', '      locationStreamers[watchId] = nil\n    }');
   source = replaceBlock(
     source,
     modulePath,
@@ -87,6 +93,7 @@ function pruneExpoLocation() {
     '  internal final class MotionActivityUnavailable: Exception {',
     '\n}',
   );
+  exceptions = replaceText(exceptions, '\n\n\n}', '\n\n}');
   writeIfChanged(exceptionsPath, exceptions);
 
   for (const relativePath of [
@@ -106,7 +113,9 @@ function pruneExpoLocation() {
     path.join(iosRoot, 'Providers/MotionActivityStreamer.swift'),
   ].filter((filePath) => fs.existsSync(filePath));
   const remainingMotionReferences = remainingFiles.some((filePath) =>
-    /CoreMotion|CMMotion|MotionActivity/.test(fs.readFileSync(filePath, 'utf8')),
+    /CoreMotion|CMMotion|MotionActivity|EVENT_MOTION_ACTIVITY_CHANGED/.test(
+      fs.readFileSync(filePath, 'utf8'),
+    ),
   );
   if (remainingMotionReferences) {
     throw new Error('Expo Location still contains iOS motion activity references after pruning.');
@@ -115,10 +124,16 @@ function pruneExpoLocation() {
 
 function pruneReanimated() {
   assertVersion('react-native-reanimated', '4.5.1');
+  assertVersion('expo-modules-autolinking', '57.0.13');
 
   const reanimatedRoot = path.join(root, 'node_modules/react-native-reanimated');
   const headerPath = path.join(reanimatedRoot, 'apple/reanimated/apple/sensor/ReanimatedSensor.h');
   let header = fs.readFileSync(headerPath, 'utf8');
+  header = replaceText(
+    header,
+    '#import <reanimated/apple/sensor/ReanimatedSensorType.h>',
+    '#import <Foundation/Foundation.h>\n#import <reanimated/apple/sensor/ReanimatedSensorType.h>',
+  );
   header = replaceText(
     header,
     `#if !TARGET_OS_TV && !TARGET_OS_OSX

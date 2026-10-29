@@ -1,5 +1,21 @@
 # 开发轮台账
 
+## DEV-96 修复 npm run ios 的 Xcode 26 编译阻塞（2026-10-29）
+
+- 当前 `.expo/xcodebuild.log` 确认 ExpoModulesJSI 57.1.0 的同步 JSI 回调原始指针捕获无法通过 Xcode 26.0.1 的 Swift 并发检查。扩展既有 `tools/fix-expo-modules-jsi-xcode26.js`，复用库内 `NonisolatedUnsafeVar`；不改变同步执行、指针寿命或 JS 线程约束。
+- 构建继续后发现 ExpoModulesCore 的 `weak let` 同样不兼容。事件回调复用库内 `NonisolatedUnsafeWeakVar`，保留弱引用语义；共享对象 registry 的 appContext 改为 unsafe weak var。兼容脚本仅在 Xcode 26.0.x 生效，JSI 指针适配限定 57.1.0；现有 postinstall 自动应用。
+- 修正 Package.swift 编译参数重复插入，连续运行脚本第二次输出 `checked 0 file(s)`。root typecheck、`git diff --check` 通过；`npm run ios -- --no-bundler` 完整构建成功（0 errors / 2 warnings），已安装并打开 iPhone 17 模拟器。普通 `npm run ios` 随后启动用于验证 Metro 接线。
+- 普通 `npm run ios` 同样 Build Succeeded，Metro 完成 2160 modules 打包，启动日志记录 `app.hydration.completed`；安装身份续期 201，素材、回忆、日记资产 GET 均 200。仅执行启动恢复，未主动创建日记或调用 AI；热更新开发进程以去除验证终端继承的 CI 环境继续启动。
+- DEV-95 构建阻塞解除：Expo Location 与 Reanimated 随整包编译通过，模拟器 `AIDiary2.debug.dylib` 的动态依赖与未定义符号中无 CoreMotion/CMMotion。未生成 App Store Archive/IPA 或重新上传，不将模拟器结果记为 App Store 正式验收。未改变 UI、选图 CASE、后端或用户数据，未运行全量测试。
+
+## DEV-95 移除未使用的 iOS Core Motion API（2026-10-29）
+
+- 用户遇到 App Store 上传错误 90683。业务源码只使用 Expo Location 前台 GPS，没有运动活动 API 或 Reanimated 传感器调用；未添加虚构的 `NSMotionUsageDescription`。
+- 新增 `tools/prune-ios-motion-apis.cjs` 并接入依赖安装 `postinstall`：对锁定版本的 Expo Location 移除 `CMMotionActivityManager` 权限/订阅实现，对 Reanimated 将未使用的 iOS 传感器适配器设为不可用并去掉 `CoreMotion` 链接；普通定位、动画和手势保留。升级相关依赖时脚本会因版本不符而停止，要求重新核查。
+- 静态检查确认 Expo Location、Reanimated、自动链接配置、生成的 Pods 工程和 iOS `Info.plist` 均无 `CoreMotion` / `CMMotion` / `NSMotionUsageDescription` 引用；GPS API 仍存在。Reanimated Pod 模拟器目标编译通过。
+- 验证限制：Expo Location Pod 与完整 App 构建被既有 `ExpoModulesJSI` 在 Xcode 26 的 Swift 并发编译错误阻断（`JavaScriptRuntime.swift` 中 `sending ... risks causing data races`）；未生成/检查 IPA 或 Archive，故未声称上传错误已由新包实测消除。`npm run postinstall`、root typecheck、`git diff --check` 通过。
+- 此项不改变 CRE-002 的业务规则或 CASE 状态，不更新正式验收通过数。修复实际生效需重新构建并上传 iOS 包；不在 App Store Connect 修改用途说明。
+
 ## DEV-94 明信片预览前寄语加载（2026-10-29）
 
 - `/postcard/apply` 的预览与跳过印章入口先单独授权并生成当前照片/地点寄语；仅成功后导航。等待期间按钮显示 spinner，禁用重复点击、素材/步骤操作与页头返回；授权拒绝和生成失败留在选择页提示。

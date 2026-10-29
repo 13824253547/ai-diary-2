@@ -1,5 +1,19 @@
 # 当前执行快照
 
+## DEV-96 iOS 本地构建阻塞已修复（2026-10-29）
+
+扩展既有 Xcode 26.0.x 安装补丁，使用 Expo 库内指针与弱引用 capture wrapper，修复 JSI 并发诊断和 Expo Core 的 weak let 编译错误；脚本重复执行无变化。`npm run ios -- --no-bundler` 完整构建成功并安装、打开 iPhone 17 模拟器，root typecheck 和差异检查通过。普通 `npm run ios` 命令保持不变。
+
+普通 `npm run ios` 已实际完成构建、Metro 打包与 App 启动恢复，安装身份续期成功，素材/回忆/日记资产接口返回 200；未主动发起 AI 或日记创建操作。
+
+DEV-95 的本地编译阻塞已解除；模拟器 App 动态依赖与未定义符号扫描无 CoreMotion/CMMotion。正式 Archive/IPA、App Store 上传复验及业务真机验收仍待执行，验收矩阵不变。以下 DEV-95 的阻塞描述保留为当时记录。
+
+## DEV-95 移除未使用的 iOS Core Motion API（2026-10-29）
+
+应用业务未使用运动活动或运动传感器，只使用前台 GPS。依赖安装补丁已从 Expo Location 移除运动活动原生实现，并关闭未使用的 Reanimated iOS 传感器实现及 Core Motion 链接；未添加运动用途说明。静态检查无 Core Motion API/用途键残留，GPS 代码保留；Reanimated Pod 模拟器目标编译通过。
+
+root typecheck、postinstall 和差异格式检查通过。完整 App/Expo Location Pod 构建被 ExpoModulesJSI 在 Xcode 26 下的 Swift 并发错误阻断；尚无新 IPA/Archive，不能确认 App Store 复验结果。处理位置是源码依赖补丁与重新构建，不是 App Store Connect。CRE-002 CASE 与验收统计不变。
+
 ## DEV-93 明信片 AI 寄语（2026-10-29）
 
 明信片预览已用当前素材照片和可用地点生成中文 AI 寄语，限制单行、最多 12 个 Unicode 字符。首次请求使用独立授权；服务端按安装身份读取设备自有素材，客户端不重复上传照片。无效结果不会回退固定文案，授权拒绝或生成失败时分享/保存不可用。无贴纸时文字容器扩展占用正文右侧空白，有贴纸时避让 66dp 区域。
