@@ -46,3 +46,11 @@ This project-local draft describes the current prototype's business capabilities
 - [实施决策登记](delivery/decision-register.md)
 
 Each task and its matching test cases use separate, same-named files. Business decisions remain unconfirmed until recorded; test cases are not execution results.
+
+## App Store Materials
+
+- Current Chinese-only copy: [app-store-materials-brief.md](app-store-materials-brief.md)
+- Word version: [app-store-materials-brief.docx](app-store-materials-brief.docx)
+- Feishu document: [AI旅行日记 iOS 上架材料（简版）](https://iy5fmr8b2n.feishu.cn/docx/GHjWd53Smo02h5xjD02cTDRdnWe)
+
+Updated on 2026-10-30 for installation identity, AI postcard messages, single-diary deletion, and the privacy-policy entry. AI consent withdrawal and full identity deletion remain unresolved policy/product consistency items, not implemented features. The detailed bilingual materials are historical references.

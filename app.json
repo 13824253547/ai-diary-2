@@ -10,7 +10,7 @@
     "ios": {
       "bundleIdentifier": "io.com.shihangbiji.www.aidiary",
       "appleTeamId": "JWTMTK2F34",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "entitlements": {
         "com.apple.developer.devicecheck.appattest-environment": "production"
       },

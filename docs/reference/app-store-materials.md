@@ -234,7 +234,7 @@ The app interface is currently primarily in Chinese. Backend and AI services mus
 | 主语言 | 简体中文 | 建议值 |
 | 主类别 | 生活（Lifestyle） | 建议值 |
 | 次类别 | 摄影与录像（Photo & Video） | 建议值，可不填 |
-| iPad 支持 | 当前 supportsTablet 为 true | 必须验证实际提交包及 iPad 体验 |
+| iPad 支持 | 仅支持 iPhone（supportsTablet 为 false，设备族为 iPhone） | iPad 截图不适用；以最终提交包核验为准 |
 | 发布方式 | 审核通过后手动发布 | 建议值，便于核对上线环境 |
 
 ## 需要发行方提供或确认
