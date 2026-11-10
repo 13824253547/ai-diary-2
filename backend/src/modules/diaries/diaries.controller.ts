@@ -1,6 +1,6 @@
+import { CurrentUserId } from "../auth/auth-request";
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Headers, InternalServerErrorException, NotFoundException, Param, Post, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { resolveDeviceId } from '../../common/device-identity';
 import { DeleteDiaryError, MemoryStoreService, PermissionDeniedError, SaveDiaryError, type DiaryContentSnapshotRecord } from '../../common/memory-store.service';
 import { DiaryAnchorGenerationService } from '../anchors/diary-anchor-generation.service';
 import { PhotoAssetError, PhotoAssetService, type DiaryPhotoUpload } from '../photos/photo-asset.service';
@@ -111,11 +111,11 @@ export class DiariesController {
   }))
   async saveDiary(
     @Body() rawBody: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
     @UploadedFiles() files: UploadedPhotoFile[] = [],
   ) {
     try {
-      const ownerDeviceId = resolveDeviceId(deviceId);
+
       const body = parseSaveDiaryBody(rawBody);
       if (!body) {
         throw new BadRequestException({
@@ -131,11 +131,11 @@ export class DiariesController {
         });
       }
       const photoIds = Array.isArray(body.photoIds) ? body.photoIds : [];
-      const assetHook = this.photoAssets.createDiaryPhotoSaveHook(ownerDeviceId, photoIds, uploads);
-      const saved = await this.store.saveDiaryWithCommand(body, ownerDeviceId, assetHook);
-      await this.photoAssets.ensureDiaryPhotoCopies(ownerDeviceId, saved.diaryId, photoIds);
-      this.diaryAnchors.enqueue(ownerDeviceId, saved.diaryId, saved.savedVersion);
-      this.growthInsights.enqueueAfterDiarySaved(ownerDeviceId, saved.diaryId, saved.savedVersion);
+      const assetHook = this.photoAssets.createDiaryPhotoSaveHook(ownerUserId, photoIds, uploads);
+      const saved = await this.store.saveDiaryWithCommand(body, ownerUserId, assetHook);
+      await this.photoAssets.ensureDiaryPhotoCopies(ownerUserId, saved.diaryId, photoIds);
+      this.diaryAnchors.enqueue(ownerUserId, saved.diaryId, saved.savedVersion);
+      this.growthInsights.enqueueAfterDiarySaved(ownerUserId, saved.diaryId, saved.savedVersion);
       return {
         ok: true,
         data: {
@@ -186,9 +186,9 @@ export class DiariesController {
   }
 
   @Get('save-results/:idempotencyKey')
-  async getSaveResult(@Param('idempotencyKey') idempotencyKey: string, @Headers('x-device-id') deviceId?: string) {
+  async getSaveResult(@Param('idempotencyKey') idempotencyKey: string, @CurrentUserId() ownerUserId: string) {
     try {
-      const result = await this.store.getSaveResult(idempotencyKey, resolveDeviceId(deviceId));
+      const result = await this.store.getSaveResult(idempotencyKey, ownerUserId);
       if (!result) throw new NotFoundException('save result not found');
       return {
         ok: true,
@@ -210,9 +210,9 @@ export class DiariesController {
   }
 
   @Get(':id')
-  async getDiary(@Param('id') id: string, @Headers('x-device-id') deviceId?: string) {
+  async getDiary(@Param('id') id: string, @CurrentUserId() ownerUserId: string) {
     try {
-      const diary = await this.store.getDiary(id, resolveDeviceId(deviceId));
+      const diary = await this.store.getDiary(id, ownerUserId);
       if (!diary) throw new NotFoundException('diary not found');
       return {
         ok: true,
@@ -234,13 +234,13 @@ export class DiariesController {
   }
 
   @Delete(':id')
-  async deleteDiary(@Param('id') id: string, @Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
-    const assetHook = this.photoAssets.createDiaryPhotoDeleteHook(ownerDeviceId, id);
+  async deleteDiary(@Param('id') id: string, @CurrentUserId() ownerUserId: string) {
+
+    const assetHook = this.photoAssets.createDiaryPhotoDeleteHook(ownerUserId, id);
     try {
       return {
         ok: true,
-        data: await this.store.deleteDiary(id, ownerDeviceId, assetHook),
+        data: await this.store.deleteDiary(id, ownerUserId, assetHook),
       };
     } catch (error) {
       if (error instanceof DeleteDiaryError) {

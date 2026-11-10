@@ -1,13 +1,13 @@
 import { CORE_DIARY_CONTRACT_VERSION, isCreateGenerationJobRequestContract, isDiaryContentContractForPhotoIds, isDraftContract, isGenerationJobContract, isMemoriesQuery, isRewriteBlockResultContract, MEMORIES_PAGE_SIZES, type CreateGenerationJobRequestContract, type DiaryContract, type DraftContract, type GenerationJobContract, type MemoriesQuery, type MemoriesQueryResult, type RemoteError, type RemoteResult, type RewriteBlockRequestContract, type RewriteBlockResultContract, type SaveDiaryRequestContract, type SaveDraftResult } from '../contracts/core-diary-contract';
 import { ApiClient, ApiRequestError, type ApiRequestOptions, type ApiResponse } from '../services/api-client';
-import type { CoreDiaryRepository, GenerationPhotoUpload, IdentityContract } from './core-diary-repository';
+import type { CoreDiaryRepository, GenerationPhotoUpload } from './core-diary-repository';
 import type { DiaryItem } from '../types/diary';
 
 type OkEnvelope<T> = { ok: true; data: T };
 type ErrorEnvelope = {
   ok: false;
   error: {
-    code: 'permission_denied' | 'device_identity_required' | 'timeout' | 'cancelled' | 'not_found' | 'invalid_input' | 'version_conflict' | 'asset_unreadable' | 'publication_blocked' | 'provider_failed';
+    code: 'permission_denied' | 'account_session_invalid' | 'timeout' | 'cancelled' | 'not_found' | 'invalid_input' | 'version_conflict' | 'asset_unreadable' | 'publication_blocked' | 'provider_failed';
     message: string;
     retryable: boolean;
   };
@@ -15,7 +15,7 @@ type ErrorEnvelope = {
 
 const ERROR_CODES = new Set<ErrorEnvelope['error']['code']>([
   'permission_denied',
-  'device_identity_required',
+  'account_session_invalid',
   'timeout',
   'cancelled',
   'not_found',
@@ -126,10 +126,6 @@ function buildPhotoMultipartBody(
 
 export class HttpCoreDiaryRepository implements CoreDiaryRepository {
   constructor(private readonly client: ApiClient) {}
-
-  async getIdentity(options?: ApiRequestOptions): Promise<IdentityContract> {
-    return this.client.get<IdentityContract>('/identity/me', options);
-  }
 
   async createDraft(input: DraftContract, options?: ApiRequestOptions): Promise<RemoteResult<DraftContract>> {
     return this.requestDraftResult('/drafts', {

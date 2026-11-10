@@ -1,3 +1,4 @@
+import { CurrentUserId } from "../auth/auth-request";
 import {
   BadRequestException,
   Controller,
@@ -8,7 +9,6 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { resolveDeviceId } from '../../common/device-identity';
 import { PhotoAssetError } from '../photos/photo-asset.service';
 import { AIImageProviderError } from './ark-seedream-image-provider';
 import {
@@ -39,11 +39,11 @@ export class AIImageGenerationController {
 
   @Post()
   async generate(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (!isRequest(request.body)) {
       throw new BadRequestException({
         ok: false,
@@ -57,7 +57,7 @@ export class AIImageGenerationController {
     request.once('aborted', abortOnDisconnect);
     response.once('close', abortOnDisconnect);
     try {
-      const asset = await this.generation.generate(ownerDeviceId, request.body, abortController.signal);
+      const asset = await this.generation.generate(ownerUserId, request.body, abortController.signal);
       return {
         ok: true,
         data: {

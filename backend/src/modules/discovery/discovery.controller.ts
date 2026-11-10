@@ -1,5 +1,5 @@
+import { CurrentUserId } from "../auth/auth-request";
 import { BadRequestException, Body, ConflictException, Controller, Get, Headers, NotFoundException, Param, Put, Query } from '@nestjs/common';
-import { resolveDeviceId } from '../../common/device-identity';
 import { DISCOVERY_PAGE_SIZES, DiscoveryService, DiscoveryStoryError } from './discovery.service';
 
 type SetLikeBody = {
@@ -21,9 +21,9 @@ export class DiscoveryController {
     @Query('pageSize') pageSizeParam: unknown,
     @Query('category') categoryParam: unknown,
     @Query('city') cityParam: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (pageParam !== undefined && !isDecimalIntegerParam(pageParam)) {
       throw new BadRequestException({
         ok: false,
@@ -79,7 +79,7 @@ export class DiscoveryController {
           pageSize,
           category: categoryParam,
           ...(typeof cityParam === 'string' ? { city: cityParam } : {}),
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -89,9 +89,9 @@ export class DiscoveryController {
   @Get('stories/:storyId')
   async getStory(
     @Param('storyId') storyId: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof storyId !== 'string' || !storyId.trim()) {
       throw new BadRequestException({
         ok: false,
@@ -101,7 +101,7 @@ export class DiscoveryController {
     try {
       return {
         ok: true,
-        data: await this.service.getStory(storyId, ownerDeviceId),
+        data: await this.service.getStory(storyId, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -112,9 +112,9 @@ export class DiscoveryController {
   async setLike(
     @Param('storyId') storyId: unknown,
     @Body() body: SetLikeBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof storyId !== 'string' || !storyId.trim()) {
       throw new BadRequestException({
         ok: false,
@@ -130,7 +130,7 @@ export class DiscoveryController {
     try {
       return {
         ok: true,
-        data: await this.service.setLike(storyId, ownerDeviceId, body.liked),
+        data: await this.service.setLike(storyId, ownerUserId, body.liked),
       };
     } catch (error) {
       this.handleError(error);

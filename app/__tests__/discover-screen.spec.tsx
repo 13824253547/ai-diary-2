@@ -15,9 +15,8 @@ jest.mock('../../src/store/adapters/backend-discovery-adapter', () => ({
   createBackendDiscoveryRepository: () => ({ listStories: mockListStories, setLike: mockSetLike }),
 }));
 
-jest.mock('../../src/services/device-identity', () => ({
-  getDeviceIdentityHeaders: jest.fn(async () => ({
-    'x-device-id': 'device-discovery-test',
+jest.mock('../../src/services/account-auth', () => ({
+  getAccountAuthHeaders: jest.fn(async () => ({
     Authorization: 'Bearer discovery-test-token',
   })),
 }));
@@ -148,7 +147,6 @@ describe('Discover screen categories', () => {
       expect(screen.getByLabelText('公开故事图片测试封面').props.source).toMatchObject({
         uri: expect.stringContaining('/photos/discovery/story-image-1/photo-content?photoId=photo-1'),
         headers: expect.objectContaining({
-          'x-device-id': 'device-discovery-test',
           Authorization: 'Bearer discovery-test-token',
         }),
       });

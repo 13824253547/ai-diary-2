@@ -40,9 +40,9 @@ function toStoryResponse(
     body: string;
     likesEnabled: boolean;
     _count?: { likes: number };
-    likes?: Array<{ ownerDeviceId: string }>;
+    likes?: Array<{ ownerUserId: string }>;
   },
-  ownerDeviceId: string,
+  ownerUserId: string,
 ) {
   const photoUri = (photoId: string) =>
     `/photos/discovery/${encodeURIComponent(story.id)}/photo-content?photoId=${encodeURIComponent(photoId)}`;
@@ -86,7 +86,7 @@ function toStoryResponse(
     characterId,
     likesEnabled: story.likesEnabled,
     likeCount: story._count?.likes ?? 0,
-    liked: story.likes?.some(like => like.ownerDeviceId === ownerDeviceId) ?? false,
+    liked: story.likes?.some(like => like.ownerUserId === ownerUserId) ?? false,
   };
 }
 
@@ -94,7 +94,7 @@ function toStoryResponse(
 export class DiscoveryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listStories(query: DiscoveryListQuery, ownerDeviceId: string) {
+  async listStories(query: DiscoveryListQuery, ownerUserId: string) {
     if (!query || typeof query !== 'object' || Array.isArray(query)) {
       throw new DiscoveryStoryError('invalid_input', 'discovery query is invalid');
     }
@@ -143,21 +143,21 @@ export class DiscoveryService {
         take: query.pageSize,
         include: {
           _count: { select: { likes: true } },
-          likes: { where: { ownerDeviceId } },
+          likes: { where: { ownerUserId } },
         },
       }),
       this.prisma.discoveryStory.count({ where }),
     ]);
 
     return {
-      items: stories.map(story => toStoryResponse(story, ownerDeviceId)),
+      items: stories.map(story => toStoryResponse(story, ownerUserId)),
       page: query.page,
       pageSize: query.pageSize,
       total,
     };
   }
 
-  async getStory(storyId: unknown, ownerDeviceId: string) {
+  async getStory(storyId: unknown, ownerUserId: string) {
     if (typeof storyId !== 'string' || !storyId.trim()) {
       throw new DiscoveryStoryError('invalid_input', 'story ID is invalid');
     }
@@ -170,16 +170,16 @@ export class DiscoveryService {
       },
       include: {
         _count: { select: { likes: true } },
-        likes: { where: { ownerDeviceId } },
+        likes: { where: { ownerUserId } },
       },
     });
     if (!story) throw new DiscoveryStoryError('not_found', 'discovery story not found');
-    return toStoryResponse(story, ownerDeviceId);
+    return toStoryResponse(story, ownerUserId);
   }
 
-  async setLike(storyId: unknown, ownerDeviceId: unknown, liked: unknown) {
+  async setLike(storyId: unknown, ownerUserId: unknown, liked: unknown) {
     if (typeof storyId !== 'string' || !storyId.trim()
-      || typeof ownerDeviceId !== 'string' || !ownerDeviceId.trim()
+      || typeof ownerUserId !== 'string' || !ownerUserId.trim()
       || typeof liked !== 'boolean') {
       throw new DiscoveryStoryError('invalid_input', 'like request is invalid');
     }
@@ -200,20 +200,20 @@ export class DiscoveryService {
 
       if (liked) {
         await transaction.discoveryLike.upsert({
-          where: { storyId_ownerDeviceId: { storyId, ownerDeviceId } },
-          create: { storyId, ownerDeviceId },
+          where: { storyId_ownerUserId: { storyId, ownerUserId } },
+          create: { storyId, ownerUserId },
           update: {},
         });
       } else {
         await transaction.discoveryLike.deleteMany({
-          where: { storyId, ownerDeviceId },
+          where: { storyId, ownerUserId },
         });
       }
 
       const [likeCount, relation] = await Promise.all([
         transaction.discoveryLike.count({ where: { storyId } }),
         transaction.discoveryLike.findUnique({
-          where: { storyId_ownerDeviceId: { storyId, ownerDeviceId } },
+          where: { storyId_ownerUserId: { storyId, ownerUserId } },
           select: { storyId: true },
         }),
       ]);

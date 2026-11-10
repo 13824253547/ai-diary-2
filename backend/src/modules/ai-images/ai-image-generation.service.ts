@@ -26,8 +26,8 @@ export class AIImageGenerationService {
     private readonly assets: PhotoAssetService,
   ) {}
 
-  async generate(ownerDeviceId: string, request: AIImageGenerationRequest, signal?: AbortSignal) {
-    const existing = await this.assets.findGeneratedMaterial(ownerDeviceId, request.requestId);
+  async generate(ownerUserId: string, request: AIImageGenerationRequest, signal?: AbortSignal) {
+    const existing = await this.assets.findGeneratedMaterial(ownerUserId, request.requestId);
     if (existing) {
       if (existing.generationPrompt !== request.description) {
         throw new AIImageProviderError('provider_failed');
@@ -35,7 +35,7 @@ export class AIImageGenerationService {
       return existing;
     }
 
-    const key = `${ownerDeviceId}\u0000${request.requestId}`;
+    const key = `${ownerUserId}\u0000${request.requestId}`;
     const pending = this.pending.get(key);
     if (pending) {
       if (pending.description !== request.description) {
@@ -44,8 +44,8 @@ export class AIImageGenerationService {
       return pending.promise;
     }
 
-    const operation = this.assets.assertMaterialCapacity(ownerDeviceId)
-      .then(() => this.generateAndStore(ownerDeviceId, request, signal));
+    const operation = this.assets.assertMaterialCapacity(ownerUserId)
+      .then(() => this.generateAndStore(ownerUserId, request, signal));
     const entry = { description: request.description, promise: operation };
     this.pending.set(key, entry);
     try {
@@ -56,14 +56,14 @@ export class AIImageGenerationService {
   }
 
   private async generateAndStore(
-    ownerDeviceId: string,
+    ownerUserId: string,
     request: AIImageGenerationRequest,
     signal?: AbortSignal,
   ) {
     try {
       const image = await this.provider.generate(request.description, signal);
       if (signal?.aborted) throw new AIImageProviderError('provider_failed');
-      return await this.assets.saveGeneratedMaterial(ownerDeviceId, request.requestId, request.description, image);
+      return await this.assets.saveGeneratedMaterial(ownerUserId, request.requestId, request.description, image);
     } catch (error) {
       if (error instanceof AIImageProviderError || error instanceof PhotoAssetError) throw error;
       throw new AIImageProviderError('provider_failed');

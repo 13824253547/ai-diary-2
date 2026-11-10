@@ -70,7 +70,7 @@ function buildMaterialPhoto(id: string): DiaryPhoto {
     date: '2026.10.27',
     filename: `${id}.jpg`,
     uri: `https://api.example.test/photos/materials/${id}/content`,
-    remoteHeaders: { 'x-device-id': 'device-1' },
+    remoteHeaders: { Authorization: 'Bearer test-token' },
     source: 'device',
   };
 }

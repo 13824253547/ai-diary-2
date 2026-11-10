@@ -10,20 +10,20 @@ type QueuedTask = {
 };
 
 @Injectable()
-export class DeviceAiTaskCoordinator {
-  private readonly activeDevices = new Set<string>();
+export class AccountAiTaskCoordinator {
+  private readonly activeAccounts = new Set<string>();
   private readonly queues = new Map<string, QueuedTask[]>();
 
-  runInteractive<T>(ownerDeviceId: string, run: () => Promise<T>): Promise<T> {
-    return this.enqueue(ownerDeviceId, 'interactive', run);
+  runInteractive<T>(ownerUserId: string, run: () => Promise<T>): Promise<T> {
+    return this.enqueue(ownerUserId, 'interactive', run);
   }
 
-  runBackground<T>(ownerDeviceId: string, run: () => Promise<T>): Promise<T> {
-    return this.enqueue(ownerDeviceId, 'background', run);
+  runBackground<T>(ownerUserId: string, run: () => Promise<T>): Promise<T> {
+    return this.enqueue(ownerUserId, 'background', run);
   }
 
   private enqueue<T>(
-    ownerDeviceId: string,
+    ownerUserId: string,
     priority: TaskPriority,
     run: () => Promise<T>,
   ): Promise<T> {
@@ -34,7 +34,7 @@ export class DeviceAiTaskCoordinator {
         resolve: value => resolve(value as T),
         reject,
       };
-      const queue = this.queues.get(ownerDeviceId) ?? [];
+      const queue = this.queues.get(ownerUserId) ?? [];
       if (priority === 'interactive') {
         const firstBackground = queue.findIndex(item => item.priority === 'background');
         if (firstBackground < 0) queue.push(task);
@@ -42,26 +42,26 @@ export class DeviceAiTaskCoordinator {
       } else {
         queue.push(task);
       }
-      this.queues.set(ownerDeviceId, queue);
-      this.drain(ownerDeviceId);
+      this.queues.set(ownerUserId, queue);
+      this.drain(ownerUserId);
     });
   }
 
-  private drain(ownerDeviceId: string) {
-    if (this.activeDevices.has(ownerDeviceId)) return;
-    const queue = this.queues.get(ownerDeviceId);
+  private drain(ownerUserId: string) {
+    if (this.activeAccounts.has(ownerUserId)) return;
+    const queue = this.queues.get(ownerUserId);
     const next = queue?.shift();
     if (!next) {
-      this.queues.delete(ownerDeviceId);
+      this.queues.delete(ownerUserId);
       return;
     }
-    this.activeDevices.add(ownerDeviceId);
+    this.activeAccounts.add(ownerUserId);
     void Promise.resolve()
       .then(next.run)
       .then(next.resolve, next.reject)
       .finally(() => {
-        this.activeDevices.delete(ownerDeviceId);
-        this.drain(ownerDeviceId);
+        this.activeAccounts.delete(ownerUserId);
+        this.drain(ownerUserId);
       });
   }
 }

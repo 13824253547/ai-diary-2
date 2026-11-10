@@ -142,14 +142,14 @@ export class TemporaryGenerationPhotoStore implements OnModuleInit, OnModuleDest
   }
 
   async stage(
-    ownerDeviceId: string,
+    ownerUserId: string,
     draftId: string,
     draftVersion: number,
     selectedPhotoIds: string[],
     uploads: UploadedGenerationPhoto[],
   ) {
     validateUploads(selectedPhotoIds, uploads);
-    const directory = this.getDirectory(ownerDeviceId, draftId, draftVersion);
+    const directory = this.getDirectory(ownerUserId, draftId, draftVersion);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const entries: StoredGenerationPhoto[] = [];
 
@@ -176,12 +176,12 @@ export class TemporaryGenerationPhotoStore implements OnModuleInit, OnModuleDest
   }
 
   async readForGeneration(
-    ownerDeviceId: string,
+    ownerUserId: string,
     draftId: string,
     draftVersion: number,
     selectedPhotoIds: string[],
   ): Promise<GenerationPhotoInput[]> {
-    const directory = this.getDirectory(ownerDeviceId, draftId, draftVersion);
+    const directory = this.getDirectory(ownerUserId, draftId, draftVersion);
     try {
       const manifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8')) as {
         photos?: StoredGenerationPhoto[];
@@ -229,10 +229,15 @@ export class TemporaryGenerationPhotoStore implements OnModuleInit, OnModuleDest
     }));
   }
 
-  async cleanupGeneration(ownerDeviceId: string, draftId: string, draftVersion: number) {
-    const directory = this.getDirectory(ownerDeviceId, draftId, draftVersion);
+  async cleanupGeneration(ownerUserId: string, draftId: string, draftVersion: number) {
+    const directory = this.getDirectory(ownerUserId, draftId, draftVersion);
     await rm(directory, { recursive: true, force: true });
     await this.removeEmptyParents(dirname(directory));
+  }
+
+  async clearOwner(ownerUserId: string) {
+    if (!ownerUserId.trim()) throw new GenerationPhotoInputError('invalid_input', '账号标识无效。');
+    await rm(join(this.root, safeKey(ownerUserId)), { recursive: true, force: true });
   }
 
   async cleanupExpired(now = Date.now()) {
@@ -257,8 +262,8 @@ export class TemporaryGenerationPhotoStore implements OnModuleInit, OnModuleDest
     }
   }
 
-  private getDirectory(ownerDeviceId: string, draftId: string, draftVersion: number) {
-    return join(this.root, safeKey(ownerDeviceId), safeKey(draftId), String(draftVersion));
+  private getDirectory(ownerUserId: string, draftId: string, draftVersion: number) {
+    return join(this.root, safeKey(ownerUserId), safeKey(draftId), String(draftVersion));
   }
 
   private async removeEmptyParents(start: string) {

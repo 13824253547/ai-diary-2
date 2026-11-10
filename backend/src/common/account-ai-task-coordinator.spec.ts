@@ -1,8 +1,8 @@
-import { DeviceAiTaskCoordinator } from './device-ai-task-coordinator';
+import { AccountAiTaskCoordinator } from './account-ai-task-coordinator';
 
-describe('DeviceAiTaskCoordinator', () => {
-  test('serializes one device and prioritizes queued interactive chat over background work', async () => {
-    const coordinator = new DeviceAiTaskCoordinator();
+describe('AccountAiTaskCoordinator', () => {
+  test('serializes one account and prioritizes queued interactive chat over background work', async () => {
+    const coordinator = new AccountAiTaskCoordinator();
     const order: string[] = [];
     let releaseBackground!: () => void;
     const backgroundGate = new Promise<void>(resolve => { releaseBackground = resolve; });
@@ -32,8 +32,8 @@ describe('DeviceAiTaskCoordinator', () => {
     ]);
   });
 
-  test('allows independent devices to run concurrently', async () => {
-    const coordinator = new DeviceAiTaskCoordinator();
+  test('allows independent accounts to run concurrently', async () => {
+    const coordinator = new AccountAiTaskCoordinator();
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
     let secondStarted = false;

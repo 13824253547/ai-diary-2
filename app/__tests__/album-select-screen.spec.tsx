@@ -82,7 +82,7 @@ function buildMaterialPhoto(id:string,source:'device'|'generated'='device'){
     color:'#EFE3D5',
     date:'2026.10.13',
     uri:`https://api.example.test/photos/materials/${id}/content`,
-    remoteHeaders:{'x-device-id':'device-test','Authorization':'Bearer test-token'},
+    remoteHeaders:{'Authorization':'Bearer test-token'},
     source,
     ...(source==='generated'?{generationRequestId:requestId,generationPrompt:'雨后的街道',generationSource:'provider' as const}:{}),
   };

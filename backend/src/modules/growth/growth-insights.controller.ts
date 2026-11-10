@@ -1,3 +1,4 @@
+import { CurrentUserId } from "../auth/auth-request";
 import {
   BadRequestException,
   ConflictException,
@@ -8,7 +9,6 @@ import {
   Post,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { resolveDeviceId } from '../../common/device-identity';
 import { GrowthInsightServiceError, GrowthInsightsService } from './growth-insights.service';
 
 @Controller('growth')
@@ -16,43 +16,43 @@ export class GrowthInsightsController {
   constructor(private readonly growth: GrowthInsightsService) {}
 
   @Get('state')
-  async getState(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async getState(@CurrentUserId() ownerUserId: string) {
+
     return {
       ok: true,
       version: 'growth-insight-v2',
-      data: await this.growth.getState(ownerDeviceId),
+      data: await this.growth.getState(ownerUserId),
     };
   }
 
   @Post('flowers/initialize')
-  async initializeFlowers(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async initializeFlowers(@CurrentUserId() ownerUserId: string) {
+
     return {
       ok: true,
       version: 'growth-insight-v2',
-      data: await this.growth.initializeFlowers(ownerDeviceId),
+      data: await this.growth.initializeFlowers(ownerUserId),
     };
   }
 
   @Post('flowers/retry')
-  async retryFlowers(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async retryFlowers(@CurrentUserId() ownerUserId: string) {
+
     return {
       ok: true,
       version: 'growth-insight-v2',
-      data: await this.growth.retryFlowerAnalysis(ownerDeviceId),
+      data: await this.growth.retryFlowerAnalysis(ownerUserId),
     };
   }
 
   @Post('reports/ensure-current')
-  async ensureCurrentReport(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async ensureCurrentReport(@CurrentUserId() ownerUserId: string) {
+
     try {
       return {
         ok: true,
         version: 'growth-insight-v2',
-        data: await this.growth.ensureCurrentReport(ownerDeviceId),
+        data: await this.growth.ensureCurrentReport(ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -60,13 +60,13 @@ export class GrowthInsightsController {
   }
 
   @Post('reports/retry')
-  async retryReport(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async retryReport(@CurrentUserId() ownerUserId: string) {
+
     try {
       return {
         ok: true,
         version: 'growth-insight-v2',
-        data: await this.growth.retryCurrentReport(ownerDeviceId),
+        data: await this.growth.retryCurrentReport(ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -74,12 +74,12 @@ export class GrowthInsightsController {
   }
 
   @Get('reports/current')
-  async getCurrentReport(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async getCurrentReport(@CurrentUserId() ownerUserId: string) {
+
     return {
       ok: true,
       version: 'growth-insight-v2',
-      data: await this.growth.getState(ownerDeviceId),
+      data: await this.growth.getState(ownerUserId),
     };
   }
 

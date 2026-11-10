@@ -16,7 +16,7 @@ function okResponse(data: unknown) {
 function createRepository() {
   return new HttpDiscoveryRepository(new ApiClient({
     baseUrl: 'http://127.0.0.1:3001/api',
-    getHeaders: async () => ({ 'x-device-id': 'device-1' }),
+    getHeaders: async () => ({ Authorization: 'Bearer test-token' }),
   }));
 }
 
@@ -57,7 +57,7 @@ describe('HttpDiscoveryRepository', () => {
     expect(result).toEqual(page);
     const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
     expect(String(url)).toBe('http://127.0.0.1:3001/api/discovery/stories?category=latest&page=1&pageSize=10&keyword=%E6%97%A7%E5%9F%8E');
-    expect(init.headers).toMatchObject({ 'x-device-id': 'device-1' });
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer test-token' });
     expect(DISCOVERY_CONTRACT_VERSION).toBe('discovery-read-v1');
   });
 

@@ -1,6 +1,6 @@
 import { appConfig } from '../config/app-config';
 import { ApiClient, ApiRequestError } from './api-client';
-import { getDeviceIdentityHeaders } from './device-identity';
+import { getAccountAuthHeaders } from './account-auth';
 
 export const POSTCARD_MESSAGE_CONTRACT_VERSION = 'postcard-message-v1';
 const MAX_MESSAGE_LENGTH = 12;
@@ -23,7 +23,7 @@ export class PostcardMessageRequestError extends Error {
 
 const client = new ApiClient({
   baseUrl: appConfig.backendBaseUrl,
-  getHeaders: getDeviceIdentityHeaders,
+  getHeaders: getAccountAuthHeaders,
 });
 
 function isValidMessage(value: unknown): value is string {

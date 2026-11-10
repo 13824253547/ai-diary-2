@@ -2,11 +2,6 @@ import type { CreateGenerationJobRequestContract, DraftContract, GenerationJobCo
 import type { ApiRequestOptions } from '../services/api-client';
 import type { DiaryItem } from '../types/diary';
 
-export type IdentityContract = {
-  id: string;
-  type: 'anonymous-device';
-};
-
 export type GenerationPhotoUpload = {
   photoId: string;
   uri: string;
@@ -16,7 +11,6 @@ export type GenerationPhotoUpload = {
 };
 
 export interface CoreDiaryRepository {
-  getIdentity(options?: ApiRequestOptions): Promise<IdentityContract>;
   createDraft(input: DraftContract, options?: ApiRequestOptions): Promise<RemoteResult<DraftContract>>;
   createGenerationJob(input: CreateGenerationJobRequestContract, options?: ApiRequestOptions, photos?: GenerationPhotoUpload[]): Promise<RemoteResult<GenerationJobContract>>;
   rewriteBlock?(input: RewriteBlockRequestContract, options?: ApiRequestOptions, photos?: GenerationPhotoUpload[]): Promise<RemoteResult<RewriteBlockResultContract>>;

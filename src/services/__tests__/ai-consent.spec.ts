@@ -7,28 +7,28 @@ jest.mock('expo-file-system/legacy', () => ({
   readAsStringAsync: jest.fn(),
   writeAsStringAsync: jest.fn(async () => undefined),
 }));
-jest.mock('../device-identity', () => ({ ensureDeviceIdentity: jest.fn(async () => 'device-1') }));
+jest.mock('../account-auth', () => ({ getAccountUserId: jest.fn(async () => 'user-1') }));
 
 function fixture() {
-  let deviceId = 'device-1';
+  let userId = 'user-1';
   const records = new Map<string, unknown>();
   const read = jest.fn(async (id: string) => records.get(id));
   const write = jest.fn(async (id: string, record: unknown) => { records.set(id, record); });
   const prompt = jest.fn(async () => true);
-  const deps = { getDeviceId: async () => deviceId, service: 'https://api.test', read, write, prompt };
-  return { deps, records, prompt, write, setDevice: (id: string) => { deviceId = id; } };
+  const deps = { getUserId: async () => userId, service: 'https://api.test', read, write, prompt };
+  return { deps, records, prompt, write, setUser: (id: string) => { userId = id; } };
 }
 
 describe('AI consent', () => {
-  test('keeps each purpose independent and persists the version, service, identity and timestamp', async () => {
+  test('keeps each purpose independent and persists the version, service, account and timestamp', async () => {
     const f = fixture();
     const service = createAIConsentService(f.deps);
     for (const purpose of ['diary', 'chat', 'image', 'insights'] as const) {
       expect(await service.request(purpose)).toBe(true);
     }
     expect(f.prompt).toHaveBeenCalledTimes(4);
-    expect(f.records.get('device-1')).toMatchObject({
-      deviceId: 'device-1', version: AI_CONSENT_VERSION, service: 'https://api.test',
+    expect(f.records.get('user-1')).toMatchObject({
+      userId: 'user-1', version: AI_CONSENT_VERSION, service: 'https://api.test',
       grants: { diary: expect.any(String), chat: expect.any(String), image: expect.any(String), insights: expect.any(String) },
     });
     const restarted = createAIConsentService(f.deps);
@@ -55,30 +55,30 @@ describe('AI consent', () => {
     expect(await Promise.all([service.request('image'), service.request('image'), service.request('chat')]))
       .toEqual([true, true, true]);
     expect(f.prompt).toHaveBeenCalledTimes(2);
-    expect(f.records.get('device-1')).toMatchObject({ grants: { image: expect.any(String), chat: expect.any(String) } });
+    expect(f.records.get('user-1')).toMatchObject({ grants: { image: expect.any(String), chat: expect.any(String) } });
   });
 
-  test('prompts again for a changed device, endpoint or disclosure version', async () => {
+  test('prompts again for a changed account, endpoint or disclosure version', async () => {
     const f = fixture();
     const service = createAIConsentService(f.deps);
     await service.request('diary');
-    f.setDevice('device-2');
+    f.setUser('user-2');
     await service.request('diary');
     const otherService = createAIConsentService({ ...f.deps, service: 'https://other.test' });
     await otherService.request('diary');
-    f.records.set('device-2', {
-      deviceId: 'device-2',
+    f.records.set('user-2', {
+      userId: 'user-2',
       service: 'https://other.test',
-      version: '2026-10-29-v2',
+      version: '2026-10-29-v4',
       grants: { diary: '2026-10-29T00:00:00Z' },
     });
     await otherService.request('diary');
     expect(f.prompt).toHaveBeenCalledTimes(4);
   });
 
-  test('preserves v3 grants while requesting a separate postcard grant', async () => {
+  test('does not reuse anonymous-device grants for account authorization', async () => {
     const f = fixture();
-    f.records.set('device-1', {
+    f.records.set('user-1', {
       deviceId: 'device-1',
       service: 'https://api.test',
       version: '2026-10-29-v3',
@@ -92,16 +92,13 @@ describe('AI consent', () => {
     const service = createAIConsentService(f.deps);
 
     expect(await service.request('chat')).toBe(true);
-    expect(f.prompt).not.toHaveBeenCalled();
+    expect(f.prompt).toHaveBeenCalledWith('chat', undefined);
     expect(await service.request('postcard')).toBe(true);
     expect(f.prompt).toHaveBeenCalledWith('postcard', undefined);
-    expect(f.records.get('device-1')).toMatchObject({
+    expect(f.records.get('user-1')).toMatchObject({
       version: AI_CONSENT_VERSION,
+      userId: 'user-1',
       grants: {
-        diary: expect.any(String),
-        chat: expect.any(String),
-        image: expect.any(String),
-        insights: expect.any(String),
         postcard: expect.any(String),
       },
     });
@@ -128,13 +125,13 @@ describe('AI consent', () => {
     expect(AI_CONSENT_NOTICES.postcard.message).toMatch(/照片画面.*地点/);
   });
 
-  test('does not persist acceptance for a different identity or after leaving the page', async () => {
+  test('does not persist acceptance for a different account or after leaving the page', async () => {
     const f = fixture();
     const controller = new AbortController();
     f.prompt.mockImplementationOnce(async () => { controller.abort(); return true; });
     const service = createAIConsentService(f.deps);
     expect(await service.request('diary', controller.signal)).toBe(false);
-    f.prompt.mockImplementationOnce(async () => { f.setDevice('device-2'); return true; });
+    f.prompt.mockImplementationOnce(async () => { f.setUser('user-2'); return true; });
     expect(await service.request('chat')).toBe(false);
     expect(f.write).not.toHaveBeenCalled();
   });

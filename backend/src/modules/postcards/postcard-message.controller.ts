@@ -1,3 +1,4 @@
+import { CurrentUserId } from "../auth/auth-request";
 import {
   BadRequestException,
   Controller,
@@ -8,7 +9,6 @@ import {
   Res,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { resolveDeviceId } from '../../common/device-identity';
 import { PhotoAssetError } from '../photos/photo-asset.service';
 import { PostcardMessageProviderError } from './ark-postcard-message-provider';
 import {
@@ -34,11 +34,11 @@ export class PostcardMessageController {
 
   @Post()
   async generate(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Req() request: Request,
     @Res({ passthrough: true }) response: Response,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (!isRequest(request.body)) {
       throw new BadRequestException({
         ok: false,
@@ -53,7 +53,7 @@ export class PostcardMessageController {
     request.once('aborted', abortOnDisconnect);
     response.once('close', abortOnDisconnect);
     try {
-      const data = await this.messages.generate(ownerDeviceId, request.body, abortController.signal);
+      const data = await this.messages.generate(ownerUserId, request.body, abortController.signal);
       return {
         ok: true,
         version: POSTCARD_MESSAGE_CONTRACT_VERSION,

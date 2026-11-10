@@ -1,5 +1,5 @@
+import { CurrentUserId } from "../auth/auth-request";
 import { BadRequestException, Controller, Get, Headers, Query } from '@nestjs/common';
-import { resolveDeviceId } from '../../common/device-identity';
 import { MemoryStoreService } from '../../common/memory-store.service';
 
 const SUPPORTED_PAGE_SIZES = [10, 20, 50, 100];
@@ -36,14 +36,14 @@ export class MemoriesController {
 
   @Get()
   async listMemories(
-    @Query('month') month?: unknown,
-    @Query('day') day?: unknown,
-    @Query('keyword') keyword?: unknown,
-    @Query('page') pageParam?: unknown,
-    @Query('pageSize') pageSizeParam?: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @Query('month') month: unknown,
+    @Query('day') day: unknown,
+    @Query('keyword') keyword: unknown,
+    @Query('page') pageParam: unknown,
+    @Query('pageSize') pageSizeParam: unknown,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (pageParam !== undefined && !isDecimalIntegerParam(pageParam)) {
       throw new BadRequestException({
         ok: false,
@@ -91,7 +91,7 @@ export class MemoriesController {
     const normalizedMonth = month?.replaceAll('-', '.');
     const normalizedDay = day?.replaceAll('-', '.');
     const normalizedKeyword = keyword?.trim();
-    const filtered = (await this.store.listDiaries(ownerDeviceId)).filter(item => {
+    const filtered = (await this.store.listDiaries(ownerUserId)).filter(item => {
       const matchesMonth = !normalizedMonth || item.date.startsWith(normalizedMonth);
       const matchesDay = !normalizedDay || item.date === normalizedDay;
       const matchesKeyword = !normalizedKeyword

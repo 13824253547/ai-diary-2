@@ -5,7 +5,7 @@ import {
 } from '../contracts/material-photo-contract';
 import type { DiaryPhoto } from '../types/diary';
 import { ApiClient } from './api-client';
-import { getDeviceIdentityHeaders } from './device-identity';
+import { getAccountAuthHeaders } from './account-auth';
 
 type PhotoAssetContract = {
   id: string;
@@ -29,7 +29,7 @@ type Envelope<T> = { ok: true; data: T } | { ok: false; error?: { message?: stri
 
 const client = new ApiClient({
   baseUrl: appConfig.backendBaseUrl,
-  getHeaders: getDeviceIdentityHeaders,
+  getHeaders: getAccountAuthHeaders,
 });
 
 function isPhotoAsset(value: unknown): value is PhotoAssetContract {
@@ -108,16 +108,16 @@ export async function listMaterialPhotosFromBackend(): Promise<
 > {
   if (process.env.JEST_WORKER_ID) return { ok: false, message: '测试环境不请求素材服务。' };
   try {
-    const requestedDeviceId = (await getDeviceIdentityHeaders())['x-device-id'];
+    const requestedAuthorization = (await getAccountAuthHeaders()).Authorization;
     const response = await client.get<unknown>('/photos/materials');
     const envelope = readEnvelope<unknown>(response);
     if (!envelope || envelope.ok !== true || !Array.isArray(envelope.data)
       || envelope.data.some(item => !isPhotoAsset(item))) {
       return { ok: false, message: '素材库返回的数据无法读取。' };
     }
-    const headers = await getDeviceIdentityHeaders();
-    if (!requestedDeviceId || headers['x-device-id'] !== requestedDeviceId) {
-      return { ok: false, message: '设备身份已变化，请重新打开素材库。' };
+    const headers = await getAccountAuthHeaders();
+    if (!requestedAuthorization || headers.Authorization !== requestedAuthorization) {
+      return { ok: false, message: '账号已切换，请重新打开素材库。' };
     }
     const photos = (envelope.data as PhotoAssetContract[]).map(asset =>
       toDiaryPhoto(asset, headers, getMaterialPhotoContentUrl(asset.id)),
@@ -168,7 +168,7 @@ export async function uploadMaterialPhotosToBackend(photos: DiaryPhoto[]): Promi
       const failure = envelope?.ok === false ? envelope.error?.message : undefined;
       return { ok: false, message: failure || '照片没有成功上传到素材库。' };
     }
-    const headers = await getDeviceIdentityHeaders();
+    const headers = await getAccountAuthHeaders();
     const originals = new Map(photos.map(photo => [photo.id, photo]));
     const uploaded = (envelope.data as PhotoAssetContract[]).map(asset => {
       const original = originals.get(asset.sourceAssetId);
@@ -214,7 +214,7 @@ export async function deleteMaterialPhotosFromBackend(photoIds: string[]): Promi
 
 export async function listSavedDiaryPhotoAssets(diaryIds: string[]): Promise<DiaryPhotoCopy[]> {
   if (!diaryIds.length || process.env.JEST_WORKER_ID) return [];
-  const headers = await getDeviceIdentityHeaders();
+  const headers = await getAccountAuthHeaders();
   const photos: DiaryPhotoCopy[] = [];
   for (let offset = 0; offset < diaryIds.length; offset += 100) {
     const batch = diaryIds.slice(offset, offset + 100);

@@ -6,7 +6,7 @@ import type {
 
 export type PetChatRepositoryErrorCode =
   | 'permission_denied'
-  | 'device_identity_required'
+  | 'account_session_invalid'
   | 'timeout'
   | 'cancelled'
   | 'not_found'

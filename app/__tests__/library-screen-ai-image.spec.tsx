@@ -96,7 +96,7 @@ function generatedPhoto(requestId: string, prompt: string): DiaryPhoto {
     date: '2026.10.23',
     filename: 'generated-material-1.jpg',
     uri: 'https://api.example.test/photos/materials/generated-material-1/content',
-    remoteHeaders: { 'x-device-id': 'device-1' },
+    remoteHeaders: { Authorization: 'Bearer test-token' },
     source: 'generated',
     generationRequestId: requestId,
     generationPrompt: prompt,

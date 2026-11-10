@@ -1,3 +1,4 @@
+import { CurrentUserId } from "../auth/auth-request";
 import {
   BadRequestException,
   Body,
@@ -15,8 +16,7 @@ import {
 } from '@nestjs/common';
 import type { ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
-import { resolveDeviceId } from '../../common/device-identity';
+import { AccountAiTaskCoordinator } from '../../common/account-ai-task-coordinator';
 import { ChatDailyAnchorService } from '../anchors/chat-daily-anchor.service';
 import { ArkPetChatProvider, PetChatProviderError } from './ark-pet-chat-provider';
 import { PetChatMemoryService } from './pet-chat-memory.service';
@@ -79,7 +79,7 @@ function parseDecimalIntegerParam(value: unknown, defaultValue: number): number 
 @Controller('chat')
 export class ChatSessionsController {
   private readonly generatingTurns = new Map<string, Promise<ChatConversationSnapshot>>();
-  private readonly activeDeviceGenerations = new Map<string, {
+  private readonly activeAccountGenerations = new Map<string, {
     flightKey: string;
     conversationId: string;
     requestId: string;
@@ -88,18 +88,18 @@ export class ChatSessionsController {
   constructor(
     private readonly service: ChatSessionsService,
     private readonly provider: ArkPetChatProvider,
-    private readonly taskCoordinator: DeviceAiTaskCoordinator,
+    private readonly taskCoordinator: AccountAiTaskCoordinator,
     private readonly dailyAnchors: ChatDailyAnchorService,
     private readonly memories: PetChatMemoryService,
   ) {}
 
   @Get('conversations')
   async listConversations(
-    @Query('page') pageParam?: unknown,
-    @Query('pageSize') pageSizeParam?: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @Query('page') pageParam: unknown,
+    @Query('pageSize') pageSizeParam: unknown,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const page = parseDecimalIntegerParam(pageParam, 1);
     const pageSize = parseDecimalIntegerParam(pageSizeParam, 20);
     if (page === null || page < 1 || pageSize === null
@@ -110,7 +110,7 @@ export class ChatSessionsController {
       return {
         ok: true,
         version: 'pet-chat-v1',
-        data: await this.service.listConversations({ page, pageSize }, ownerDeviceId),
+        data: await this.service.listConversations({ page, pageSize }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -120,14 +120,14 @@ export class ChatSessionsController {
   @Get('conversations/:conversationId')
   async getConversation(
     @Param('conversationId') conversationId: string,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     try {
       return {
         ok: true,
         version: 'pet-chat-v1',
-        data: await this.service.getConversation(conversationId, ownerDeviceId),
+        data: await this.service.getConversation(conversationId, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -139,10 +139,10 @@ export class ChatSessionsController {
     @Param('conversationId') conversationId: string,
     @Param('requestId') requestId: string,
     @Body() body: GenerateReplyBody,
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Res() response: ChatStreamResponse,
   ): Promise<void> {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.attempt !== 'number' || !Number.isSafeInteger(body.attempt) || body.attempt < 1) {
       throw this.invalidInput('聊天请求轮次无效。');
     }
@@ -159,7 +159,7 @@ export class ChatSessionsController {
         response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       }
     };
-    const flightKey = `${ownerDeviceId}:${conversationId}:${requestId}:${body.attempt}`;
+    const flightKey = `${ownerUserId}:${conversationId}:${requestId}:${body.attempt}`;
     const existingFlight = this.generatingTurns.get(flightKey);
 
     try {
@@ -170,7 +170,7 @@ export class ChatSessionsController {
             conversationId,
             requestId,
             body.attempt,
-            ownerDeviceId,
+            ownerUserId,
             text => writeEvent('delta', { text }),
           );
       const turn = conversation.turns.find(item => item.requestId === requestId);
@@ -196,14 +196,14 @@ export class ChatSessionsController {
     @Param('conversationId') conversationId: string,
     @Param('requestId') requestId: string,
     @Body() body: GenerateReplyBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ): Promise<{ ok: true; version: 'pet-chat-v1'; data: ChatConversationSnapshot }> {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.attempt !== 'number' || !Number.isSafeInteger(body.attempt) || body.attempt < 1) {
       throw this.invalidInput('聊天请求轮次无效。');
     }
 
-    const flightKey = `${ownerDeviceId}:${conversationId}:${requestId}:${body.attempt}`;
+    const flightKey = `${ownerUserId}:${conversationId}:${requestId}:${body.attempt}`;
     const existingFlight = this.generatingTurns.get(flightKey);
     if (existingFlight) {
       const data = await existingFlight;
@@ -216,7 +216,7 @@ export class ChatSessionsController {
         conversationId,
         requestId,
         body.attempt,
-        ownerDeviceId,
+        ownerUserId,
       );
       return { ok: true, version: 'pet-chat-v1', data };
     } catch (error) {
@@ -229,21 +229,21 @@ export class ChatSessionsController {
     conversationId: string,
     requestId: string,
     attempt: number,
-    ownerDeviceId: string,
+    ownerUserId: string,
     onTextDelta?: (text: string) => void,
   ) {
     const existing = this.generatingTurns.get(flightKey);
     if (existing) return existing;
-    const active = this.activeDeviceGenerations.get(ownerDeviceId);
+    const active = this.activeAccountGenerations.get(ownerUserId);
     if (active && active.flightKey !== flightKey) {
-      throw new ChatSessionError('chat_busy', '该设备已有一条小橘回复正在生成，请稍后再试。');
+      throw new ChatSessionError('chat_busy', '该账号已有一条小橘回复正在生成，请稍后再试。');
     }
     const flight = this.taskCoordinator.runInteractive(
-      ownerDeviceId,
-      () => this.generateReplyOnce(conversationId, requestId, attempt, ownerDeviceId, onTextDelta),
+      ownerUserId,
+      () => this.generateReplyOnce(conversationId, requestId, attempt, ownerUserId, onTextDelta),
     );
     this.generatingTurns.set(flightKey, flight);
-    this.activeDeviceGenerations.set(ownerDeviceId, { flightKey, conversationId, requestId });
+    this.activeAccountGenerations.set(ownerUserId, { flightKey, conversationId, requestId });
     let completed: ChatConversationSnapshot | undefined;
     try {
       completed = await flight;
@@ -252,20 +252,20 @@ export class ChatSessionsController {
       if (this.generatingTurns.get(flightKey) === flight) {
         this.generatingTurns.delete(flightKey);
       }
-      if (this.activeDeviceGenerations.get(ownerDeviceId)?.flightKey === flightKey) {
-        this.activeDeviceGenerations.delete(ownerDeviceId);
+      if (this.activeAccountGenerations.get(ownerUserId)?.flightKey === flightKey) {
+        this.activeAccountGenerations.delete(ownerUserId);
       }
       const turn = completed?.turns.find(item => item.requestId === requestId);
       if (turn?.status === 'completed' && turn.source === 'provider' && turn.deviceLocalDate) {
-        this.dailyAnchors.enqueueAfterCompletedTurn(ownerDeviceId, turn.deviceLocalDate);
+        this.dailyAnchors.enqueueAfterCompletedTurn(ownerUserId, turn.deviceLocalDate);
       }
     }
   }
 
-  private assertDeviceCanBeginTurn(ownerDeviceId: string, conversationId: string, requestId: string) {
-    const active = this.activeDeviceGenerations.get(ownerDeviceId);
+  private assertAccountCanBeginTurn(ownerUserId: string, conversationId: string, requestId: string) {
+    const active = this.activeAccountGenerations.get(ownerUserId);
     if (active && (active.conversationId !== conversationId || active.requestId !== requestId)) {
-      throw new ChatSessionError('chat_busy', '该设备已有一条小橘回复正在生成，请稍后再发送。');
+      throw new ChatSessionError('chat_busy', '该账号已有一条小橘回复正在生成，请稍后再发送。');
     }
   }
 
@@ -273,10 +273,10 @@ export class ChatSessionsController {
     conversationId: string,
     requestId: string,
     attempt: number,
-    ownerDeviceId: string,
+    ownerUserId: string,
     onTextDelta?: (text: string) => void,
   ): Promise<ChatConversationSnapshot> {
-    const snapshot = await this.service.getConversation(conversationId, ownerDeviceId);
+    const snapshot = await this.service.getConversation(conversationId, ownerUserId);
     const turn = snapshot.turns.find(item => item.requestId === requestId);
     if (!turn) throw new ChatSessionError('not_found', '聊天请求不存在。');
     if (turn.status === 'completed') return snapshot;
@@ -293,7 +293,7 @@ export class ChatSessionsController {
         conversationId,
         requestId,
         attempt,
-      }, ownerDeviceId);
+      }, ownerUserId);
       throw new ChatSessionError(currentPolicyCode, getPetChatPolicyMessage(currentPolicyCode));
     }
 
@@ -318,7 +318,7 @@ export class ChatSessionsController {
         content: message.text,
         }));
       // Unavailable memory is not evidence of an empty diary history; continue without claims.
-      const memoryContext = await this.memories.getContext(ownerDeviceId).catch(() => '');
+      const memoryContext = await this.memories.getContext(ownerUserId).catch(() => '');
       const reply = await this.provider.reply(trustedContext, onTextDelta, memoryContext);
       return this.service.completeGeneratedTurn({
         conversationId,
@@ -328,7 +328,7 @@ export class ChatSessionsController {
         text: reply.text,
         source: 'provider',
         providerRequestId: reply.providerRequestId,
-      }, ownerDeviceId);
+      }, ownerUserId);
     } catch (error) {
       if (!(error instanceof PetChatProviderError)) throw error;
       if (error.failureCode === 'out_of_scope' || error.failureCode === 'unsafe_request') {
@@ -336,7 +336,7 @@ export class ChatSessionsController {
           conversationId,
           requestId,
           attempt,
-        }, ownerDeviceId);
+        }, ownerUserId);
         throw new ChatSessionError(error.failureCode, getPetChatPolicyMessage(error.failureCode));
       }
       return this.service.failTurn({
@@ -344,7 +344,7 @@ export class ChatSessionsController {
         requestId,
         attempt,
         failureCode: error.failureCode,
-      }, ownerDeviceId);
+      }, ownerUserId);
     }
   }
 
@@ -352,9 +352,9 @@ export class ChatSessionsController {
   async beginTurn(
     @Param('conversationId') conversationId: string,
     @Body() body: BeginTurnBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.requestId !== 'string'
       || typeof body.userMessageId !== 'string'
       || typeof body.text !== 'string'
@@ -362,7 +362,7 @@ export class ChatSessionsController {
       throw this.invalidInput('消息请求信息不完整。');
     }
     try {
-      this.assertDeviceCanBeginTurn(ownerDeviceId, conversationId, body.requestId);
+      this.assertAccountCanBeginTurn(ownerUserId, conversationId, body.requestId);
       return {
         ok: true,
         version: 'pet-chat-v1',
@@ -372,7 +372,7 @@ export class ChatSessionsController {
           userMessageId: body.userMessageId,
           text: body.text,
           deviceLocalDate: body.deviceLocalDate as string | undefined,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -384,9 +384,9 @@ export class ChatSessionsController {
     @Param('conversationId') conversationId: string,
     @Param('requestId') requestId: string,
     @Body() body: CompleteTurnBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.attempt !== 'number'
       || typeof body.assistantMessageId !== 'string'
       || typeof body.text !== 'string'
@@ -406,7 +406,7 @@ export class ChatSessionsController {
           text: body.text,
           source: body.source,
           providerRequestId: body.providerRequestId,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -418,9 +418,9 @@ export class ChatSessionsController {
     @Param('conversationId') conversationId: string,
     @Param('requestId') requestId: string,
     @Body() body: FailTurnBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.attempt !== 'number'
       || (body.failureCode !== 'timeout'
         && body.failureCode !== 'cancelled'
@@ -436,7 +436,7 @@ export class ChatSessionsController {
           requestId,
           attempt: body.attempt,
           failureCode: body.failureCode,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -448,14 +448,14 @@ export class ChatSessionsController {
     @Param('conversationId') conversationId: string,
     @Param('requestId') requestId: string,
     @Body() body: RetryTurnBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.nextAttempt !== 'number') {
       throw this.invalidInput('重试轮次无效。');
     }
     try {
-      this.assertDeviceCanBeginTurn(ownerDeviceId, conversationId, requestId);
+      this.assertAccountCanBeginTurn(ownerUserId, conversationId, requestId);
       return {
         ok: true,
         version: 'pet-chat-v1',
@@ -463,7 +463,7 @@ export class ChatSessionsController {
           conversationId,
           requestId,
           nextAttempt: body.nextAttempt,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);

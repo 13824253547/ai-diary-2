@@ -12,7 +12,7 @@ export const CORE_DIARY_CONTRACT_VERSION = 'core-diary-v1';
 
 export type ContractErrorCode =
   | 'permission_denied'
-  | 'device_identity_required'
+  | 'account_session_invalid'
   | 'timeout'
   | 'cancelled'
   | 'not_found'

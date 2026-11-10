@@ -18,7 +18,7 @@ const publishedStory = {
   publishedAt: new Date('2026-09-13T00:00:00.000Z'),
   withdrawnAt: null,
   _count: { likes: 3 },
-  likes: [{ ownerDeviceId: 'device-1' }],
+  likes: [{ ownerUserId: 'device-1' }],
 };
 
 function createService() {
@@ -252,8 +252,8 @@ describe('DiscoveryService', () => {
     expect(transaction.$queryRaw.mock.invocationCallOrder[0])
       .toBeLessThan(transaction.discoveryLike.upsert.mock.invocationCallOrder[0]);
     expect(transaction.discoveryLike.upsert).toHaveBeenCalledWith({
-      where: { storyId_ownerDeviceId: { storyId: 'story-1', ownerDeviceId: 'device-1' } },
-      create: { storyId: 'story-1', ownerDeviceId: 'device-1' },
+      where: { storyId_ownerUserId: { storyId: 'story-1', ownerUserId: 'device-1' } },
+      create: { storyId: 'story-1', ownerUserId: 'device-1' },
       update: {},
     });
     expect(result).toEqual({ storyId: 'story-1', liked: true, likeCount: 4 });
@@ -263,10 +263,10 @@ describe('DiscoveryService', () => {
     [null, 'device-1', true],
     ['story-1', '', true],
     ['story-1', 'device-1', 'true'],
-  ])('rejects malformed like input before starting a transaction (%j)', async (storyId, ownerDeviceId, liked) => {
+  ])('rejects malformed like input before starting a transaction (%j)', async (storyId, ownerUserId, liked) => {
     const { service, prisma } = createService();
 
-    await expect(service.setLike(storyId, ownerDeviceId, liked))
+    await expect(service.setLike(storyId, ownerUserId, liked))
       .rejects.toMatchObject({ code: 'invalid_input' });
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });

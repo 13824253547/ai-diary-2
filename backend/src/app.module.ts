@@ -5,7 +5,7 @@ import { HealthController } from './common/health.controller';
 import { DiariesModule } from './modules/diaries/diaries.module';
 import { DraftsModule } from './modules/drafts/drafts.module';
 import { GenerationModule } from './modules/generation/generation.module';
-import { IdentityModule } from './modules/identity/identity.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { MemoriesModule } from './modules/memories/memories.module';
 import { PhotosModule } from './modules/photos/photos.module';
 import { DiscoveryModule } from './modules/discovery/discovery.module';
@@ -22,7 +22,7 @@ import { PostcardMessageModule } from './modules/postcards/postcard-message.modu
       isGlobal: true,
     }),
     CommonServicesModule,
-    IdentityModule,
+    AuthModule,
     PhotosModule,
     DraftsModule,
     GenerationModule,

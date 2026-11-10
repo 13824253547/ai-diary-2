@@ -50,9 +50,8 @@ describe('material photo API', () => {
         return client;
       }),
     }));
-    jest.doMock('../device-identity', () => ({
-      getDeviceIdentityHeaders: jest.fn(async () => ({
-        'x-device-id': 'device-1',
+    jest.doMock('../account-auth', () => ({
+      getAccountAuthHeaders: jest.fn(async () => ({
         Authorization: 'Bearer test-token',
       })),
     }));
@@ -66,7 +65,7 @@ describe('material photo API', () => {
     if (originalWorkerId === undefined) delete process.env.JEST_WORKER_ID;
     else process.env.JEST_WORKER_ID = originalWorkerId;
     jest.dontMock('../api-client');
-    jest.dontMock('../device-identity');
+    jest.dontMock('../account-auth');
     jest.resetModules();
   });
 
@@ -99,7 +98,6 @@ describe('material photo API', () => {
       { transport: 'xhr', timeoutMs: 120_000 },
     );
     await expect(clientOptions?.getHeaders?.()).resolves.toEqual({
-      'x-device-id': 'device-1',
       Authorization: 'Bearer test-token',
     });
     const [path, request] = client.request.mock.calls[0] as [string, { body: TestFormData }];
@@ -121,7 +119,6 @@ describe('material photo API', () => {
       uri: 'https://api.example.test/photos/materials/material-1/content',
       localUri: undefined,
       remoteHeaders: {
-        'x-device-id': 'device-1',
         Authorization: 'Bearer test-token',
       },
     });
@@ -176,7 +173,7 @@ describe('material photo API', () => {
           generationSource: 'provider',
           generationRequestId: 'request-1',
           uri: 'https://api.example.test/photos/materials/generated-1/content',
-          remoteHeaders: { 'x-device-id': 'device-1' },
+          remoteHeaders: { Authorization: 'Bearer test-token' },
         },
         { id: 'uploaded-1', source: 'device' },
       ],
@@ -184,10 +181,10 @@ describe('material photo API', () => {
   });
 
   test('rejects a material list when device identity changes during the request', async () => {
-    const identity = require('../device-identity') as { getDeviceIdentityHeaders: jest.Mock };
-    identity.getDeviceIdentityHeaders
-      .mockResolvedValueOnce({ 'x-device-id': 'device-1' })
-      .mockResolvedValueOnce({ 'x-device-id': 'device-2' });
+    const identity = require('../account-auth') as { getAccountAuthHeaders: jest.Mock };
+    identity.getAccountAuthHeaders
+      .mockResolvedValueOnce({ Authorization: 'Bearer test-token' })
+      .mockResolvedValueOnce({ Authorization: 'Bearer token-two' });
     client.get.mockResolvedValue({ ok: true, data: [] });
 
     await expect(api.listMaterialPhotosFromBackend())

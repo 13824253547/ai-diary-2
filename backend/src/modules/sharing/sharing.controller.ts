@@ -1,5 +1,5 @@
+import { CurrentUserId } from "../auth/auth-request";
 import { BadRequestException, Body, Controller, ForbiddenException, Headers, NotFoundException, Post } from '@nestjs/common';
-import { resolveDeviceId } from '../../common/device-identity';
 import { MemoryStoreService, PermissionDeniedError, SaveDiaryError } from '../../common/memory-store.service';
 
 type ProjectSharingBody = {
@@ -27,8 +27,8 @@ export class SharingController {
   constructor(private readonly store: MemoryStoreService) {}
 
   @Post('project')
-  async project(@Body() body: unknown, @Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async project(@Body() body: unknown, @CurrentUserId() ownerUserId: string) {
+
     if (!isProjectSharingBody(body)) {
       throw new BadRequestException({
         ok: false,
@@ -44,7 +44,7 @@ export class SharingController {
         diaryId: body.diaryId,
         privacy: body.privacy,
         publicBlockIds: body.publicBlockIds,
-      }, ownerDeviceId);
+      }, ownerUserId);
       return {
         ok: true,
         data: {

@@ -6,6 +6,7 @@ import { createTestStore } from '../../src/test-utils/create-test-store';
 import { useAppStore } from '../../src/store/use-app-store';
 import type { AppStore } from '../../src/store/use-app-store';
 import type { DiaryItem } from '../../src/types/diary';
+import * as accountAuth from '../../src/services/account-auth';
 
 const mockRouter = {
   push: jest.fn(),
@@ -165,5 +166,33 @@ describe('Profile screen monthly entry', () => {
       expect(openURL).toHaveBeenCalledWith('https://www.comiaite.com/privacy-policy');
     });
     openURL.mockRestore();
+  });
+
+  test('requires a password and email code before requesting account deletion', async () => {
+    const requestCode = jest.spyOn(accountAuth, 'requestAccountDeletionEmailCode').mockResolvedValue({
+      challengeId: 'delete-challenge',
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      maskedEmail: 'd***@perspectivar.com',
+    });
+    const deleteAccount = jest.spyOn(accountAuth, 'deleteAccount').mockResolvedValue({ cleanupPending: false });
+    const screen = await render(<ProfileScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: '注销账号' }));
+    await fireEvent.changeText(screen.getByLabelText('注销确认密码'), 'secret-pass-123');
+    await fireEvent.press(screen.getByRole('button', { name: '发送邮箱验证码' }));
+
+    await waitFor(() => {
+      expect(requestCode).toHaveBeenCalledWith('secret-pass-123');
+      expect(screen.getByText(/d\*\*\*@perspectivar\.com/)).toBeTruthy();
+    });
+    await fireEvent.changeText(screen.getByLabelText('注销邮箱验证码'), '001234');
+    await fireEvent.press(screen.getByRole('button', { name: '确认永久注销' }));
+
+    await waitFor(() => {
+      expect(deleteAccount).toHaveBeenCalledWith('secret-pass-123', 'delete-challenge', '001234');
+      expect(mockRouter.replace).toHaveBeenCalledWith('/auth/login');
+    });
+    requestCode.mockRestore();
+    deleteAccount.mockRestore();
   });
 });

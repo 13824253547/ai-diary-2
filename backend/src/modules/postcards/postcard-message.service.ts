@@ -17,8 +17,8 @@ export class PostcardMessageService {
     private readonly assets: PhotoAssetService,
   ) {}
 
-  async generate(ownerDeviceId: string, request: PostcardMessageRequest, signal?: AbortSignal) {
-    const photo = await this.assets.readMaterialPhoto(ownerDeviceId, request.photoId);
+  async generate(ownerUserId: string, request: PostcardMessageRequest, signal?: AbortSignal) {
+    const photo = await this.assets.readMaterialPhoto(ownerUserId, request.photoId);
     const message = await this.provider.generate(photo, request.location, signal);
     if (!message || /[\r\n\u2028\u2029]/u.test(message) || Array.from(message).length > 12) {
       throw new PostcardMessageProviderError('invalid_response');

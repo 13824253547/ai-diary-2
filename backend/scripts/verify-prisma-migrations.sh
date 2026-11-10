@@ -56,12 +56,20 @@ DATABASE_URL="mysql://root:root@127.0.0.1:33306/${legacy_database}" \
 DATABASE_URL="mysql://root:root@127.0.0.1:33306/${legacy_database}" \
   npx prisma migrate deploy
 
-record=$(docker compose -f docker-compose.local.yml exec -T mysql \
+legacy_diary_count=$(docker compose -f docker-compose.local.yml exec -T mysql \
   mysql -uroot -proot -D "${legacy_database}" -N -e \
-  "SELECT CONCAT(id, ':', title, ':', summary, ':', contentSnapshot IS NULL) FROM Diary WHERE id = 'legacy-diary'")
+  "SELECT COUNT(*) FROM Diary")
 
-if [ "${record}" != "legacy-diary:Legacy diary:Old summary:1" ]; then
-  printf 'Migration changed or lost the legacy diary: %s\n' "${record}" >&2
+if [ "${legacy_diary_count}" != "0" ]; then
+  printf 'Account cutover did not remove legacy anonymous diaries: %s\n' "${legacy_diary_count}" >&2
+  exit 1
+fi
+
+account_schema=$(docker compose -f docker-compose.local.yml exec -T mysql \
+  mysql -uroot -proot -D "${legacy_database}" -N -e \
+  "SELECT CONCAT(SUM(table_name = 'UserAccount'), ':', SUM(table_name = 'AccountSession'), ':', SUM(table_name = 'CaptchaChallenge'), ':', SUM(table_name = 'EmailVerificationChallenge'), ':', SUM(table_name = 'AuthRateLimit'), ':', SUM(table_name = 'AccountDeletionJob'), ':', SUM(table_name = 'AppAttestDevice')) FROM information_schema.tables WHERE table_schema = DATABASE()")
+if [ "${account_schema}" != "1:1:1:1:1:1:0" ]; then
+  printf 'Account cutover schema is incomplete or retained App Attest tables: %s\n' "${account_schema}" >&2
   exit 1
 fi
 
@@ -113,4 +121,4 @@ if [ "${record}" != "baseline-diary:Baseline diary:Existing data" ]; then
   exit 1
 fi
 
-printf 'Verified fresh deployment, legacy upgrade and guarded baseline adoption.\n'
+printf 'Verified fresh deployment, destructive anonymous cutover and guarded baseline adoption.\n'

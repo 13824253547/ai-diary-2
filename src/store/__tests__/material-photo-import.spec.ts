@@ -28,14 +28,14 @@ describe('Store device photo import', () => {
       generationSource: 'provider',
       uri: 'https://api.example.test/photos/materials/generated-remote-1/content',
       localUri: undefined,
-      remoteHeaders: { 'x-device-id': 'device-1' },
+      remoteHeaders: { Authorization: 'Bearer test-token' },
     };
     const uploaded: DiaryPhoto = {
       ...devicePhoto,
       id: 'uploaded-remote-1',
       uri: 'https://api.example.test/photos/materials/uploaded-remote-1/content',
       localUri: undefined,
-      remoteHeaders: { 'x-device-id': 'device-1' },
+      remoteHeaders: { Authorization: 'Bearer test-token' },
     };
     const store = createAppStore(createDefaultAppStoreDeps({ photos: [], diaries: [] }));
 
@@ -200,7 +200,7 @@ describe('Store device photo import', () => {
       sourceAssetId: 'device-photo-1',
       uri: 'https://api.example.test/photos/materials/material-photo-1/content',
       localUri: undefined,
-      remoteHeaders: { 'x-device-id': 'device-1' },
+      remoteHeaders: { Authorization: 'Bearer test-token' },
     };
       const diaryCopy = {
       ...materialPhoto,
@@ -270,7 +270,7 @@ describe('Store device photo import', () => {
       id: 'photo-read',
       localUri: undefined,
       uri: 'https://api.example.test/photos/diaries/diary-read/photo-content?photoId=photo-read',
-      remoteHeaders: { 'x-device-id': 'device-1' },
+      remoteHeaders: { Authorization: 'Bearer test-token' },
       diaryId: diary.id,
     };
     const listDiaryPhotos = jest.spyOn(materialPhotoApi, 'listSavedDiaryPhotoAssets').mockResolvedValue([copy]);

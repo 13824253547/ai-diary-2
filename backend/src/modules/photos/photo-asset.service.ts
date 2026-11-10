@@ -96,23 +96,32 @@ export class PhotoAssetService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async listMaterials(ownerDeviceId: string) {
+  async listMaterials(ownerUserId: string) {
     const records = await this.prisma.materialPhoto.findMany({
-      where: { ownerDeviceId },
+      where: { ownerUserId },
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
     return records.map(record => this.toAssetContract(record));
   }
 
-  async assertMaterialCapacity(ownerDeviceId: string) {
-    const count = await this.prisma.materialPhoto.count({ where: { ownerDeviceId } });
+  async deleteAccountAssets(ownerUserId: string) {
+    if (!ownerUserId.trim()) throw new PhotoAssetError('invalid_input', '账号标识无效。');
+    const key = this.ownerKey(ownerUserId);
+    await Promise.all([
+      rm(join(this.root, 'materials', key), { recursive: true, force: true }),
+      rm(join(this.root, 'diaries', key), { recursive: true, force: true }),
+    ]);
+  }
+
+  async assertMaterialCapacity(ownerUserId: string) {
+    const count = await this.prisma.materialPhoto.count({ where: { ownerUserId } });
     if (count >= MAX_MATERIAL_LIBRARY_PHOTOS) {
       throw new PhotoAssetError('limit_exceeded', `素材库最多保存 ${MAX_MATERIAL_LIBRARY_PHOTOS} 张照片，请先删除部分素材。`);
     }
   }
 
   async uploadMaterials(
-    ownerDeviceId: string,
+    ownerUserId: string,
     uploads: PhotoAssetUpload[],
     metadata: PhotoAssetUploadMetadata[],
   ) {
@@ -147,25 +156,25 @@ export class PhotoAssetService {
     const movedPaths: string[] = [];
     try {
       for (const item of prepared) {
-        item.destination = this.materialPath(ownerDeviceId, item.id, item.image.extension);
+        item.destination = this.materialPath(ownerUserId, item.id, item.image.extension);
         await mkdir(join(this.root, '.staging'), { recursive: true, mode: 0o700 });
-        await mkdir(join(this.root, 'materials', this.ownerKey(ownerDeviceId)), { recursive: true, mode: 0o700 });
+        await mkdir(join(this.root, 'materials', this.ownerKey(ownerUserId)), { recursive: true, mode: 0o700 });
         await writeFile(item.temporaryPath, item.buffer, { flag: 'wx', mode: 0o600 });
       }
 
       await this.prisma.$transaction(async tx => {
         await tx.$executeRaw`
-          INSERT INTO MaterialPhotoQuota (ownerDeviceId, photoCount, updatedAt)
-          VALUES (${ownerDeviceId}, 0, NOW(3))
-          ON DUPLICATE KEY UPDATE ownerDeviceId = VALUES(ownerDeviceId)
+          INSERT INTO MaterialPhotoQuota (ownerUserId, photoCount, updatedAt)
+          VALUES (${ownerUserId}, 0, NOW(3))
+          ON DUPLICATE KEY UPDATE ownerUserId = VALUES(ownerUserId)
         `;
         await tx.$queryRaw`
-          SELECT ownerDeviceId FROM MaterialPhotoQuota
-          WHERE ownerDeviceId = ${ownerDeviceId}
+          SELECT ownerUserId FROM MaterialPhotoQuota
+          WHERE ownerUserId = ${ownerUserId}
           FOR UPDATE
         `;
 
-        const currentCount = await tx.materialPhoto.count({ where: { ownerDeviceId } });
+        const currentCount = await tx.materialPhoto.count({ where: { ownerUserId } });
         if (currentCount + prepared.length > MAX_MATERIAL_LIBRARY_PHOTOS) {
           throw new PhotoAssetError('limit_exceeded', `素材库最多保存 ${MAX_MATERIAL_LIBRARY_PHOTOS} 张照片，请先删除部分素材。`);
         }
@@ -176,7 +185,7 @@ export class PhotoAssetService {
           movedPaths.push(item.destination);
           rows.push({
             id: item.id,
-            ownerDeviceId,
+            ownerUserId,
             sourceAssetId: item.metadata.sourceAssetId,
             filePath: this.relativePath(item.destination),
             filename: item.metadata.filename?.trim() || `${item.id}.${item.image.extension}`,
@@ -191,7 +200,7 @@ export class PhotoAssetService {
         if (rows.length) {
           await tx.materialPhoto.createMany({ data: rows });
           await tx.materialPhotoQuota.update({
-            where: { ownerDeviceId },
+            where: { ownerUserId },
             data: { photoCount: currentCount + prepared.length },
           });
         }
@@ -209,7 +218,7 @@ export class PhotoAssetService {
     await Promise.all(prepared.map(item => rm(item.temporaryPath, { force: true })));
     const records = await this.prisma.materialPhoto.findMany({
       where: {
-        ownerDeviceId,
+        ownerUserId,
         id: { in: prepared.map(item => item.id) },
       },
     });
@@ -221,24 +230,24 @@ export class PhotoAssetService {
     });
   }
 
-  async findGeneratedMaterial(ownerDeviceId: string, requestId: string) {
+  async findGeneratedMaterial(ownerUserId: string, requestId: string) {
     const record = await this.prisma.materialPhoto.findFirst({
-      where: { ownerDeviceId, generationRequestId: requestId },
+      where: { ownerUserId, generationRequestId: requestId },
     });
     return record ? this.toAssetContract(record) : undefined;
   }
 
   async saveGeneratedMaterial(
-    ownerDeviceId: string,
+    ownerUserId: string,
     requestId: string,
     description: string,
     image: GeneratedPhotoAsset,
   ) {
-    const existing = await this.findGeneratedMaterial(ownerDeviceId, requestId);
+    const existing = await this.findGeneratedMaterial(ownerUserId, requestId);
     if (existing) return existing;
 
     const labelledBuffer = await labelGeneratedImage(image.buffer, requestId);
-    const [asset] = await this.uploadMaterials(ownerDeviceId, [{
+    const [asset] = await this.uploadMaterials(ownerUserId, [{
       buffer: labelledBuffer,
       mimetype: image.mimeType,
     }], [{
@@ -260,14 +269,14 @@ export class PhotoAssetService {
       });
       return this.toAssetContract(updated);
     } catch {
-      await this.deleteMaterials(ownerDeviceId, [asset.id]).catch(() => undefined);
-      const raced = await this.findGeneratedMaterial(ownerDeviceId, requestId).catch(() => undefined);
+      await this.deleteMaterials(ownerUserId, [asset.id]).catch(() => undefined);
+      const raced = await this.findGeneratedMaterial(ownerUserId, requestId).catch(() => undefined);
       if (raced) return raced;
       throw new PhotoAssetError('storage_failed', '生成图片没有成功保存，请稍后重试。');
     }
   }
 
-  async deleteMaterials(ownerDeviceId: string, photoIds: string[]) {
+  async deleteMaterials(ownerUserId: string, photoIds: string[]) {
     if (!Array.isArray(photoIds) || photoIds.length < 1 || photoIds.length > MAX_MATERIAL_LIBRARY_PHOTOS
       || photoIds.some(id => typeof id !== 'string' || !id.trim())
       || new Set(photoIds).size !== photoIds.length) {
@@ -277,26 +286,26 @@ export class PhotoAssetService {
     let filePaths: string[] = [];
     await this.prisma.$transaction(async tx => {
       await tx.$executeRaw`
-        INSERT INTO MaterialPhotoQuota (ownerDeviceId, photoCount, updatedAt)
-        VALUES (${ownerDeviceId}, 0, NOW(3))
-        ON DUPLICATE KEY UPDATE ownerDeviceId = VALUES(ownerDeviceId)
+        INSERT INTO MaterialPhotoQuota (ownerUserId, photoCount, updatedAt)
+        VALUES (${ownerUserId}, 0, NOW(3))
+        ON DUPLICATE KEY UPDATE ownerUserId = VALUES(ownerUserId)
       `;
       await tx.$queryRaw`
-        SELECT ownerDeviceId FROM MaterialPhotoQuota
-        WHERE ownerDeviceId = ${ownerDeviceId}
+        SELECT ownerUserId FROM MaterialPhotoQuota
+        WHERE ownerUserId = ${ownerUserId}
         FOR UPDATE
       `;
       const records = await tx.materialPhoto.findMany({
-        where: { ownerDeviceId, id: { in: photoIds } },
+        where: { ownerUserId, id: { in: photoIds } },
       });
       if (records.length !== photoIds.length) {
         throw new PhotoAssetError('not_found', '部分素材不存在或不属于当前设备。');
       }
       filePaths = records.map(record => this.absolutePath(record.filePath));
-      await tx.materialPhoto.deleteMany({ where: { ownerDeviceId, id: { in: photoIds } } });
-      const count = await tx.materialPhoto.count({ where: { ownerDeviceId } });
+      await tx.materialPhoto.deleteMany({ where: { ownerUserId, id: { in: photoIds } } });
+      const count = await tx.materialPhoto.count({ where: { ownerUserId } });
       await tx.materialPhotoQuota.update({
-        where: { ownerDeviceId },
+        where: { ownerUserId },
         data: { photoCount: count },
       });
     });
@@ -305,7 +314,7 @@ export class PhotoAssetService {
   }
 
   async ensureDiaryPhotoCopies(
-    ownerDeviceId: string,
+    ownerUserId: string,
     diaryId: string,
     photoIds: string[],
     uploads: DiaryPhotoUpload[] = [],
@@ -316,7 +325,7 @@ export class PhotoAssetService {
     const createdPaths: string[] = [];
     try {
       await this.prisma.$transaction(tx =>
-        this.ensureDiaryPhotoCopiesInTransaction(tx, ownerDeviceId, diaryId, ids, uploads, createdPaths, allowMissing));
+        this.ensureDiaryPhotoCopiesInTransaction(tx, ownerUserId, diaryId, ids, uploads, createdPaths, allowMissing));
     } catch (error) {
       await this.removeCreatedCopies(createdPaths);
       if (error instanceof PhotoAssetError) throw error;
@@ -324,13 +333,13 @@ export class PhotoAssetService {
     }
   }
 
-  createDiaryPhotoSaveHook(ownerDeviceId: string, photoIds: string[], uploads: DiaryPhotoUpload[] = []) {
+  createDiaryPhotoSaveHook(ownerUserId: string, photoIds: string[], uploads: DiaryPhotoUpload[] = []) {
     const createdPaths: string[] = [];
     return {
       beforeCommit: (tx: Prisma.TransactionClient, diaryId: string) =>
         this.ensureDiaryPhotoCopiesInTransaction(
           tx,
-          ownerDeviceId,
+          ownerUserId,
           diaryId,
           [...new Set(photoIds)],
           uploads,
@@ -340,11 +349,11 @@ export class PhotoAssetService {
     };
   }
 
-  createDiaryPhotoDeleteHook(ownerDeviceId: string, diaryId: string): DiaryPhotoDeleteHook {
+  createDiaryPhotoDeleteHook(ownerUserId: string, diaryId: string): DiaryPhotoDeleteHook {
     const diaryDirectory = join(
       this.root,
       'diaries',
-      this.ownerKey(ownerDeviceId),
+      this.ownerKey(ownerUserId),
       this.key(diaryId),
     );
     let filePaths: string[] = [];
@@ -355,14 +364,14 @@ export class PhotoAssetService {
           throw new PhotoAssetError('invalid_input', '删除日记标识不匹配。');
         }
         const copies = await tx.diaryPhotoCopy.findMany({
-          where: { ownerDeviceId, diaryId },
+          where: { ownerUserId, diaryId },
           select: { filePath: true },
         });
         filePaths = copies.flatMap(copy => {
           const absolutePath = this.absolutePath(copy.filePath);
           return absolutePath.startsWith(`${diaryDirectory}/`) ? [absolutePath] : [];
         });
-        await tx.diaryPhotoCopy.deleteMany({ where: { ownerDeviceId, diaryId } });
+        await tx.diaryPhotoCopy.deleteMany({ where: { ownerUserId, diaryId } });
       },
       afterCommit: async () => {
         try {
@@ -380,7 +389,7 @@ export class PhotoAssetService {
 
   private async ensureDiaryPhotoCopiesInTransaction(
     tx: Prisma.TransactionClient,
-    ownerDeviceId: string,
+    ownerUserId: string,
     diaryId: string,
     photoIds: string[],
     uploads: DiaryPhotoUpload[],
@@ -406,17 +415,17 @@ export class PhotoAssetService {
     }
 
     await tx.$executeRaw`
-      INSERT INTO MaterialPhotoQuota (ownerDeviceId, photoCount, updatedAt)
-      VALUES (${ownerDeviceId}, 0, NOW(3))
-      ON DUPLICATE KEY UPDATE ownerDeviceId = VALUES(ownerDeviceId)
+      INSERT INTO MaterialPhotoQuota (ownerUserId, photoCount, updatedAt)
+      VALUES (${ownerUserId}, 0, NOW(3))
+      ON DUPLICATE KEY UPDATE ownerUserId = VALUES(ownerUserId)
     `;
     await tx.$queryRaw`
-      SELECT ownerDeviceId FROM MaterialPhotoQuota
-      WHERE ownerDeviceId = ${ownerDeviceId}
+      SELECT ownerUserId FROM MaterialPhotoQuota
+      WHERE ownerUserId = ${ownerUserId}
       FOR UPDATE
     `;
     const existing = await tx.diaryPhotoCopy.findMany({
-      where: { ownerDeviceId, diaryId, photoId: { in: photoIds } },
+      where: { ownerUserId, diaryId, photoId: { in: photoIds } },
     });
     const existingIds = new Set(existing.map(item => item.photoId));
     const missingIds = photoIds.filter(id => !existingIds.has(id));
@@ -425,14 +434,14 @@ export class PhotoAssetService {
     const materialIds = missingIds.filter(id => !uploadByPhotoId.has(id));
     const directMaterials = materialIds.length
       ? await tx.materialPhoto.findMany({
-          where: { ownerDeviceId, id: { in: materialIds } },
+          where: { ownerUserId, id: { in: materialIds } },
         })
       : [];
     const materialById = new Map(directMaterials.map(material => [material.id, material]));
     const sourceIds = materialIds.filter(id => !materialById.has(id));
     const sourceMaterials = sourceIds.length
       ? await tx.materialPhoto.findMany({
-          where: { ownerDeviceId, sourceAssetId: { in: sourceIds } },
+          where: { ownerUserId, sourceAssetId: { in: sourceIds } },
         })
       : [];
     const materialBySourceId = new Map<string, (typeof sourceMaterials)[number]>();
@@ -454,8 +463,8 @@ export class PhotoAssetService {
 
       const image = upload ? detectImage(upload.buffer) : undefined;
       const extension = image?.extension ?? material?.filePath.split('.').pop() ?? 'img';
-      const destination = this.diaryPath(ownerDeviceId, diaryId, photoId, extension);
-      await mkdir(join(this.root, 'diaries', this.ownerKey(ownerDeviceId), this.key(diaryId)), {
+      const destination = this.diaryPath(ownerUserId, diaryId, photoId, extension);
+      await mkdir(join(this.root, 'diaries', this.ownerKey(ownerUserId), this.key(diaryId)), {
         recursive: true,
         mode: 0o700,
       });
@@ -480,7 +489,7 @@ export class PhotoAssetService {
       createdPaths.push(destination);
       rows.push({
         id: randomUUID(),
-        ownerDeviceId,
+        ownerUserId,
         diaryId,
         photoId,
         filePath: this.relativePath(destination),
@@ -503,22 +512,22 @@ export class PhotoAssetService {
     paths.length = 0;
   }
 
-  async listDiaryPhotoCopies(ownerDeviceId: string, diaryId: string) {
+  async listDiaryPhotoCopies(ownerUserId: string, diaryId: string) {
     const rows = await this.prisma.diaryPhotoCopy.findMany({
-      where: { ownerDeviceId, diaryId },
+      where: { ownerUserId, diaryId },
       orderBy: { createdAt: 'asc' },
     });
     return rows.map(row => this.toAssetContract(row));
   }
 
-  async listDiaryPhotoCopiesForDiaries(ownerDeviceId: string, diaryIds: string[]) {
+  async listDiaryPhotoCopiesForDiaries(ownerUserId: string, diaryIds: string[]) {
     if (!Array.isArray(diaryIds) || diaryIds.length < 1 || diaryIds.length > 100
       || diaryIds.some(id => typeof id !== 'string' || !id.trim() || id.length > 191)
       || new Set(diaryIds).size !== diaryIds.length) {
       throw new PhotoAssetError('invalid_input', '日记照片查询参数无效。');
     }
     const diaries = await this.prisma.diary.findMany({
-      where: { ownerDeviceId, id: { in: diaryIds } },
+      where: { ownerUserId, id: { in: diaryIds } },
       select: { id: true, photoIds: true },
     });
     for (const diary of diaries) {
@@ -526,15 +535,15 @@ export class PhotoAssetService {
         ? diary.photoIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
         : [];
       if (!photoIds.length) continue;
-      await this.ensureDiaryPhotoCopies(ownerDeviceId, diary.id, photoIds, [], true);
+      await this.ensureDiaryPhotoCopies(ownerUserId, diary.id, photoIds, [], true);
     }
 
     const rows = await this.prisma.diaryPhotoCopy.findMany({
-      where: { ownerDeviceId, diaryId: { in: diaryIds } },
+      where: { ownerUserId, diaryId: { in: diaryIds } },
       orderBy: [{ diaryId: 'asc' }, { createdAt: 'asc' }],
     });
     const materials = rows.length ? await this.prisma.materialPhoto.findMany({
-      where: { ownerDeviceId, id: { in: [...new Set(rows.map(row => row.photoId))] } },
+      where: { ownerUserId, id: { in: [...new Set(rows.map(row => row.photoId))] } },
     }) : [];
     const materialById = new Map(materials.map(material => [material.id, material]));
     return rows.map(row => ({
@@ -547,9 +556,9 @@ export class PhotoAssetService {
     }));
   }
 
-  async readDiaryPhotoCopy(ownerDeviceId: string, diaryId: string, photoId: string) {
+  async readDiaryPhotoCopy(ownerUserId: string, diaryId: string, photoId: string) {
     const row = await this.prisma.diaryPhotoCopy.findFirst({
-      where: { ownerDeviceId, diaryId, photoId },
+      where: { ownerUserId, diaryId, photoId },
     });
     if (!row) throw new PhotoAssetError('not_found', '日记照片不存在。');
     return this.readFile(row.filePath, row.mimeType);
@@ -564,7 +573,7 @@ export class PhotoAssetService {
         withdrawnAt: null,
       },
       select: {
-        ownerDeviceId: true,
+        ownerUserId: true,
         sourceDiaryId: true,
         sourceDiaryVersion: true,
         publicPhotoIds: true,
@@ -582,7 +591,7 @@ export class PhotoAssetService {
     const diary = await this.prisma.diary.findFirst({
       where: {
         id: story.sourceDiaryId,
-        ownerDeviceId: story.ownerDeviceId,
+        ownerUserId: story.ownerUserId,
         version: story.sourceDiaryVersion,
         privacy: { not: 'private' },
       },
@@ -594,7 +603,7 @@ export class PhotoAssetService {
 
     const row = await this.prisma.diaryPhotoCopy.findFirst({
       where: {
-        ownerDeviceId: story.ownerDeviceId,
+        ownerUserId: story.ownerUserId,
         diaryId: story.sourceDiaryId,
         photoId,
       },
@@ -603,9 +612,9 @@ export class PhotoAssetService {
     return this.readFile(row.filePath, row.mimeType);
   }
 
-  async readAnyDiaryPhotoCopy(ownerDeviceId: string, photoId: string) {
+  async readAnyDiaryPhotoCopy(ownerUserId: string, photoId: string) {
     const rows = await this.prisma.diaryPhotoCopy.findMany({
-      where: { ownerDeviceId, photoId },
+      where: { ownerUserId, photoId },
       orderBy: { createdAt: 'asc' },
     });
     if (!rows.length) throw new PhotoAssetError('not_found', '日记照片不存在。');
@@ -619,8 +628,8 @@ export class PhotoAssetService {
     throw new PhotoAssetError('asset_unreadable', '日记照片副本暂时无法读取。');
   }
 
-  async readMaterialPhoto(ownerDeviceId: string, photoId: string) {
-    const row = await this.prisma.materialPhoto.findFirst({ where: { ownerDeviceId, id: photoId } });
+  async readMaterialPhoto(ownerUserId: string, photoId: string) {
+    const row = await this.prisma.materialPhoto.findFirst({ where: { ownerUserId, id: photoId } });
     if (!row) throw new PhotoAssetError('not_found', '照片素材不存在。');
     const file = await this.readFile(row.filePath, row.mimeType);
     if (!row.generationRequestId || row.generationSource === 'mock') return file;
@@ -672,8 +681,8 @@ export class PhotoAssetService {
     };
   }
 
-  private ownerKey(ownerDeviceId: string) {
-    return this.key(ownerDeviceId);
+  private ownerKey(ownerUserId: string) {
+    return this.key(ownerUserId);
   }
 
   private key(value: string) {
@@ -692,15 +701,15 @@ export class PhotoAssetService {
     return absolutePath;
   }
 
-  private materialPath(ownerDeviceId: string, photoId: string, extension: string) {
-    return join(this.root, 'materials', this.ownerKey(ownerDeviceId), `${photoId}.${extension}`);
+  private materialPath(ownerUserId: string, photoId: string, extension: string) {
+    return join(this.root, 'materials', this.ownerKey(ownerUserId), `${photoId}.${extension}`);
   }
 
-  private diaryPath(ownerDeviceId: string, diaryId: string, photoId: string, extension: string) {
+  private diaryPath(ownerUserId: string, diaryId: string, photoId: string, extension: string) {
     return join(
       this.root,
       'diaries',
-      this.ownerKey(ownerDeviceId),
+      this.ownerKey(ownerUserId),
       this.key(diaryId),
       `${this.key(photoId)}.${extension}`,
     );

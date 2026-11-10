@@ -1,5 +1,5 @@
+import { CurrentUserId } from "../auth/auth-request";
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, NotFoundException, Param, Post } from '@nestjs/common';
-import { resolveDeviceId } from '../../common/device-identity';
 import { DraftInputError, MemoryStoreService, PermissionDeniedError } from '../../common/memory-store.service';
 
 type CreateDraftBody = {
@@ -17,11 +17,11 @@ export class DraftsController {
   constructor(private readonly store: MemoryStoreService) {}
 
   @Post()
-  async createDraft(@Body() body: CreateDraftBody, @Headers('x-device-id') deviceId?: string) {
+  async createDraft(@Body() body: CreateDraftBody, @CurrentUserId() ownerUserId: string) {
     try {
       return {
         ok: true,
-        data: await this.store.createDraft(body, resolveDeviceId(deviceId)),
+        data: await this.store.createDraft(body, ownerUserId),
       };
     } catch (error) {
       if (error instanceof DraftInputError) {
@@ -49,17 +49,17 @@ export class DraftsController {
   }
 
   @Get()
-  async listDrafts(@Headers('x-device-id') deviceId?: string) {
+  async listDrafts(@CurrentUserId() ownerUserId: string) {
     return {
       ok: true,
-      data: await this.store.listDrafts(resolveDeviceId(deviceId)),
+      data: await this.store.listDrafts(ownerUserId),
     };
   }
 
   @Get(':id')
-  async getDraft(@Param('id') id: string, @Headers('x-device-id') deviceId?: string) {
+  async getDraft(@Param('id') id: string, @CurrentUserId() ownerUserId: string) {
     try {
-      const draft = await this.store.getDraft(id, resolveDeviceId(deviceId));
+      const draft = await this.store.getDraft(id, ownerUserId);
       if (!draft) throw new NotFoundException('draft not found');
       return {
         ok: true,

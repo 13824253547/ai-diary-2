@@ -11,11 +11,9 @@ describe('SharingController', () => {
     jest.clearAllMocks();
   });
 
-  test('requires device identity before reading a malformed sharing body', async () => {
-    await expect(controller.project(undefined as never, undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
+  test('validates malformed sharing input for the authenticated account', async () => {
+    await expect(controller.project(undefined as never, 'user-1'))
+      .rejects.toMatchObject({ response: { error: { code: 'invalid_input' } } });
     expect(store.updateDiaryVisibility).not.toHaveBeenCalled();
   });
 

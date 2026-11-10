@@ -31,24 +31,15 @@ describe('DiscoveryController', () => {
       pageSize: 20,
       category: 'latest',
     }, 'device-1');
-    await expect(controller.listStories(undefined, undefined, undefined, 'latest', undefined, '  '))
-      .rejects.toBeInstanceOf(BadRequestException);
   });
 
-  test('requires device identity before validating query, story, or like input', async () => {
-    const requests = [
-      controller.listStories(undefined, '0', '15', undefined, undefined),
-      controller.getStory('', undefined),
-      controller.setLike('story-1', { liked: 'yes' }),
-    ];
-
-    for (const request of requests) {
-      await expect(request).rejects.toMatchObject({
-        response: {
-          error: { code: 'device_identity_required' },
-        },
-      });
-    }
+  test('validates query, story, or like input for the authenticated account', async () => {
+    await expect(controller.listStories(undefined, '0', '15', undefined, undefined, 'user-1'))
+      .rejects.toMatchObject({ response: { error: { code: 'invalid_input' } } });
+    await expect(controller.getStory('', 'user-1'))
+      .rejects.toMatchObject({ response: { error: { code: 'invalid_input' } } });
+    await expect(controller.setLike('story-1', { liked: 'yes' }, 'user-1'))
+      .rejects.toMatchObject({ response: { error: { code: 'invalid_input' } } });
     expect(service.listStories).not.toHaveBeenCalled();
     expect(service.getStory).not.toHaveBeenCalled();
     expect(service.setLike).not.toHaveBeenCalled();

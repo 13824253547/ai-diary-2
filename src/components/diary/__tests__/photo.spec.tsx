@@ -78,7 +78,6 @@ describe('Diary photo', () => {
 
   test('sends identity headers when loading a remote material photo', async () => {
     const remoteHeaders = {
-      'x-device-id': 'device-1',
       Authorization: 'Bearer signed-token',
     };
     registerPhoto('material-photo-p1', {
@@ -96,7 +95,7 @@ describe('Diary photo', () => {
   });
 
   test('loads a saved diary photo by query so iOS cannot split source IDs on slashes', async () => {
-    const remoteHeaders = { 'x-device-id': 'device-1' };
+    const remoteHeaders = { Authorization: 'Bearer test-token' };
     const photoId = 'material-photo-context/L0/001';
     registerPhoto(photoId, {
       localUri: undefined,

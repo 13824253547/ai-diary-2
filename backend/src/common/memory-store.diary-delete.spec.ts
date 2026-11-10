@@ -74,22 +74,22 @@ describe('MemoryStoreService.deleteDiary', () => {
     expect(assetHook.afterCommit).toHaveBeenCalledTimes(1);
     expect(transaction.discoveryLike.deleteMany).toHaveBeenCalledWith({ where: { storyId: { in: ['story-1'] } } });
     expect(transaction.discoveryStory.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ['story-1'] }, ownerDeviceId: 'device-1' },
+      where: { id: { in: ['story-1'] }, ownerUserId: 'device-1' },
     });
     expect(transaction.diaryAnchor.deleteMany).toHaveBeenCalledWith({
-      where: { ownerDeviceId: 'device-1', diaryId: 'diary-1' },
+      where: { ownerUserId: 'device-1', diaryId: 'diary-1' },
     });
     expect(transaction.growthFlower.deleteMany).toHaveBeenCalledWith({
-      where: { ownerDeviceId: 'device-1', id: { in: ['flower-affected'] } },
+      where: { ownerUserId: 'device-1', id: { in: ['flower-affected'] } },
     });
     expect(transaction.growthRecognitionRun.deleteMany).toHaveBeenCalledWith({
-      where: { ownerDeviceId: 'device-1', id: { in: ['run-diary', 'run-baseline'] } },
+      where: { ownerUserId: 'device-1', id: { in: ['run-diary', 'run-baseline'] } },
     });
     expect(transaction.growthMilestone.update).toHaveBeenCalledWith({
       where: { id: 'milestone-1' },
       data: { sourceDiaryIds: ['diary-2'] },
     });
-    expect(transaction.growthInsightReport.deleteMany).toHaveBeenCalledWith({ where: { ownerDeviceId: 'device-1' } });
+    expect(transaction.growthInsightReport.deleteMany).toHaveBeenCalledWith({ where: { ownerUserId: 'device-1' } });
     expect(transaction.diary.delete).toHaveBeenCalledWith({ where: { id: 'diary-1' } });
   });
 

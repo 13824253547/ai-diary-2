@@ -1,12 +1,12 @@
 import type { PetChatConversation } from '../../contracts/pet-chat-contract';
 import type { PetChatRepository } from '../../repositories/pet-chat-repository';
 import { PetChatRepositoryError } from '../../repositories/pet-chat-repository';
-import { ensureDeviceIdentity } from '../../services/device-identity';
+import { getAccountUserId } from '../../services/account-auth';
 import { createTestStore } from '../../test-utils/create-test-store';
 import type { AppStoreDeps } from '../create-app-store';
 
-jest.mock('../../services/device-identity', () => ({
-  ensureDeviceIdentity: jest.fn(async () => 'device-chat-test'),
+jest.mock('../../services/account-auth', () => ({
+  getAccountUserId: jest.fn(async () => 'device-chat-test'),
 }));
 
 function buildConversation(input: {
@@ -116,8 +116,8 @@ function createReadyChatTestStore(overrides: Partial<AppStoreDeps>) {
 
 describe('PET-001 Store/server integration', () => {
   beforeEach(() => {
-    jest.mocked(ensureDeviceIdentity).mockReset();
-    jest.mocked(ensureDeviceIdentity).mockResolvedValue('device-chat-test');
+    jest.mocked(getAccountUserId).mockReset();
+    jest.mocked(getAccountUserId).mockResolvedValue('device-chat-test');
   });
 
   test('uses the device-scoped server repository instead of the local mock provider', async () => {
@@ -591,7 +591,7 @@ describe('PET-001 Store/server integration', () => {
 
   test('clears the prior device conversation before restoring another identity', async () => {
     let activeDevice = 'device-A';
-    jest.mocked(ensureDeviceIdentity).mockImplementation(async () => activeDevice);
+    jest.mocked(getAccountUserId).mockImplementation(async () => activeDevice);
     const repository = createRepository({
       listConversations: jest.fn(async () => ({
         items: [{ id: `conversation-${activeDevice}`, updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 }],
@@ -615,7 +615,7 @@ describe('PET-001 Store/server integration', () => {
   test('discards a conversation response if the device identity changes in flight', async () => {
     let activeDevice = 'device-A';
     let finishGet!: (conversation: PetChatConversation) => void;
-    jest.mocked(ensureDeviceIdentity).mockImplementation(async () => activeDevice);
+    jest.mocked(getAccountUserId).mockImplementation(async () => activeDevice);
     const repository = createRepository({
       listConversations: jest.fn(async () => ({
         items: [{ id: 'conversation-A', updatedAt: '2026-10-27T10:00:00.000Z', messageCount: 2 }],

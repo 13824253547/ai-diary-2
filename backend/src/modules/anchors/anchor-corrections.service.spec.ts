@@ -8,7 +8,7 @@ import {
 function createHarness() {
   const diary = {
     id: 'diary-1',
-    ownerDeviceId: 'device-1',
+    ownerUserId: 'device-1',
     version: 3,
     contentSnapshot: {
       blocks: [
@@ -20,7 +20,7 @@ function createHarness() {
   const corrections = new Map<string, Record<string, any>>();
   const commands = new Map<string, Record<string, any>>();
   const anchors = [{
-    ownerDeviceId: 'device-1',
+    ownerUserId: 'device-1',
     diaryId: 'diary-1',
     diaryVersion: 3,
     anchorId: 'anchor-1',
@@ -33,23 +33,23 @@ function createHarness() {
     if (where.id) {
       return [...corrections.values()].find(record => record.id === where.id) ?? null;
     }
-    const key = where.ownerDeviceId_diaryId_anchorId_sourceDiaryVersion;
+    const key = where.ownerUserId_diaryId_anchorId_sourceDiaryVersion;
     return corrections.get([
-      key.ownerDeviceId,
+      key.ownerUserId,
       key.diaryId,
       key.anchorId,
       key.sourceDiaryVersion,
     ].join(':')) ?? null;
   };
   const correctionKey = (record: Record<string, any>) => [
-    record.ownerDeviceId,
+    record.ownerUserId,
     record.diaryId,
     record.anchorId,
     record.sourceDiaryVersion,
   ].join(':');
   const findCommand = (where: Record<string, any>) => {
-    const key = where.ownerDeviceId_idempotencyKey;
-    return commands.get(`${key.ownerDeviceId}:${key.idempotencyKey}`) ?? null;
+    const key = where.ownerUserId_idempotencyKey;
+    return commands.get(`${key.ownerUserId}:${key.idempotencyKey}`) ?? null;
   };
 
   const transaction = {
@@ -60,7 +60,7 @@ function createHarness() {
     diaryAnchor: {
       findFirst: jest.fn(async ({ where }: { where: Record<string, any> }) =>
         anchors.find(anchor =>
-          anchor.ownerDeviceId === where.ownerDeviceId
+          anchor.ownerUserId === where.ownerUserId
           && anchor.diaryId === where.diaryId
           && anchor.diaryVersion === where.diaryVersion
           && anchor.anchorId === where.anchorId
@@ -102,7 +102,7 @@ function createHarness() {
       findUnique: jest.fn(async ({ where }: { where: Record<string, any> }) => findCommand(where)),
       create: jest.fn(async ({ data }: { data: Record<string, any> }) => {
         const command = { id: `command-${nextId++}`, ...data };
-        commands.set(`${data.ownerDeviceId}:${data.idempotencyKey}`, command);
+        commands.set(`${data.ownerUserId}:${data.idempotencyKey}`, command);
         return command;
       }),
     },

@@ -1,12 +1,10 @@
 import { Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { appConfig } from '../config/app-config';
-import { ensureDeviceIdentity } from './device-identity';
+import { getAccountUserId } from './account-auth';
 
 export type AIConsentPurpose = 'diary' | 'chat' | 'image' | 'insights' | 'postcard';
-export const AI_CONSENT_VERSION = '2026-10-29-v4';
-const PREVIOUS_AI_CONSENT_VERSION = '2026-10-29-v3';
-const PREVIOUS_AI_CONSENT_PURPOSES: AIConsentPurpose[] = ['diary', 'chat', 'image', 'insights'];
+export const AI_CONSENT_VERSION = '2026-11-09-account-v5';
 
 export const AI_CONSENT_NOTICES: Record<AIConsentPurpose, { title: string; message: string }> = {
   diary: {
@@ -23,7 +21,7 @@ export const AI_CONSENT_NOTICES: Record<AIConsentPurpose, { title: string; messa
   },
   insights: {
     title: '全库日记分析授权',
-    message: 'AI会分析本设备已保存的日记正文，用于成长记录和个人洞察。新保存或修改的日记也会用于后续分析。是否同意？',
+    message: 'AI会分析当前账号已保存的日记正文，用于成长记录和个人洞察。新保存或修改的日记也会用于后续分析。是否同意？',
   },
   postcard: {
     title: '明信片寄语授权',
@@ -32,31 +30,27 @@ export const AI_CONSENT_NOTICES: Record<AIConsentPurpose, { title: string; messa
 };
 
 type ConsentRecord = {
-  deviceId: string;
+  userId: string;
   service: string;
   version: string;
   grants: Partial<Record<AIConsentPurpose, string>>;
 };
 
 type ConsentDependencies = {
-  getDeviceId: () => Promise<string>;
+  getUserId: () => Promise<string>;
   service: string;
-  read: (deviceId: string) => Promise<unknown>;
-  write: (deviceId: string, record: ConsentRecord) => Promise<void>;
+  read: (userId: string) => Promise<unknown>;
+  write: (userId: string, record: ConsentRecord) => Promise<void>;
   prompt: (purpose: AIConsentPurpose, signal?: AbortSignal) => Promise<boolean>;
   now?: () => string;
   onError?: () => void;
 };
 
-function readGrants(value: unknown, deviceId: string, service: string): ConsentRecord['grants'] {
+function readGrants(value: unknown, userId: string, service: string): ConsentRecord['grants'] {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const record = value as Partial<ConsentRecord>;
-  const allowedPurposes = record.version === AI_CONSENT_VERSION
-    ? Object.keys(AI_CONSENT_NOTICES)
-    : record.version === PREVIOUS_AI_CONSENT_VERSION
-      ? PREVIOUS_AI_CONSENT_PURPOSES
-      : [];
-  if (record.deviceId !== deviceId || record.service !== service || !allowedPurposes.length
+  const allowedPurposes = record.version === AI_CONSENT_VERSION ? Object.keys(AI_CONSENT_NOTICES) : [];
+  if (record.userId !== userId || record.service !== service || !allowedPurposes.length
     || !record.grants || typeof record.grants !== 'object' || Array.isArray(record.grants)) return {};
   return Object.fromEntries(Object.entries(record.grants).filter(([purpose, time]) =>
     allowedPurposes.includes(purpose as AIConsentPurpose)
@@ -71,16 +65,16 @@ export function createAIConsentService(deps: ConsentDependencies) {
     request(purpose: AIConsentPurpose, signal?: AbortSignal): Promise<boolean> {
       const operation = queue.then(async () => {
         if (signal?.aborted) return false;
-        const deviceId = await deps.getDeviceId();
-        const grants = readGrants(await deps.read(deviceId), deviceId, deps.service);
+        const userId = await deps.getUserId();
+        const grants = readGrants(await deps.read(userId), userId, deps.service);
         if (signal?.aborted) return false;
         if (!grants[purpose]) {
           if (!(await deps.prompt(purpose, signal)) || signal?.aborted) return false;
-          if (await deps.getDeviceId() !== deviceId || signal?.aborted) return false;
+          if (await deps.getUserId() !== userId || signal?.aborted) return false;
           grants[purpose] = (deps.now ?? (() => new Date().toISOString()))();
-          await deps.write(deviceId, { deviceId, service: deps.service, version: AI_CONSENT_VERSION, grants });
+          await deps.write(userId, { userId, service: deps.service, version: AI_CONSENT_VERSION, grants });
         }
-        return !signal?.aborted && await deps.getDeviceId() === deviceId;
+        return !signal?.aborted && await deps.getUserId() === userId;
       }).catch(() => {
         deps.onError?.();
         return false;
@@ -91,9 +85,9 @@ export function createAIConsentService(deps: ConsentDependencies) {
   };
 }
 
-function fileUri(deviceId: string) {
+function fileUri(userId: string) {
   if (!FileSystem.documentDirectory) throw new Error('Consent storage unavailable.');
-  return `${FileSystem.documentDirectory}ai-consent-${encodeURIComponent(deviceId)}.json`;
+  return `${FileSystem.documentDirectory}ai-consent-user-${encodeURIComponent(userId)}.json`;
 }
 
 function promptForConsent(purpose: AIConsentPurpose, signal?: AbortSignal) {
@@ -117,17 +111,17 @@ function promptForConsent(purpose: AIConsentPurpose, signal?: AbortSignal) {
 }
 
 const service = createAIConsentService({
-  getDeviceId: ensureDeviceIdentity,
+  getUserId: getAccountUserId,
   service: appConfig.backendBaseUrl,
-  read: async deviceId => {
-    const uri = fileUri(deviceId);
+  read: async userId => {
+    const uri = fileUri(userId);
     const info = await FileSystem.getInfoAsync(uri);
     if (!info.exists) return undefined;
     try { return JSON.parse(await FileSystem.readAsStringAsync(uri)); }
     catch { return undefined; }
   },
-  write: async (deviceId, record) => {
-    await FileSystem.writeAsStringAsync(fileUri(deviceId), JSON.stringify(record));
+  write: async (userId, record) => {
+    await FileSystem.writeAsStringAsync(fileUri(userId), JSON.stringify(record));
   },
   prompt: promptForConsent,
   onError: () => Alert.alert('授权状态暂不可用', '未提交本次AI处理。请稍后重试授权。'),

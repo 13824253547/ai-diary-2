@@ -26,9 +26,8 @@ jest.mock('../../src/store/adapters/backend-discovery-adapter', () => ({
   }),
 }));
 
-jest.mock('../../src/services/device-identity', () => ({
-  getDeviceIdentityHeaders: jest.fn(async () => ({
-    'x-device-id': 'device-discovery-test',
+jest.mock('../../src/services/account-auth', () => ({
+  getAccountAuthHeaders: jest.fn(async () => ({
     Authorization: 'Bearer discovery-test-token',
   })),
 }));
@@ -192,14 +191,12 @@ describe('Discovery story detail layout', () => {
       expect(screen.getByLabelText('故事封面').props.source).toMatchObject({
         uri: expect.stringContaining('/photos/discovery/story-1/photo-content?photoId=photo-1'),
         headers: expect.objectContaining({
-          'x-device-id': 'device-discovery-test',
           Authorization: 'Bearer discovery-test-token',
         }),
       });
       expect(screen.getByLabelText('路口的灯光').props.source).toMatchObject({
         uri: expect.stringContaining('/photos/discovery/story-1/photo-content?photoId=photo-2'),
         headers: expect.objectContaining({
-          'x-device-id': 'device-discovery-test',
           Authorization: 'Bearer discovery-test-token',
         }),
       });

@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { configureApiBodyParser } from '../src/common/api-body-parser';
@@ -10,15 +11,34 @@ import { ChatDailyAnchorService } from '../src/modules/anchors/chat-daily-anchor
 import { ArkMemoryAnchorProvider, MemoryAnchorProviderError } from '../src/modules/anchors/ark-memory-anchor-provider';
 import { ArkGrowthInsightProvider, GrowthInsightProviderError } from '../src/modules/growth/ark-growth-insight-provider';
 import { GrowthInsightsService } from '../src/modules/growth/growth-insights.service';
+import { signAccountToken } from '../src/modules/auth/account-token';
+import { EmailVerificationMailer } from '../src/modules/auth/email-verification-mailer';
 
 describe('Backend foundation (e2e)', () => {
   let app: INestApplication;
   let store: MemoryStoreService;
   let prisma: PrismaService;
-  const deviceA = 'device-a';
-  const deviceB = 'device-b';
+  const accountA = 'user-e2e-a';
+  const accountB = 'user-e2e-b';
   const originalEnv = { ...process.env };
   const originalFetch = global.fetch;
+  const originalAuthSecret = process.env.ACCOUNT_AUTH_JWT_SECRET;
+  const testAuthSecret = 'e2e-account-auth-secret-with-at-least-32-bytes';
+  const sentEmailCodes: Array<{ email: string; code: string; purpose: string }> = [];
+
+  function sessionIdFor(userId: string) {
+    return userId === accountA ? 'session-e2e-a' : 'session-e2e-b';
+  }
+
+  function accountAuthorization(userId: string) {
+    const now = Math.floor(Date.now() / 1000);
+    return `Bearer ${signAccountToken({
+      sub: userId,
+      sid: sessionIdFor(userId),
+      iat: now,
+      exp: now + 60 * 60,
+    })}`;
+  }
 
   function createDiaryContentSnapshot(title: string, photoIds: string[]): DiaryContentSnapshotRecord {
     return {
@@ -40,11 +60,11 @@ describe('Backend foundation (e2e)', () => {
     };
   }
 
-  async function waitForGenerationCompletion(server: ReturnType<INestApplication['getHttpServer']>, jobId: string, deviceId: string) {
+  async function waitForGenerationCompletion(server: ReturnType<INestApplication['getHttpServer']>, jobId: string, userId: string) {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const response = await request(server)
         .get(`/api/generation/jobs/${jobId}`)
-        .set('x-device-id', deviceId)
+        .set('Authorization', accountAuthorization(userId))
         .expect(200);
       if (response.body.data.status === 'succeeded') {
         return response;
@@ -59,15 +79,15 @@ describe('Backend foundation (e2e)', () => {
 
   async function postGenerationJob(
     input: { draftId: string; draftVersion: number; idempotencyKey: string },
-    deviceId: string,
+    userId: string,
     server: ReturnType<INestApplication['getHttpServer']> = app.getHttpServer(),
     expectedStatus = 201,
   ) {
-    const draft = await store.getDraft(input.draftId, deviceId);
+    const draft = await store.getDraft(input.draftId, userId);
     const selectedPhotoIds = draft?.selectedPhotoIds ?? [];
     let upload = request(server)
       .post('/api/generation/jobs')
-      .set('x-device-id', deviceId)
+      .set('Authorization', accountAuthorization(userId))
       .field('draftId', input.draftId)
       .field('draftVersion', String(input.draftVersion))
       .field('idempotencyKey', input.idempotencyKey)
@@ -85,26 +105,62 @@ describe('Backend foundation (e2e)', () => {
   }
 
   beforeAll(async () => {
+    process.env.ACCOUNT_AUTH_JWT_SECRET = testAuthSecret;
+    const emailMailer = {
+      sendCode: jest.fn(async (email: string, code: string, purpose: string) => {
+        sentEmailCodes.push({ email, code, purpose });
+      }),
+    };
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    }).overrideProvider(EmailVerificationMailer).useValue(emailMailer).compile();
 
     app = moduleRef.createNestApplication({ bodyParser: false });
     configureApiBodyParser(app);
     store = moduleRef.get(MemoryStoreService);
     prisma = moduleRef.get(PrismaService);
+    for (const [id, username] of [[accountA, 'e2e_user_a'], [accountB, 'e2e_user_b']] as const) {
+      await prisma.userAccount.upsert({
+        where: { id },
+        create: {
+          id,
+          username,
+          email: `${id}@example.test`,
+          emailVerifiedAt: new Date(),
+          passwordHash: 'test-only-hash',
+        },
+        update: { email: `${id}@example.test`, emailVerifiedAt: new Date() },
+      });
+      await prisma.accountSession.upsert({
+        where: { userId: id },
+        create: {
+          id: sessionIdFor(id),
+          userId: id,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+        update: {
+          id: sessionIdFor(id),
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          revokedAt: null,
+        },
+      });
+    }
     app.setGlobalPrefix('api');
     await app.init();
   });
 
   beforeEach(async () => {
     process.env = { ...originalEnv };
+    process.env.ACCOUNT_AUTH_JWT_SECRET = testAuthSecret;
     global.fetch = originalFetch;
+    sentEmailCodes.length = 0;
     await store.reset();
   });
 
   afterAll(async () => {
     process.env = { ...originalEnv };
+    if (originalAuthSecret === undefined) delete process.env.ACCOUNT_AUTH_JWT_SECRET;
+    else process.env.ACCOUNT_AUTH_JWT_SECRET = originalAuthSecret;
     global.fetch = originalFetch;
     await app.close();
   });
@@ -112,29 +168,130 @@ describe('Backend foundation (e2e)', () => {
   it('GET /api/health', async () => {
     await request(app.getHttpServer())
       .get('/api/health')
-      .set('x-device-id', 'device-health')
       .expect(200)
       .expect(({ body }) => {
         expect(body.ok).toBe(true);
       });
   });
 
-  it('requires device identity for health requests', async () => {
-    const response = await request(app.getHttpServer())
-      .get('/api/health')
-      .expect(400);
-    expect(response.body.error.code).toBe('device_identity_required');
+  it('registers, replaces the prior session on login, logs out and deletes the account', async () => {
+    const username = `e2e_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    const email = `${username}@example.test`;
+    const password = 'e2e-account-password-2026';
+    const issueCaptcha = async (purpose: 'register' | 'login') => {
+      const issued = await request(app.getHttpServer())
+        .post('/api/auth/captcha')
+        .send({ purpose })
+        .expect(201);
+      const challengeId = issued.body.data.challengeId as string;
+      const challenge = await prisma.captchaChallenge.findUnique({
+        where: { id: challengeId },
+        select: { targetX: true },
+      });
+      if (!challenge) throw new Error('captcha challenge was not persisted');
+      return { challengeId, x: challenge.targetX };
+    };
+
+    const emailChallenge = await request(app.getHttpServer())
+      .post('/api/auth/register/email-code')
+      .send({ email, captcha: await issueCaptcha('register') })
+      .expect(201);
+    expect(emailChallenge.body.data).not.toHaveProperty('code');
+    const registrationCode = sentEmailCodes.at(-1);
+    expect(registrationCode).toMatchObject({ email, purpose: 'register' });
+
+    const registration = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        username,
+        email,
+        password,
+        emailChallengeId: emailChallenge.body.data.challengeId,
+        emailCode: registrationCode?.code,
+      })
+      .expect(201);
+    const firstToken = registration.body.data.accessToken as string;
+    const userId = registration.body.data.user.id as string;
+    expect(registration.body.data.user.username).toBe(username);
+    expect(await prisma.userAccount.findUnique({
+      where: { id: userId },
+      select: { email: true, emailVerifiedAt: true },
+    })).toMatchObject({ email, emailVerifiedAt: expect.any(Date) });
+
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ username, password, captcha: await issueCaptcha('login') })
+      .expect(201);
+    const secondToken = login.body.data.accessToken as string;
+    expect(secondToken).not.toBe(firstToken);
+    await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${firstToken}`)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${secondToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${secondToken}`)
+      .expect(201);
+    await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${secondToken}`)
+      .expect(401);
+
+    const deletionLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ username, password, captcha: await issueCaptcha('login') })
+      .expect(201);
+    const deletionToken = deletionLogin.body.data.accessToken as string;
+    const deletionChallenge = await request(app.getHttpServer())
+      .post('/api/auth/account/deletion-code')
+      .set('Authorization', `Bearer ${deletionToken}`)
+      .send({ password })
+      .expect(201);
+    const deletionCode = sentEmailCodes.at(-1);
+    expect(deletionCode).toMatchObject({ email, purpose: 'delete' });
+    await request(app.getHttpServer())
+      .delete('/api/auth/account')
+      .set('Authorization', `Bearer ${deletionToken}`)
+      .send({
+        password,
+        emailChallengeId: deletionChallenge.body.data.challengeId,
+        emailCode: deletionCode?.code,
+      })
+      .expect(200);
+
+    expect(await prisma.userAccount.findUnique({ where: { id: userId } })).toBeNull();
+    expect(await prisma.accountDeletionJob.findUnique({ where: { ownerUserId: userId } })).toBeNull();
+    await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${deletionToken}`)
+      .expect(401);
   });
 
-  it('requires device identity and initializes the flower baseline idempotently', async () => {
-    const missingIdentity = await request(app.getHttpServer())
+  it('keeps health public while requiring account sessions for private APIs', async () => {
+    const health = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
+    expect(health.body.ok).toBe(true);
+    const privateResponse = await request(app.getHttpServer())
       .get('/api/growth/state')
-      .expect(400);
-    expect(missingIdentity.body.error.code).toBe('device_identity_required');
+      .expect(401);
+    expect(privateResponse.body.error.code).toBe('account_session_invalid');
+  });
+
+  it('requires an account session and initializes the flower baseline idempotently', async () => {
+    const missingSession = await request(app.getHttpServer())
+      .get('/api/growth/state')
+      .expect(401);
+    expect(missingSession.body.error.code).toBe('account_session_invalid');
 
     await request(app.getHttpServer())
       .post('/api/growth/flowers/initialize')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(201)
       .expect(({ body }) => {
         expect(body.data.flowerAnalysis).toMatchObject({
@@ -147,13 +304,13 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/growth/flowers/initialize')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(201);
-    expect(await prisma.growthRecognitionRun.count({ where: { ownerDeviceId: deviceA } })).toBe(1);
+    expect(await prisma.growthRecognitionRun.count({ where: { ownerUserId: accountA } })).toBe(1);
 
     await request(app.getHttpServer())
       .get('/api/growth/state')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.flowers.every((flower: { status: string }) => flower.status === 'locked')).toBe(true);
@@ -164,7 +321,7 @@ describe('Backend foundation (e2e)', () => {
   it('marks in-flight growth requests interrupted on restart without resubmitting them', async () => {
     const run = await prisma.growthRecognitionRun.create({
       data: {
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         runKey: 'restart-inflight-recognition',
         kind: 'baseline',
         sourceVersion: 'restart-source-version',
@@ -177,7 +334,7 @@ describe('Backend foundation (e2e)', () => {
     });
     const job = await prisma.growthReportJob.create({
       data: {
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         requestId: 'restart-inflight-report',
         sourceVersion: 'restart-report-version',
         sourceDiaryRefs: [],
@@ -238,7 +395,7 @@ describe('Backend foundation (e2e)', () => {
       photoIds,
       contentSnapshot: createDiaryContentSnapshot('本地日期日记', photoIds),
       version: 1,
-    }, deviceA);
+    }, accountA);
 
     const created = await prisma.diary.findUnique({ where: { id: initial.diaryId } });
     expect(created?.publishedLocalDate).toBe('2026-10-20');
@@ -258,7 +415,7 @@ describe('Backend foundation (e2e)', () => {
       photoIds,
       contentSnapshot: createDiaryContentSnapshot('本地日期日记（已编辑）', photoIds),
       version: 2,
-    }, deviceA);
+    }, accountA);
 
     const edited = await prisma.diary.findUnique({ where: { id: initial.diaryId } });
     expect(edited?.version).toBe(2);
@@ -269,7 +426,7 @@ describe('Backend foundation (e2e)', () => {
     await prisma.diary.create({
       data: {
         id: 'growth-diary-1',
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         draftId: 'growth-draft-1',
         title: '海边散步',
         summary: '和朋友一起看海。',
@@ -294,7 +451,7 @@ describe('Backend foundation (e2e)', () => {
     for (const flowerKey of ['pathfinder', 'self-awareness', 'healing']) {
       await prisma.growthFlower.create({
         data: {
-          ownerDeviceId: deviceA,
+          ownerUserId: accountA,
           flowerKey,
           summary: '有日记来源支持的短说明。',
           sourceDiaryIds: ['growth-diary-1'],
@@ -306,24 +463,24 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/growth/reports/ensure-current')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(403)
       .expect(({ body }) => {
         expect(body.error.code).toBe('not_unlocked');
       });
     await prisma.growthInsightReport.create({
       data: {
-        ownerDeviceId: deviceB,
+        ownerUserId: accountB,
         sourceVersion: 'locked-fixture',
-        sourceDiaryIds: ['device-a-private-diary'],
-        sourceDiaryVersions: [{ id: 'device-a-private-diary', version: 1 }],
+        sourceDiaryIds: ['account-a-private-diary'],
+        sourceDiaryVersions: [{ id: 'account-a-private-diary', version: 1 }],
         sourceDiaryCount: 1,
         dimensions: [],
       },
     });
     await request(app.getHttpServer())
       .get('/api/growth/reports/current')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.report.unlocked).toBe(false);
@@ -332,17 +489,17 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/growth/reports/ensure-current')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(403)
       .expect(({ body }) => {
         expect(body.error.code).toBe('not_unlocked');
       });
-    expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceA } })).toBe(0);
+    expect(await prisma.growthReportJob.count({ where: { ownerUserId: accountA } })).toBe(0);
 
     for (const milestoneId of ['first-trip', 'streak-30', 'anchors-100']) {
       await prisma.growthMilestone.create({
         data: {
-          ownerDeviceId: deviceA,
+          ownerUserId: accountA,
           milestoneId,
           sourceDiaryIds: milestoneId === 'first-trip' ? ['growth-diary-1'] : [],
         },
@@ -351,7 +508,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/growth/reports/ensure-current')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(201)
       .expect(({ body }) => {
         expect(body.data.report).toMatchObject({
@@ -363,8 +520,8 @@ describe('Backend foundation (e2e)', () => {
           .toEqual(['bloomed', 'bloomed', 'bloomed']);
       });
 
-    expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceA } })).toBe(1);
-    expect(await prisma.growthReportJob.count({ where: { ownerDeviceId: deviceB } })).toBe(0);
+    expect(await prisma.growthReportJob.count({ where: { ownerUserId: accountA } })).toBe(1);
+    expect(await prisma.growthReportJob.count({ where: { ownerUserId: accountB } })).toBe(0);
   });
 
   it('awards milestone flowers once and retains them when live progress later drops', async () => {
@@ -374,7 +531,7 @@ describe('Backend foundation (e2e)', () => {
         const publishedLocalDate = date.toISOString().slice(0, 10);
         return {
           id: `streak-diary-${index + 1}`,
-          ownerDeviceId: deviceA,
+          ownerUserId: accountA,
           draftId: `streak-draft-${index + 1}`,
           title: `连续记录 ${index + 1}`,
           summary: '成长记录测试日记。',
@@ -395,7 +552,7 @@ describe('Backend foundation (e2e)', () => {
       .mockResolvedValueOnce(100)
       .mockResolvedValueOnce(9);
     try {
-      const reached = await growth.getState(deviceA);
+      const reached = await growth.getState(accountA);
       expect(reached.milestones).toMatchObject({
         streak30: { currentDays: 30, achieved: true },
         anchors100: { count: 100, achieved: true },
@@ -405,10 +562,10 @@ describe('Backend foundation (e2e)', () => {
       expect(reached.report.unlocked).toBe(false);
 
       await prisma.diary.updateMany({
-        where: { ownerDeviceId: deviceA, id: { startsWith: 'streak-diary-' } },
+        where: { ownerUserId: accountA, id: { startsWith: 'streak-diary-' } },
         data: { publishedLocalDate: '2026-03-12' },
       });
-      const afterProgressDrop = await growth.getState(deviceA);
+      const afterProgressDrop = await growth.getState(accountA);
       expect(afterProgressDrop.milestones).toMatchObject({
         streak30: { currentDays: 1, achieved: true },
         anchors100: { count: 9, achieved: true },
@@ -416,7 +573,7 @@ describe('Backend foundation (e2e)', () => {
       expect(afterProgressDrop.flowers.map(flower => flower.status))
         .toEqual(['locked', 'bloomed', 'bloomed']);
       expect(await prisma.growthMilestone.count({
-        where: { ownerDeviceId: deviceA, milestoneId: { in: ['streak-30', 'anchors-100'] } },
+        where: { ownerUserId: accountA, milestoneId: { in: ['streak-30', 'anchors-100'] } },
       })).toBe(2);
     } finally {
       countFeed.mockRestore();
@@ -427,7 +584,7 @@ describe('Backend foundation (e2e)', () => {
     await prisma.diary.create({
       data: {
         id: 'growth-diary-source',
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         draftId: 'growth-draft-source',
         title: '同行海边',
         summary: '和朋友去看海。',
@@ -470,46 +627,46 @@ describe('Backend foundation (e2e)', () => {
     ]);
     const growth = app.get(GrowthInsightsService);
 
-    await growth.initializeFlowers(deviceA);
+    await growth.initializeFlowers(accountA);
     const run = await prisma.growthRecognitionRun.findUnique({
-      where: { ownerDeviceId_runKey: { ownerDeviceId: deviceA, runKey: 'baseline-v1' } },
+      where: { ownerUserId_runKey: { ownerUserId: accountA, runKey: 'baseline-v1' } },
     });
     expect(run).toBeTruthy();
     await (growth as unknown as {
-      processRecognitionRun: (runId: string, ownerDeviceId: string) => Promise<void>;
-    }).processRecognitionRun(run!.id, deviceA);
+      processRecognitionRun: (runId: string, ownerUserId: string) => Promise<void>;
+    }).processRecognitionRun(run!.id, accountA);
 
-    const flowerState = await growth.getState(deviceA);
+    const flowerState = await growth.getState(accountA);
     expect(flowerState.flowers.filter(flower => flower.status === 'bloomed')).toHaveLength(1);
     expect(flowerState.flowers.map(flower => flower.status)).toEqual(['bloomed', 'locked', 'locked']);
     expect(flowerState.milestones.firstTrip).toMatchObject({
       achieved: true,
       sourceDiaryIds: ['growth-diary-source'],
     });
-    await expect(growth.ensureCurrentReport(deviceA)).rejects.toMatchObject({ code: 'not_unlocked' });
+    await expect(growth.ensureCurrentReport(accountA)).rejects.toMatchObject({ code: 'not_unlocked' });
     for (const milestoneId of ['streak-30', 'anchors-100']) {
       await prisma.growthMilestone.create({
-        data: { ownerDeviceId: deviceA, milestoneId, sourceDiaryIds: [] },
+        data: { ownerUserId: accountA, milestoneId, sourceDiaryIds: [] },
       });
     }
-    expect((await growth.getState(deviceA)).flowers.map(flower => flower.status))
+    expect((await growth.getState(accountA)).flowers.map(flower => flower.status))
       .toEqual(['bloomed', 'bloomed', 'bloomed']);
     expect(recognize).toHaveBeenCalledTimes(1);
 
-    await growth.ensureCurrentReport(deviceA);
-    const reportJob = await prisma.growthReportJob.findFirst({ where: { ownerDeviceId: deviceA } });
+    await growth.ensureCurrentReport(accountA);
+    const reportJob = await prisma.growthReportJob.findFirst({ where: { ownerUserId: accountA } });
     expect(reportJob).toBeTruthy();
     await (growth as unknown as {
-      processReportJob: (jobId: string, ownerDeviceId: string) => Promise<void>;
-    }).processReportJob(reportJob!.id, deviceA);
+      processReportJob: (jobId: string, ownerUserId: string) => Promise<void>;
+    }).processReportJob(reportJob!.id, accountA);
 
-    const reportState = await growth.getState(deviceA);
+    const reportState = await growth.getState(accountA);
     expect(reportState.report.status).toBe('succeeded');
     expect(reportState.report.current?.sourceDiaryIds).toEqual(['growth-diary-source']);
     expect(reportState.report.current?.dimensions).toHaveLength(3);
     expect(summarize).toHaveBeenCalledTimes(1);
     expect(synthesize).toHaveBeenCalledTimes(1);
-    expect(await prisma.growthFlower.count({ where: { ownerDeviceId: deviceA } })).toBe(3);
+    expect(await prisma.growthFlower.count({ where: { ownerUserId: accountA } })).toBe(3);
 
     const lastGoodReportId = reportState.report.current?.reportId;
     await prisma.diary.update({
@@ -529,45 +686,59 @@ describe('Backend foundation (e2e)', () => {
         },
       },
     });
-    const staleState = await growth.getState(deviceA);
+    const staleState = await growth.getState(accountA);
     expect(staleState.report).toMatchObject({ status: 'stale', stale: true });
     expect(staleState.report.current?.reportId).toBe(lastGoodReportId);
 
-    const updateState = await growth.ensureCurrentReport(deviceA);
+    const updateState = await growth.ensureCurrentReport(accountA);
     expect(updateState.report).toMatchObject({ status: 'pending', stale: true });
     expect(updateState.report.current?.reportId).toBe(lastGoodReportId);
     const updateJob = await prisma.growthReportJob.findFirst({
-      where: { ownerDeviceId: deviceA, status: 'pending' },
+      where: { ownerUserId: accountA, status: 'pending' },
       orderBy: { createdAt: 'desc' },
     });
     expect(updateJob).toBeTruthy();
     summarize.mockRejectedValueOnce(new GrowthInsightProviderError('provider_failed'));
     await (growth as unknown as {
-      processReportJob: (jobId: string, ownerDeviceId: string) => Promise<void>;
-    }).processReportJob(updateJob!.id, deviceA);
-    const failedUpdate = await growth.getState(deviceA);
+      processReportJob: (jobId: string, ownerUserId: string) => Promise<void>;
+    }).processReportJob(updateJob!.id, accountA);
+    const failedUpdate = await growth.getState(accountA);
     expect(failedUpdate.report).toMatchObject({ status: 'failed', stale: true });
     expect(failedUpdate.report.current?.reportId).toBe(lastGoodReportId);
 
-    const retried = await growth.retryCurrentReport(deviceA);
+    const retried = await growth.retryCurrentReport(accountA);
     expect(retried.report.status).toBe('pending');
     await (growth as unknown as {
-      processReportJob: (jobId: string, ownerDeviceId: string) => Promise<void>;
-    }).processReportJob(updateJob!.id, deviceA);
-    const refreshed = await growth.getState(deviceA);
+      processReportJob: (jobId: string, ownerUserId: string) => Promise<void>;
+    }).processReportJob(updateJob!.id, accountA);
+    const refreshed = await growth.getState(accountA);
     expect(refreshed.report).toMatchObject({ status: 'succeeded', stale: false });
     expect(refreshed.report.current?.reportId).not.toBe(lastGoodReportId);
-    expect(await prisma.growthInsightReport.count({ where: { ownerDeviceId: deviceA } })).toBe(1);
+    expect(await prisma.growthInsightReport.count({ where: { ownerUserId: accountA } })).toBe(1);
 
     recognize.mockRestore();
     summarize.mockRestore();
     synthesize.mockRestore();
   });
 
-  it('rejects missing device identity instead of reading the shared anonymous namespace', async () => {
+  it('ignores caller-supplied identity headers and scopes data to the verified account token', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', 'device-anonymous')
+      .set('x-user-id', accountA)
+      .send({
+        type: 'travel',
+        characterId: 'character-blue',
+        selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
+        privacy: 'private',
+        version: 1,
+      })
+      .expect(401)
+      .expect(({ body }) => expect(body.error.code).toBe('account_session_invalid'));
+
+    const created = await request(app.getHttpServer())
+      .post('/api/drafts')
+      .set('Authorization', accountAuthorization(accountA))
+      .set('x-user-id', accountB)
       .send({
         type: 'travel',
         characterId: 'character-blue',
@@ -577,24 +748,11 @@ describe('Backend foundation (e2e)', () => {
       })
       .expect(201);
 
-    const missingIdentityDrafts = await request(app.getHttpServer())
+    const accountBDrafts = await request(app.getHttpServer())
       .get('/api/drafts')
-      .expect(400);
-
-    expect(missingIdentityDrafts.body.error.code).toBe('device_identity_required');
-
-    const missingIdentityResponse = await request(app.getHttpServer())
-      .get('/api/identity/me')
-      .expect(400);
-
-    expect(missingIdentityResponse.body.error.code).toBe('device_identity_required');
-
-    const blankIdentityDrafts = await request(app.getHttpServer())
-      .get('/api/drafts')
-      .set('x-device-id', '   ')
-      .expect(400);
-
-    expect(blankIdentityDrafts.body.error.code).toBe('device_identity_required');
+      .set('Authorization', accountAuthorization(accountB))
+      .expect(200);
+    expect(accountBDrafts.body.data.some((draft: { id: string }) => draft.id === created.body.data.id)).toBe(false);
   });
 
   it('supports draft create/save/memories flow', async () => {
@@ -615,7 +773,7 @@ describe('Backend foundation (e2e)', () => {
     };
     const draft = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         type: 'travel',
         characterId: 'character-blue',
@@ -627,7 +785,7 @@ describe('Backend foundation (e2e)', () => {
 
     const saved = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.body.data.id,
         idempotencyKey: `${draft.body.data.id}-save-1`,
@@ -644,7 +802,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${saved.body.data.diaryId}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.id).toBe(saved.body.data.diaryId);
@@ -655,7 +813,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -666,7 +824,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories?month=2026-10&day=2026-10-13&keyword=厦门')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -685,7 +843,7 @@ describe('Backend foundation (e2e)', () => {
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
       contentSnapshot: createDiaryContentSnapshot('有效初始正文', ['photo-1', 'photo-2', 'photo-3']),
       version: 1,
-    }, deviceA);
+    }, accountA);
     await prisma.diary.update({
       where: { id: saved.id },
       data: { contentSnapshot: 'corrupt-snapshot-scalar' },
@@ -693,7 +851,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${saved.id}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.id).toBe(saved.id);
@@ -703,7 +861,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -715,7 +873,7 @@ describe('Backend foundation (e2e)', () => {
   it('rejects saves that omit a valid content snapshot', async () => {
     const draft = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         type: 'travel',
         characterId: 'character-blue',
@@ -727,7 +885,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.body.data.id,
         idempotencyKey: 'missing-content-snapshot',
@@ -746,7 +904,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.body.data.id,
         idempotencyKey: 'invalid-content-photo-reference',
@@ -774,7 +932,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.body.data.id,
         idempotencyKey: 'duplicate-person-ids',
@@ -800,7 +958,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(0);
@@ -811,7 +969,7 @@ describe('Backend foundation (e2e)', () => {
     const idempotencyKey = 'transaction-failure-retry';
     const draft = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         type: 'travel',
         characterId: 'character-blue',
@@ -863,14 +1021,14 @@ describe('Backend foundation (e2e)', () => {
     try {
       await request(app.getHttpServer())
         .post('/api/diaries/save')
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .send(saveInput)
         .expect(500);
       expect(failureInjected).toBe(true);
 
       await request(app.getHttpServer())
         .get('/api/memories')
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200)
         .expect(({ body }) => {
           expect(body.data.total).toBe(0);
@@ -878,12 +1036,12 @@ describe('Backend foundation (e2e)', () => {
 
       await request(app.getHttpServer())
         .get(`/api/diaries/save-results/${idempotencyKey}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(404);
 
       await request(app.getHttpServer())
         .get(`/api/drafts/${draft.body.data.id}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200)
         .expect(({ body }) => {
           expect(body.data.id).toBe(draft.body.data.id);
@@ -895,13 +1053,13 @@ describe('Backend foundation (e2e)', () => {
 
     const retry = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(saveInput)
       .expect(201);
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -913,7 +1071,7 @@ describe('Backend foundation (e2e)', () => {
   it('supports save result lookup and idempotent retry', async () => {
     const draft = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         type: 'travel',
         characterId: 'character-blue',
@@ -925,7 +1083,7 @@ describe('Backend foundation (e2e)', () => {
 
     const first = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.body.data.id,
         idempotencyKey: `${draft.body.data.id}-save-1`,
@@ -942,7 +1100,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/save-results/${draft.body.data.id}-save-1`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.diaryId).toBe(first.body.data.diaryId);
@@ -951,7 +1109,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.body.data.id,
         idempotencyKey: `${draft.body.data.id}-save-1`,
@@ -986,12 +1144,12 @@ describe('Backend foundation (e2e)', () => {
     };
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(newSave)
       .expect(201);
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ ...newSave, draftId: 'draft-idempotency-new-b' })
       .expect(409)
       .expect(({ body }) => {
@@ -1009,7 +1167,7 @@ describe('Backend foundation (e2e)', () => {
       photoIds: photos,
       contentSnapshot: createDiaryContentSnapshot('待编辑作品', photos),
       version: 1,
-    }, deviceA);
+    }, accountA);
     const editSave = {
       id: source.id,
       draftId: 'draft-idempotency-edit',
@@ -1027,12 +1185,12 @@ describe('Backend foundation (e2e)', () => {
     };
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(editSave)
       .expect(201);
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ ...editSave, sourceDiaryVersion: 2 })
       .expect(409)
       .expect(({ body }) => {
@@ -1044,7 +1202,7 @@ describe('Backend foundation (e2e)', () => {
   it('returns the original save result after the diary has a later edit', async () => {
     const draft = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         type: 'travel',
         characterId: 'character-blue',
@@ -1067,13 +1225,13 @@ describe('Backend foundation (e2e)', () => {
     };
     const first = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(originalSave)
       .expect(201);
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: first.body.data.diaryId,
         draftId: 'later-edit-draft',
@@ -1093,12 +1251,12 @@ describe('Backend foundation (e2e)', () => {
 
     const replay = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(originalSave)
       .expect(201);
     const result = await request(app.getHttpServer())
       .get(`/api/diaries/save-results/${originalSave.idempotencyKey}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
 
     expect(replay.body.data).toEqual({
@@ -1110,7 +1268,7 @@ describe('Backend foundation (e2e)', () => {
     expect(replay.body.data).toEqual(result.body.data);
     await request(app.getHttpServer())
       .get(`/api/diaries/${first.body.data.diaryId}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.title).toBe('后续编辑');
@@ -1128,11 +1286,11 @@ describe('Backend foundation (e2e)', () => {
       privacy: 'private',
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
       version: 2,
-    }, deviceA);
+    }, accountA);
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: original.id,
         draftId: 'draft-edit-1',
@@ -1164,11 +1322,11 @@ describe('Backend foundation (e2e)', () => {
       privacy: 'private',
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
       version: 1,
-    }, deviceA);
+    }, accountA);
 
     const save = (suffix: string) => request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: original.id,
         draftId: `draft-concurrent-${suffix}`,
@@ -1191,7 +1349,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${original.id}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.version).toBe(2);
@@ -1210,7 +1368,7 @@ describe('Backend foundation (e2e)', () => {
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
       contentSnapshot: createDiaryContentSnapshot('幂等并发编辑后', ['photo-1', 'photo-2', 'photo-3']),
       version: 1,
-    }, deviceA);
+    }, accountA);
     const body = {
       id: original.id,
       draftId: 'draft-concurrent-idempotent',
@@ -1228,7 +1386,7 @@ describe('Backend foundation (e2e)', () => {
     };
     const submit = () => request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(body);
 
     const responses = await Promise.all([submit(), submit()]);
@@ -1240,7 +1398,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${original.id}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body: responseBody }) => {
         expect(responseBody.data.version).toBe(2);
@@ -1258,7 +1416,7 @@ describe('Backend foundation (e2e)', () => {
       privacy: 'private',
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
       version: 1,
-    }, deviceA);
+    }, accountA);
     const contentSnapshot = {
       type: 'travel',
       subtitle: '修改后的副标题',
@@ -1275,7 +1433,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: original.id,
         draftId: 'draft-edit-2',
@@ -1299,7 +1457,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${original.id}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.version).toBe(2);
@@ -1308,7 +1466,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories?keyword=编辑后标题')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -1322,7 +1480,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -1341,7 +1499,7 @@ describe('Backend foundation (e2e)', () => {
       photoIds: ['photo-1', 'photo-2', 'photo-3'],
       contentSnapshot: createDiaryContentSnapshot('原有段落', ['photo-1', 'photo-2', 'photo-3']),
       version: 1,
-    }, deviceA);
+    }, accountA);
     const other = await store.saveDiary({
       draftId: 'draft-material-other',
       title: '另一篇日记',
@@ -1352,7 +1510,7 @@ describe('Backend foundation (e2e)', () => {
       photoIds: ['photo-5', 'photo-6', 'photo-7'],
       contentSnapshot: createDiaryContentSnapshot('保持原样', ['photo-5', 'photo-6', 'photo-7']),
       version: 1,
-    }, deviceA);
+    }, accountA);
     const contentSnapshot: DiaryContentSnapshotRecord = {
       type: 'travel',
       subtitle: '素材追加后的副标题',
@@ -1373,7 +1531,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: source.id,
         draftId: 'draft-material-edit',
@@ -1397,7 +1555,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${source.id}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.id).toBe(source.id);
@@ -1408,7 +1566,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${other.id}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.id).toBe(other.id);
@@ -1419,7 +1577,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(2);
@@ -1452,7 +1610,7 @@ describe('Backend foundation (e2e)', () => {
         people: [],
       },
       version: 1,
-    }, deviceA);
+    }, accountA);
 
     const otherDiary = await store.saveDiary({
       draftId: 'draft-share-2',
@@ -1463,7 +1621,7 @@ describe('Backend foundation (e2e)', () => {
       privacy: 'private',
       photoIds: ['photo-4', 'photo-5', 'photo-6'],
       version: 1,
-    }, deviceA);
+    }, accountA);
 
     const visibilityCases = [
       { privacy: 'private', publicBlockIds: undefined },
@@ -1475,7 +1633,7 @@ describe('Backend foundation (e2e)', () => {
     for (const visibilityCase of visibilityCases) {
       await request(app.getHttpServer())
         .post('/api/sharing/project')
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .send({
           diaryId: diary.id,
           privacy: visibilityCase.privacy,
@@ -1490,7 +1648,7 @@ describe('Backend foundation (e2e)', () => {
 
       await request(app.getHttpServer())
         .get(`/api/diaries/${diary.id}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200)
         .expect(({ body }) => {
           expect(body.data.privacy).toBe(visibilityCase.privacy);
@@ -1499,7 +1657,7 @@ describe('Backend foundation (e2e)', () => {
 
       await request(app.getHttpServer())
         .get(`/api/diaries/${otherDiary.id}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200)
         .expect(({ body }) => {
           expect(body.data.id).toBe(otherDiary.id);
@@ -1519,7 +1677,7 @@ describe('Backend foundation (e2e)', () => {
     for (const invalidVisibility of invalidVisibilityCases) {
       await request(app.getHttpServer())
         .post('/api/sharing/project')
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .send({ diaryId: diary.id, ...invalidVisibility })
         .expect(400)
         .expect(({ body }) => {
@@ -1529,7 +1687,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/sharing/project')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .send({
         diaryId: diary.id,
         privacy: 'private',
@@ -1541,7 +1699,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${diary.id}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.privacy).toBe('public-comments');
@@ -1550,7 +1708,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${diary.id}`)
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(403)
       .expect(({ body }) => {
         expect(body.error.code).toBe('permission_denied');
@@ -1560,7 +1718,7 @@ describe('Backend foundation (e2e)', () => {
   it('rejects unavailable and unknown diary types for new draft creation', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-work-creation',
         type: 'work',
@@ -1577,7 +1735,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-unknown-creation',
         type: 'unknown',
@@ -1596,7 +1754,7 @@ describe('Backend foundation (e2e)', () => {
   it('rejects unavailable and unknown characters for new draft creation', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-hidden-character',
         type: 'travel',
@@ -1613,7 +1771,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-unknown-character',
         type: 'travel',
@@ -1629,7 +1787,7 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
-  it('rejects malformed draft fields before persistence and checks identity first', async () => {
+  it('rejects malformed draft fields before persistence and checks the account session first', async () => {
     const validDraft = {
       type: 'travel',
       characterId: 'character-blue',
@@ -1648,7 +1806,7 @@ describe('Backend foundation (e2e)', () => {
     for (const body of malformedBodies) {
       await request(app.getHttpServer())
         .post('/api/drafts')
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .set('Content-Type', 'application/json')
         .send(JSON.stringify(body))
         .expect(400)
@@ -1663,12 +1821,12 @@ describe('Backend foundation (e2e)', () => {
       .send('null')
       .expect(400)
       .expect(({ body }) => {
-        expect(body.error.code).toBe('device_identity_required');
+        expect(body.error.code).toBe('account_session_invalid');
       });
 
     await request(app.getHttpServer())
       .get('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data).toEqual([]);
@@ -1678,7 +1836,7 @@ describe('Backend foundation (e2e)', () => {
   it('preserves an existing travel draft when an invalid type overwrite is submitted', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-type-guard',
         type: 'travel',
@@ -1691,7 +1849,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-type-guard',
         type: 'emotion',
@@ -1708,7 +1866,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/drafts/draft-type-guard')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.type).toBe('travel');
@@ -1720,7 +1878,7 @@ describe('Backend foundation (e2e)', () => {
   it('preserves an existing travel draft when an unavailable character overwrite is submitted', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-character-guard',
         type: 'travel',
@@ -1733,7 +1891,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-character-guard',
         type: 'travel',
@@ -1750,7 +1908,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/drafts/draft-character-guard')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.characterId).toBe('character-blue');
@@ -1761,7 +1919,7 @@ describe('Backend foundation (e2e)', () => {
   it('allows legacy diary types when syncing an edit draft with source diary id', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-legacy-emotion',
         sourceDiaryId: 'diary-legacy-emotion',
@@ -1781,7 +1939,7 @@ describe('Backend foundation (e2e)', () => {
   it('allows legacy hidden characters when syncing an edit draft with source diary id', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-legacy-character',
         sourceDiaryId: 'diary-legacy-character',
@@ -1801,7 +1959,7 @@ describe('Backend foundation (e2e)', () => {
   it('reuses the same travel draft when the same draft id is submitted twice', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-travel-reuse',
         type: 'travel',
@@ -1814,7 +1972,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-travel-reuse',
         type: 'travel',
@@ -1833,7 +1991,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data).toHaveLength(1);
@@ -1849,10 +2007,10 @@ describe('Backend foundation (e2e)', () => {
       selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
       privacy: 'private',
       version: 1,
-    }, deviceA);
+    }, accountA);
     const saved = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.id,
         idempotencyKey: 'discovery-publish-save',
@@ -1883,13 +2041,13 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/sharing/project')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ diaryId, privacy: 'public-comments', publicBlockIds: ['block-public'] })
       .expect(201);
 
     const story = await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } });
     expect(story).toMatchObject({
-      ownerDeviceId: deviceA,
+      ownerUserId: accountA,
       sourceDiaryVersion: 1,
       publicationStatus: 'published',
       title: '厦门海边散步',
@@ -1901,7 +2059,7 @@ describe('Backend foundation (e2e)', () => {
     const latest = await request(app.getHttpServer())
       .get('/api/discovery/stories')
       .query({ category: 'latest', page: '1', pageSize: '20' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200);
     expect(latest.body.data.items).toHaveLength(1);
     expect(latest.body.data.items[0].blocks).toMatchObject([{
@@ -1913,19 +2071,19 @@ describe('Backend foundation (e2e)', () => {
     const sameCity = await request(app.getHttpServer())
       .get('/api/discovery/stories')
       .query({ category: 'same-city', city: '厦门市', page: '1', pageSize: '20' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200);
     expect(sameCity.body.data.items.map((item: { id: string }) => item.id)).toEqual([story?.id]);
 
     await request(app.getHttpServer())
       .post('/api/sharing/project')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ diaryId, privacy: 'private' })
       .expect(201);
     await request(app.getHttpServer())
       .get('/api/discovery/stories')
       .query({ category: 'latest', page: '1', pageSize: '20' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => expect(body.data.items).toEqual([]));
     expect(await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } }))
@@ -1957,18 +2115,18 @@ describe('Backend foundation (e2e)', () => {
         people: [],
       },
       version: 1,
-    }, deviceA);
+    }, accountA);
     const diaryId = saved.id;
 
     await request(app.getHttpServer())
       .post('/api/sharing/project')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ diaryId, privacy: 'public-comments', publicBlockIds: ['block-public'] })
       .expect(201);
 
     const story = await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } });
     expect(story).toMatchObject({
-      ownerDeviceId: deviceA,
+      ownerUserId: accountA,
       sourceDiaryVersion: 1,
       publicationStatus: 'published',
       title: '厦门海边散步',
@@ -1980,7 +2138,7 @@ describe('Backend foundation (e2e)', () => {
     const latest = await request(app.getHttpServer())
       .get('/api/discovery/stories')
       .query({ category: 'latest', page: '1', pageSize: '20' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200);
     expect(latest.body.data.items).toHaveLength(1);
     expect(latest.body.data.items[0].blocks).toMatchObject([{
@@ -1992,19 +2150,19 @@ describe('Backend foundation (e2e)', () => {
     const sameCity = await request(app.getHttpServer())
       .get('/api/discovery/stories')
       .query({ category: 'same-city', city: '厦门市', page: '1', pageSize: '20' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200);
     expect(sameCity.body.data.items.map((item: { id: string }) => item.id)).toEqual([story?.id]);
 
     await request(app.getHttpServer())
       .post('/api/sharing/project')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ diaryId, privacy: 'private' })
       .expect(201);
     await request(app.getHttpServer())
       .get('/api/discovery/stories')
       .query({ category: 'latest', page: '1', pageSize: '20' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => expect(body.data.items).toEqual([]));
     expect(await prisma.discoveryStory.findUnique({ where: { sourceDiaryId: diaryId } }))
@@ -2036,11 +2194,11 @@ describe('Backend foundation (e2e)', () => {
         people: [{ id: 'person-1', name: '小林', aliases: [], photoIds: ['photo-1'], avatarPhotoId: 'photo-1' }],
       },
       version: 1,
-    }, deviceA);
+    }, accountA);
 
     await request(app.getHttpServer())
       .post('/api/sharing/project')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ diaryId: saved.id, privacy: 'anonymous', publicBlockIds: ['block-public'] })
       .expect(400)
       .expect(({ body }) => {
@@ -2048,15 +2206,15 @@ describe('Backend foundation (e2e)', () => {
         expect(body.error.message).toContain('匿名照片遮挡目前不可用');
       });
     expect(await prisma.discoveryStory.count()).toBe(0);
-    expect(await store.getDiary(saved.id, deviceA)).toMatchObject({ privacy: 'private' });
+    expect(await store.getDiary(saved.id, accountA)).toMatchObject({ privacy: 'private' });
   });
 
-  it('reads published discovery snapshots and persists device-scoped idempotent likes', async () => {
+  it('reads published discovery snapshots and persists account-scoped idempotent likes', async () => {
     const publishedAt = new Date('2026-10-16T10:00:00.000Z');
     const stories = [
       {
         id: 'story-latest-new',
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         publicationStatus: 'published',
         title: '海港的傍晚',
         authorDisplayName: '小林',
@@ -2070,7 +2228,7 @@ describe('Backend foundation (e2e)', () => {
       },
       {
         id: 'story-latest-old',
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         publicationStatus: 'published',
         title: '海港的清晨',
         authorDisplayName: '小周',
@@ -2084,7 +2242,7 @@ describe('Backend foundation (e2e)', () => {
       },
       {
         id: 'story-unpublished',
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         publicationStatus: 'draft',
         title: '海港草稿',
         authorDisplayName: '小林',
@@ -2098,7 +2256,7 @@ describe('Backend foundation (e2e)', () => {
       },
       {
         id: 'story-withdrawn',
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         publicationStatus: 'published',
         title: '海港已撤回',
         authorDisplayName: '小林',
@@ -2112,7 +2270,7 @@ describe('Backend foundation (e2e)', () => {
       },
       {
         id: 'story-likes-disabled',
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         publicationStatus: 'published',
         title: '海港禁用互动',
         authorDisplayName: '小林',
@@ -2129,13 +2287,13 @@ describe('Backend foundation (e2e)', () => {
       await prisma.discoveryStory.create({ data: story });
     }
     await prisma.discoveryLike.create({
-      data: { storyId: 'story-latest-new', ownerDeviceId: deviceB },
+      data: { storyId: 'story-latest-new', ownerUserId: accountB },
     });
 
     const listing = await request(app.getHttpServer())
       .get('/api/discovery/stories')
       .query({ category: 'latest', keyword: '海港', page: '1', pageSize: '10' })
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(listing.body.data.items.map((item: { id: string }) => item.id))
       .toEqual(['story-latest-new', 'story-latest-old', 'story-likes-disabled']);
@@ -2144,7 +2302,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/discovery/stories/story-latest-new')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data).toMatchObject({
@@ -2156,23 +2314,23 @@ describe('Backend foundation (e2e)', () => {
       });
     await request(app.getHttpServer())
       .get('/api/discovery/stories/story-withdrawn')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(404)
       .expect(({ body }) => expect(body.error.code).toBe('not_found'));
     await request(app.getHttpServer())
       .get('/api/discovery/stories/story-unpublished')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(404)
       .expect(({ body }) => expect(body.error.code).toBe('not_found'));
     await request(app.getHttpServer())
       .get('/api/discovery/stories')
-      .expect(400)
-      .expect(({ body }) => expect(body.error.code).toBe('device_identity_required'));
+      .expect(401)
+      .expect(({ body }) => expect(body.error.code).toBe('account_session_invalid'));
 
     for (let replay = 0; replay < 2; replay += 1) {
       await request(app.getHttpServer())
         .put('/api/discovery/stories/story-latest-new/like')
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .send({ liked: true })
         .expect(200)
         .expect(({ body }) => {
@@ -2185,7 +2343,7 @@ describe('Backend foundation (e2e)', () => {
     }
     await request(app.getHttpServer())
       .put('/api/discovery/stories/story-latest-new/like')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ liked: false })
       .expect(200)
       .expect(({ body }) => {
@@ -2197,23 +2355,23 @@ describe('Backend foundation (e2e)', () => {
       });
     await request(app.getHttpServer())
       .put('/api/discovery/stories/story-likes-disabled/like')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ liked: true })
       .expect(409)
       .expect(({ body }) => expect(body.error.code).toBe('interaction_not_available'));
 
-    const otherDeviceDetail = await request(app.getHttpServer())
+    const otherAccountDetail = await request(app.getHttpServer())
       .get('/api/discovery/stories/story-latest-new')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200);
-    expect(otherDeviceDetail.body.data).toMatchObject({ liked: true, likeCount: 1 });
+    expect(otherAccountDetail.body.data).toMatchObject({ liked: true, likeCount: 1 });
 
     await store.reset();
     expect(await prisma.discoveryStory.count()).toBe(0);
     expect(await prisma.discoveryLike.count()).toBe(0);
   });
 
-  it('persists chat turns, explicit retries and device-scoped conversation history', async () => {
+  it('persists chat turns, explicit retries and account-scoped conversation history', async () => {
     const conversationId = 'chat-e2e-conversation-1';
     const requestId = 'chat-e2e-request-1';
     const beginBody = {
@@ -2224,7 +2382,7 @@ describe('Backend foundation (e2e)', () => {
 
     const begun = await request(app.getHttpServer())
       .post(`/api/chat/conversations/${conversationId}/turns`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(beginBody)
       .expect(201);
     expect(begun.body.data).toMatchObject({
@@ -2235,7 +2393,7 @@ describe('Backend foundation (e2e)', () => {
 
     const replayedBegin = await request(app.getHttpServer())
       .post(`/api/chat/conversations/${conversationId}/turns`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(beginBody)
       .expect(201);
     expect(replayedBegin.body.data.messages).toHaveLength(1);
@@ -2243,7 +2401,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/chat/conversations/${conversationId}/turns/${requestId}/failure`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ attempt: 1, failureCode: 'provider_failed' })
       .expect(201)
       .expect(({ body }) => {
@@ -2257,7 +2415,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/chat/conversations/${conversationId}/turns/${requestId}/retry`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ nextAttempt: 2 })
       .expect(201)
       .expect(({ body }) => {
@@ -2270,7 +2428,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/api/chat/conversations/${conversationId}/turns/${requestId}/reply`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         attempt: 2,
         assistantMessageId: 'chat-e2e-assistant-message-1',
@@ -2291,25 +2449,25 @@ describe('Backend foundation (e2e)', () => {
 
     const history = await request(app.getHttpServer())
       .get(`/api/chat/conversations/${conversationId}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(history.body.data.messages).toHaveLength(2);
     const ownerList = await request(app.getHttpServer())
       .get('/api/chat/conversations?page=1&pageSize=10')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(ownerList.body.data).toMatchObject({
       total: 1,
       items: [{ id: conversationId, messageCount: 2 }],
     });
-    const otherDeviceList = await request(app.getHttpServer())
+    const otherAccountList = await request(app.getHttpServer())
       .get('/api/chat/conversations?page=1&pageSize=10')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200);
-    expect(otherDeviceList.body.data).toMatchObject({ total: 0, items: [] });
+    expect(otherAccountList.body.data).toMatchObject({ total: 0, items: [] });
     await request(app.getHttpServer())
       .get(`/api/chat/conversations/${conversationId}`)
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(403)
       .expect(({ body }) => expect(body.error.code).toBe('permission_denied'));
 
@@ -2326,7 +2484,7 @@ describe('Backend foundation (e2e)', () => {
     await prisma.diary.create({
       data: {
         id: diaryId,
-        ownerDeviceId: deviceA,
+        ownerUserId: accountA,
         draftId: 'anchor-e2e-draft-1',
         title: '海边散步',
         summary: '傍晚沿海边慢慢走。',
@@ -2355,7 +2513,7 @@ describe('Backend foundation (e2e)', () => {
 
     const begin = await request(app.getHttpServer())
       .post('/api/anchors/extractions/begin')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ diaryId, diaryVersion: 1, requestId, attempt: 1 })
       .expect(201);
     expect(begin.body.data).toMatchObject({ diaryId, diaryVersion: 1, requestId, attempt: 1, status: 'pending' });
@@ -2374,7 +2532,7 @@ describe('Backend foundation (e2e)', () => {
     };
     const completed = await request(app.getHttpServer())
       .post('/api/anchors/extractions/complete')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ attempt: 1, result: providerResult })
       .expect(201);
     expect(completed.body.data).toMatchObject({
@@ -2387,13 +2545,13 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/anchors/extractions/complete')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({ attempt: 1, result: providerResult })
       .expect(201);
     const anchors = await request(app.getHttpServer())
       .get('/api/anchors')
       .query({ tagId: 'tag-seaside', page: '1', pageSize: '10' })
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(anchors.body.data).toMatchObject({
       tagId: 'tag-seaside',
@@ -2404,12 +2562,12 @@ describe('Backend foundation (e2e)', () => {
         diary: { id: diaryId, version: 1, title: '海边散步', coverPhotoId: 'photo-1' },
       }],
     });
-    const otherDeviceAnchors = await request(app.getHttpServer())
+    const otherAccountAnchors = await request(app.getHttpServer())
       .get('/api/anchors')
       .query({ tagId: 'tag-seaside', page: '1', pageSize: '10' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200);
-    expect(otherDeviceAnchors.body.data).toMatchObject({ total: 0, items: [] });
+    expect(otherAccountAnchors.body.data).toMatchObject({ total: 0, items: [] });
 
     const correctionInput = {
       diaryId,
@@ -2421,7 +2579,7 @@ describe('Backend foundation (e2e)', () => {
     };
     await request(app.getHttpServer())
       .put('/api/anchors/anchor-e2e-anchor-1/correction')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(correctionInput)
       .expect(200)
       .expect(({ body }) => {
@@ -2437,7 +2595,7 @@ describe('Backend foundation (e2e)', () => {
     const correction = await request(app.getHttpServer())
       .get('/api/anchors/anchor-e2e-anchor-1/correction')
       .query({ diaryId, diaryVersion: '1' })
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(correction.body.data).toMatchObject({
       diaryId,
@@ -2450,7 +2608,7 @@ describe('Backend foundation (e2e)', () => {
     const feed = await request(app.getHttpServer())
       .get('/api/anchors/feed')
       .query({ tagId: 'tag-seaside', page: '1', pageSize: '10' })
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(feed.body).toMatchObject({
       version: 'memory-anchor-v1',
@@ -2469,13 +2627,13 @@ describe('Backend foundation (e2e)', () => {
     });
     await request(app.getHttpServer())
       .get('/api/anchors/summary')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => expect(body.data.total).toBe(0));
     await request(app.getHttpServer())
       .get('/api/anchors/anchor-e2e-anchor-1/correction')
       .query({ diaryId, diaryVersion: '1' })
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(403)
       .expect(({ body }) => expect(body.error.code).toBe('permission_denied'));
 
@@ -2490,7 +2648,7 @@ describe('Backend foundation (e2e)', () => {
     expect(await prisma.chatAnchorCorrectionCommand.count()).toBe(0);
   });
 
-  it('summarizes only new complete daily chats into one device-scoped anchor and correction', async () => {
+  it('summarizes only new complete daily chats into one account-scoped anchor and correction', async () => {
     const provider = app.get(ArkMemoryAnchorProvider);
     const summarize = jest.spyOn(provider, 'summarize').mockResolvedValue({
       tagId: 'friends',
@@ -2507,7 +2665,7 @@ describe('Backend foundation (e2e)', () => {
     }) => {
       await request(app.getHttpServer())
         .post(`/api/chat/conversations/${input.conversationId}/turns`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .send({
           requestId: input.requestId,
           userMessageId: input.userMessageId,
@@ -2518,7 +2676,7 @@ describe('Backend foundation (e2e)', () => {
       if (input.reply) {
         await request(app.getHttpServer())
           .post(`/api/chat/conversations/${input.conversationId}/turns/${input.requestId}/reply`)
-          .set('x-device-id', deviceA)
+          .set('Authorization', accountAuthorization(accountA))
           .send({
             attempt: 1,
             assistantMessageId: input.assistantMessageId,
@@ -2564,7 +2722,7 @@ describe('Backend foundation (e2e)', () => {
       deviceLocalDate: '2026-01-01',
     });
 
-    await app.get(ChatDailyAnchorService).processCompletedDate(deviceA, '2026-01-03');
+    await app.get(ChatDailyAnchorService).processCompletedDate(accountA, '2026-01-03');
 
     expect(summarize).toHaveBeenCalledTimes(1);
     expect(summarize).toHaveBeenCalledWith({
@@ -2577,7 +2735,7 @@ describe('Backend foundation (e2e)', () => {
       ],
     });
     const batch = await prisma.chatDailyAnchor.findFirstOrThrow({
-      where: { ownerDeviceId: deviceA, status: 'succeeded' },
+      where: { ownerUserId: accountA, status: 'succeeded' },
       include: { sources: true },
     });
     expect(batch).toMatchObject({
@@ -2594,7 +2752,7 @@ describe('Backend foundation (e2e)', () => {
     const feed = await request(app.getHttpServer())
       .get('/api/anchors/feed')
       .query({ page: '1', pageSize: '10' })
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(feed.body).toMatchObject({
       version: 'memory-anchor-v1',
@@ -2613,18 +2771,18 @@ describe('Backend foundation (e2e)', () => {
     expect(feed.body.data.items[0].chat.sourceMessages).toHaveLength(4);
     await request(app.getHttpServer())
       .get('/api/anchors/summary')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => expect(body.data.total).toBe(1));
     await request(app.getHttpServer())
       .get('/api/anchors/feed')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => expect(body.data.total).toBe(0));
 
     await request(app.getHttpServer())
       .put(`/api/anchors/${batch.anchorId}/chat-correction`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         anchorBatchId: batch.id,
         correction: '老朋友让这段旅程变得更有意义。',
@@ -2641,11 +2799,11 @@ describe('Backend foundation (e2e)', () => {
     const correctedFeed = await request(app.getHttpServer())
       .get('/api/anchors/feed')
       .query({ tagId: 'friends', page: '1', pageSize: '10' })
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(correctedFeed.body.data.items[0].correction).toBe('老朋友让这段旅程变得更有意义。');
 
-    await app.get(ChatDailyAnchorService).processCompletedDate(deviceA, '2026-01-03');
+    await app.get(ChatDailyAnchorService).processCompletedDate(accountA, '2026-01-03');
     expect(summarize).toHaveBeenCalledTimes(1);
     summarize.mockReset().mockRejectedValue(new MemoryAnchorProviderError('provider_failed'));
     await createTurn({
@@ -2657,15 +2815,15 @@ describe('Backend foundation (e2e)', () => {
       reply: '听起来这段友情一直很重要。',
       deviceLocalDate: '2026-01-03',
     });
-    await app.get(ChatDailyAnchorService).processCompletedDate(deviceA, '2026-01-04');
+    await app.get(ChatDailyAnchorService).processCompletedDate(accountA, '2026-01-04');
     expect(summarize).toHaveBeenCalledTimes(3);
     const failedBatch = await prisma.chatDailyAnchor.findFirstOrThrow({
-      where: { ownerDeviceId: deviceA, status: 'failed' },
+      where: { ownerUserId: accountA, status: 'failed' },
     });
     expect(failedBatch).toMatchObject({ attempt: 3, failureCode: 'provider_failed' });
     const summary = await request(app.getHttpServer())
       .get('/api/anchors/summary')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200);
     expect(summary.body.data.total).toBe(1);
     summarize.mockRestore();
@@ -2674,7 +2832,7 @@ describe('Backend foundation (e2e)', () => {
   it('supports generation job create and polling', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-remote-1',
         type: 'travel',
@@ -2689,11 +2847,11 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-remote-1',
       draftVersion: 2,
       idempotencyKey: 'draft-remote-1-round-2',
-    }, deviceA);
+    }, accountA);
 
     expect(created.body.data.jobId).toBeTruthy();
 
-    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
+    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, accountA);
     expect(completed.body.data.draftId).toBe('draft-remote-1');
     expect(completed.body.data.idempotencyKey).toBe('draft-remote-1-round-2');
     expect(completed.body.data.status).toBe('succeeded');
@@ -2714,7 +2872,7 @@ describe('Backend foundation (e2e)', () => {
     for (const id of ['draft-idempotency-a', 'draft-idempotency-b']) {
       await request(app.getHttpServer())
         .post('/api/drafts')
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .send({
           id,
           type: 'travel',
@@ -2732,22 +2890,22 @@ describe('Backend foundation (e2e)', () => {
       idempotencyKey: 'generation-idempotency-key',
     };
     const [first, concurrentRetry] = await Promise.all([
-      postGenerationJob(input, deviceA),
-      postGenerationJob(input, deviceA),
+      postGenerationJob(input, accountA),
+      postGenerationJob(input, accountA),
     ]);
 
     expect(first.status).toBe(201);
     expect(concurrentRetry.status).toBe(201);
     expect(concurrentRetry.body.data.jobId).toBe(first.body.data.jobId);
 
-    const sameRequest = await postGenerationJob(input, deviceA);
+    const sameRequest = await postGenerationJob(input, accountA);
     expect(sameRequest.body.data.jobId).toBe(first.body.data.jobId);
 
     for (const conflictingInput of [
       { ...input, draftId: 'draft-idempotency-b' },
       { ...input, draftVersion: 2 },
     ]) {
-      const conflict = await postGenerationJob(conflictingInput, deviceA, undefined, 409);
+      const conflict = await postGenerationJob(conflictingInput, accountA, undefined, 409);
       expect(conflict.body.error.code).toBe('version_conflict');
       expect(conflict.body.error.retryable).toBe(false);
     }
@@ -2811,7 +2969,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-content-array',
         type: 'travel',
@@ -2826,9 +2984,9 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-content-array',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-content-array-round-1',
-    }, deviceA);
+    }, accountA);
 
-    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
+    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, accountA);
     expect(completed.body.data.status).toBe('succeeded');
     expect(completed.body.data.result.title).toBe('海风把旅程写成一页');
     expect(completed.body.data.result.coverPhotoId).toBe('photo-8');
@@ -2915,7 +3073,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-retry',
         type: 'travel',
@@ -2930,9 +3088,9 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-retry',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-retry-round-1',
-    }, deviceA);
+    }, accountA);
 
-    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
+    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, accountA);
     expect(requestCount).toBe(2);
     expect(completed.body.data.status).toBe('succeeded');
     expect(completed.body.data.attemptCount).toBe(2);
@@ -2999,7 +3157,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-timeout-retry',
         type: 'travel',
@@ -3014,9 +3172,9 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-timeout-retry',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-timeout-retry-round-1',
-    }, deviceA);
+    }, accountA);
 
-    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
+    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, accountA);
     expect(requestCount).toBe(2);
     expect(completed.body.data.status).toBe('succeeded');
     expect(completed.body.data.attemptCount).toBe(2);
@@ -3084,7 +3242,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-network-retry',
         type: 'travel',
@@ -3099,9 +3257,9 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-network-retry',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-network-retry-round-1',
-    }, deviceA);
+    }, accountA);
 
-    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, deviceA);
+    const completed = await waitForGenerationCompletion(app.getHttpServer(), created.body.data.jobId, accountA);
     expect(requestCount).toBe(2);
     expect(completed.body.data.status).toBe('succeeded');
     expect(completed.body.data.attemptCount).toBe(2);
@@ -3148,7 +3306,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-malformed-success',
         type: 'travel',
@@ -3163,12 +3321,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-malformed-success',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-malformed-success-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3238,7 +3396,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-duplicate-person-ids',
         type: 'travel',
@@ -3253,12 +3411,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-duplicate-person-ids',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-duplicate-person-ids-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const response = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (response.body.data.status === 'failed') {
         expect(response.body.data.attemptCount).toBe(1);
@@ -3313,7 +3471,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-invalid-text-photo',
         type: 'travel',
@@ -3328,12 +3486,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-invalid-text-photo',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-invalid-text-photo-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3406,7 +3564,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-invalid-malformed-person-photo',
         type: 'travel',
@@ -3421,12 +3579,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-invalid-malformed-person-photo',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-invalid-malformed-person-photo-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3483,7 +3641,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-invalid-block-entry',
         type: 'travel',
@@ -3498,12 +3656,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-invalid-block-entry',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-invalid-block-entry-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3554,7 +3712,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-missing-title',
         type: 'travel',
@@ -3569,12 +3727,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-missing-title',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-missing-title-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3626,7 +3784,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-empty-block-content',
         type: 'travel',
@@ -3641,12 +3799,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-empty-block-content',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-empty-block-content-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3673,7 +3831,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-timeout-failed',
         type: 'travel',
@@ -3688,12 +3846,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-timeout-failed',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-timeout-failed-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3723,7 +3881,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-network-failed',
         type: 'travel',
@@ -3738,12 +3896,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-network-failed',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-network-failed-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3772,7 +3930,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-provider-failed',
         type: 'travel',
@@ -3787,12 +3945,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-provider-failed',
       draftVersion: 1,
       idempotencyKey: 'draft-provider-failed-round-1',
-    }, deviceA);
+    }, accountA);
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
       const failed = await request(app.getHttpServer())
         .get(`/api/generation/jobs/${created.body.data.jobId}`)
-        .set('x-device-id', deviceA)
+        .set('Authorization', accountAuthorization(accountA))
         .expect(200);
       if (failed.body.data.status === 'failed') {
         expect(failed.body.data.attemptCount).toBe(1);
@@ -3813,7 +3971,7 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-missing',
       draftVersion: 1,
       idempotencyKey: 'draft-missing-round-1',
-    }, deviceA, undefined, 404);
+    }, accountA, undefined, 404);
     expect(missingDraft.body.error.code).toBe('not_found');
     expect(missingDraft.body.error.message).toBe('draft not found');
     expect(missingDraft.body.error.retryable).toBe(false);
@@ -3822,7 +3980,7 @@ describe('Backend foundation (e2e)', () => {
   it('restores persisted generation jobs after app reinitialization', async () => {
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-restart-1',
         type: 'travel',
@@ -3837,7 +3995,7 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-restart-1',
       draftVersion: 3,
       idempotencyKey: 'draft-restart-1-round-3',
-    }, deviceA);
+    }, accountA);
 
     const restartedModuleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -3848,7 +4006,7 @@ describe('Backend foundation (e2e)', () => {
     await restartedApp.init();
 
     try {
-      const completed = await waitForGenerationCompletion(restartedApp.getHttpServer(), created.body.data.jobId, deviceA);
+      const completed = await waitForGenerationCompletion(restartedApp.getHttpServer(), created.body.data.jobId, accountA);
       expect(completed.body.data.jobId).toBe(created.body.data.jobId);
       expect(completed.body.data.status).toBe('succeeded');
       expect(completed.body.data.stage).toBe('completed');
@@ -3859,7 +4017,7 @@ describe('Backend foundation (e2e)', () => {
         draftId: 'draft-restart-1',
         draftVersion: 3,
         idempotencyKey: 'draft-restart-1-round-3',
-      }, deviceA, restartedApp.getHttpServer());
+      }, accountA, restartedApp.getHttpServer());
     } finally {
       await restartedApp.close();
     }
@@ -3887,7 +4045,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-remote-2',
         type: 'travel',
@@ -3902,12 +4060,12 @@ describe('Backend foundation (e2e)', () => {
       draftId: 'draft-remote-2',
       draftVersion: 1,
       idempotencyKey: 'draft-remote-2-round-1',
-    }, deviceA);
+    }, accountA);
 
     await providerStarted;
     await request(app.getHttpServer())
       .post(`/api/generation/jobs/${created.body.data.jobId}/cancel`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(201)
       .expect(({ body }) => {
         expect(body.data.status).toBe('cancelled');
@@ -3917,7 +4075,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/generation/jobs/${created.body.data.jobId}`)
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.status).toBe('cancelled');
@@ -3927,7 +4085,7 @@ describe('Backend foundation (e2e)', () => {
   it('returns structured not_found error when generation job is missing', async () => {
     await request(app.getHttpServer())
       .get('/api/generation/jobs/job-missing')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(404)
       .expect(({ body }) => {
         expect(body.error.code).toBe('not_found');
@@ -3937,7 +4095,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/generation/jobs/job-missing/cancel')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(404)
       .expect(({ body }) => {
         expect(body.error.code).toBe('not_found');
@@ -3946,10 +4104,10 @@ describe('Backend foundation (e2e)', () => {
       });
   });
 
-  it('isolates private drafts, diaries and generation jobs by device identity', async () => {
+  it('isolates private drafts, diaries and generation jobs by account', async () => {
     const draft = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         id: 'draft-owned-by-a',
         type: 'travel',
@@ -3962,7 +4120,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/drafts/${draft.body.data.id}`)
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(403)
       .expect(({ body }) => {
         expect(body.error.code).toBe('permission_denied');
@@ -3972,11 +4130,11 @@ describe('Backend foundation (e2e)', () => {
       draftId: draft.body.data.id,
       draftVersion: 1,
       idempotencyKey: 'shared-round-1',
-    }, deviceA);
+    }, accountA);
 
     await request(app.getHttpServer())
       .get(`/api/generation/jobs/${generation.body.data.jobId}`)
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(403)
       .expect(({ body }) => {
         expect(body.error.code).toBe('permission_denied');
@@ -3984,10 +4142,10 @@ describe('Backend foundation (e2e)', () => {
 
     const saved = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
         draftId: draft.body.data.id,
-        idempotencyKey: 'device-a-save-1',
+        idempotencyKey: 'account-a-save-1',
         title: '仅设备 A 可见',
         summary: '设备归属隔离',
         location: '台南',
@@ -4001,7 +4159,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get(`/api/diaries/${saved.body.data.diaryId}`)
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(403)
       .expect(({ body }) => {
         expect(body.error.code).toBe('permission_denied');
@@ -4009,13 +4167,13 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .send({
         id: saved.body.data.diaryId,
         draftId: 'draft-b-edit',
         sourceDiaryId: saved.body.data.diaryId,
         sourceDiaryVersion: 1,
-        idempotencyKey: 'device-b-illegal-edit',
+        idempotencyKey: 'account-b-illegal-edit',
         title: '不应成功',
         summary: '不应成功',
         location: '高雄',
@@ -4032,19 +4190,19 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(0);
       });
   });
 
-  it('scopes identical save idempotency keys to the current device', async () => {
+  it('scopes identical save idempotency keys to the current account', async () => {
     const draftA = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send({
-        id: 'draft-device-a-same-key',
+        id: 'draft-account-a-same-key',
         type: 'travel',
         characterId: 'character-blue',
         selectedPhotoIds: ['photo-1', 'photo-2', 'photo-3'],
@@ -4055,9 +4213,9 @@ describe('Backend foundation (e2e)', () => {
 
     const draftB = await request(app.getHttpServer())
       .post('/api/drafts')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .send({
-        id: 'draft-device-b-same-key',
+        id: 'draft-account-b-same-key',
         type: 'travel',
         characterId: 'character-green',
         selectedPhotoIds: ['photo-4', 'photo-5', 'photo-6'],
@@ -4094,13 +4252,13 @@ describe('Backend foundation (e2e)', () => {
 
     const savedA = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .send(requestBodyA)
       .expect(201);
 
     const savedB = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .send(requestBodyB)
       .expect(201);
 
@@ -4108,7 +4266,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -4117,7 +4275,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/memories')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.total).toBe(1);
@@ -4126,7 +4284,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/diaries/save-results/shared-save-key')
-      .set('x-device-id', deviceA)
+      .set('Authorization', accountAuthorization(accountA))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.diaryId).toBe(savedA.body.data.diaryId);
@@ -4134,7 +4292,7 @@ describe('Backend foundation (e2e)', () => {
 
     await request(app.getHttpServer())
       .get('/api/diaries/save-results/shared-save-key')
-      .set('x-device-id', deviceB)
+      .set('Authorization', accountAuthorization(accountB))
       .expect(200)
       .expect(({ body }) => {
         expect(body.data.diaryId).toBe(savedB.body.data.diaryId);

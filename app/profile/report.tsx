@@ -111,7 +111,7 @@ export default function ReportScreen() {
                       </View>
                     </View>
                   ))}
-                  <Text style={s.disclaimer}>这不是定义，只是一面镜子。报告由服务端 AI 根据当前可访问的日记生成，并按设备身份隔离保存。</Text>
+                  <Text style={s.disclaimer}>这不是定义，只是一面镜子。报告由服务端 AI 根据当前可访问的日记生成，并按账号隔离保存。</Text>
                 </ScrollView>
               : !consentDeclined && (state.report.status === 'idle' || state.report.status === 'stale')
                 ? <Text style={s.status}>正在准备当前日记版本的洞察报告…</Text>

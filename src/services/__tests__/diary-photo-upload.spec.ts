@@ -113,7 +113,6 @@ describe('diary photo upload preparation', () => {
       localUri: undefined,
       uri: 'https://api.example.test/photos/materials/material-1/content',
       remoteHeaders: {
-        'x-device-id': 'device-1',
         Authorization: 'Bearer test-token',
       },
     });
@@ -147,7 +146,7 @@ describe('diary photo upload preparation', () => {
       generationSource: 'provider',
       localUri: undefined,
       uri: 'https://api.example.test/photos/materials/material-failed/content',
-      remoteHeaders: { 'x-device-id': 'device-1' },
+      remoteHeaders: { Authorization: 'Bearer test-token' },
     });
     mockDownloadFileAsync.mockRejectedValueOnce(
       new Error('ERR_FILESYSTEM_CANNOT_DOWNLOAD: background daemon unavailable'),
@@ -177,7 +176,7 @@ describe('diary photo upload preparation', () => {
     const unrelated = photo('remote-1', {
       localUri: undefined,
       uri: 'https://images.example.test/remote-1.jpg',
-      remoteHeaders: { 'x-device-id': 'device-1' },
+      remoteHeaders: { Authorization: 'Bearer test-token' },
     });
 
     await expect(prepareDiaryPhotoUploads(['remote-1'], [unrelated])).rejects.toThrow(

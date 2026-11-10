@@ -53,6 +53,12 @@ describe('DiariesController', () => {
     app = moduleRef.createNestApplication({ bodyParser: false });
     configureApiBodyParser(app);
     app.setGlobalPrefix('api');
+    app.useGlobalGuards({
+      canActivate: (context: { switchToHttp: () => { getRequest: () => { auth?: unknown } } }) => {
+        context.switchToHttp().getRequest().auth = { userId: 'user-http', sessionId: 'session-http' };
+        return true;
+      },
+    } as never);
     await app.init();
   });
 
@@ -79,7 +85,6 @@ describe('DiariesController', () => {
   test('pairs saved diary photo files with their photo IDs and snapshot fields', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/diaries/save')
-      .set('x-device-id', 'device-1')
       .field('id', 'diary-1')
       .field('draftId', 'draft-1')
       .field('idempotencyKey', 'draft-1-save-new')
@@ -109,7 +114,7 @@ describe('DiariesController', () => {
       .attach('photos', uploadedPhoto.buffer, { filename: 'photo.jpg', contentType: 'image/jpeg' });
 
     expect(response.status).toBe(201);
-    expect(photoAssets.createDiaryPhotoSaveHook).toHaveBeenCalledWith('device-1', savedPhotoIds, [{
+    expect(photoAssets.createDiaryPhotoSaveHook).toHaveBeenCalledWith('user-http', savedPhotoIds, [{
       ...uploadedPhoto,
     }]);
     expect(store.saveDiaryWithCommand).toHaveBeenCalledWith(
@@ -119,32 +124,27 @@ describe('DiariesController', () => {
         photoIds: savedPhotoIds,
         contentSnapshot: expect.objectContaining({ coverPhotoId: 'device-photo-1' }),
       }),
-      'device-1',
+      'user-http',
       expect.objectContaining({ beforeCommit: expect.any(Function) }),
     );
     expect(beforeCommit).toHaveBeenCalled();
-    expect(photoAssets.ensureDiaryPhotoCopies).toHaveBeenCalledWith('device-1', 'diary-1', savedPhotoIds);
-    expect(growthInsights.enqueueAfterDiarySaved).toHaveBeenCalledWith('device-1', 'diary-1', 1);
+    expect(photoAssets.ensureDiaryPhotoCopies).toHaveBeenCalledWith('user-http', 'diary-1', savedPhotoIds);
+    expect(growthInsights.enqueueAfterDiarySaved).toHaveBeenCalledWith('user-http', 'diary-1', 1);
   });
 
-  test('deletes one diary only after resolving the current device identity', async () => {
+  test('deletes one diary only for the authenticated account', async () => {
     const response = await request(app.getHttpServer())
       .delete('/api/diaries/diary-1')
-      .set('x-device-id', 'device-1')
       .expect(200);
 
     expect(response.body).toEqual({ ok: true, data: { diaryId: 'diary-1' } });
-    expect(photoAssets.createDiaryPhotoDeleteHook).toHaveBeenCalledWith('device-1', 'diary-1');
+    expect(photoAssets.createDiaryPhotoDeleteHook).toHaveBeenCalledWith('user-http', 'diary-1');
     expect(store.deleteDiary).toHaveBeenCalledWith(
       'diary-1',
-      'device-1',
+      'user-http',
       expect.objectContaining({ beforeCommit: expect.any(Function), afterCommit: expect.any(Function) }),
     );
 
-    await request(app.getHttpServer())
-      .delete('/api/diaries/diary-1')
-      .expect(400)
-      .expect(({ body }) => expect(body.error.code).toBe('device_identity_required'));
     expect(store.deleteDiary).toHaveBeenCalledTimes(1);
   });
 
@@ -153,7 +153,6 @@ describe('DiariesController', () => {
 
     await request(app.getHttpServer())
       .delete('/api/diaries/diary-missing')
-      .set('x-device-id', 'device-1')
       .expect(404)
       .expect(({ body }) => expect(body.error.code).toBe('not_found'));
   });

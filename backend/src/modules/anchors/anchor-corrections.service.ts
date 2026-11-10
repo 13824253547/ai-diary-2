@@ -171,25 +171,25 @@ export class AnchorCorrectionsService {
 
   private async chatBatchIsAccessible(
     transaction: Prisma.TransactionClient,
-    input: { anchorId: string; anchorBatchId: string; ownerDeviceId: string },
+    input: { anchorId: string; anchorBatchId: string; ownerUserId: string },
   ) {
     const batch = await transaction.chatDailyAnchor.findFirst({
       where: {
         id: input.anchorBatchId,
         anchorId: input.anchorId,
-        ownerDeviceId: input.ownerDeviceId,
+        ownerUserId: input.ownerUserId,
         status: 'succeeded',
       },
     });
     if (!batch) return false;
     const sources = await transaction.chatDailyAnchorSource.findMany({
-      where: { anchorBatchId: batch.id, ownerDeviceId: input.ownerDeviceId },
+      where: { anchorBatchId: batch.id, ownerUserId: input.ownerUserId },
       include: { message: true, turn: true },
     });
     if (sources.length !== batch.sourceCount || sources.length === 0) return false;
     const conversationIds = [...new Set(sources.map(source => source.conversationId))];
     const conversations = await transaction.chatConversation.findMany({
-      where: { id: { in: conversationIds }, ownerDeviceId: input.ownerDeviceId },
+      where: { id: { in: conversationIds }, ownerUserId: input.ownerUserId },
       select: { id: true },
     });
     const accessibleConversations = new Set(conversations.map(conversation => conversation.id));
@@ -197,7 +197,7 @@ export class AnchorCorrectionsService {
       accessibleConversations.has(source.conversationId)
       && source.message.conversationId === source.conversationId
       && source.turn.conversationId === source.conversationId
-      && source.turn.ownerDeviceId === input.ownerDeviceId
+      && source.turn.ownerUserId === input.ownerUserId
       && source.turn.memoryAnchorBatchId === batch.id
       && source.turn.memoryEligible
       && source.turn.status === 'completed'
@@ -208,20 +208,20 @@ export class AnchorCorrectionsService {
       && !!source.message.text.trim());
   }
 
-  async getChatCorrection(input: unknown, ownerDeviceId: unknown): Promise<ChatAnchorCorrectionRecord | null> {
+  async getChatCorrection(input: unknown, ownerUserId: unknown): Promise<ChatAnchorCorrectionRecord | null> {
     if (!isRecord(input)) throw new AnchorCorrectionError('invalid_input', '聊天锚点纠正查询无效。');
     const anchorId = normalizeIdentifier(input.anchorId, 'anchorId');
     const anchorBatchId = normalizeIdentifier(input.anchorBatchId, 'anchorBatchId');
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     return this.prisma.$transaction(async transaction => {
       await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT \`id\` FROM \`ChatDailyAnchor\` WHERE \`id\` = ${anchorBatchId} FOR UPDATE
       `);
-      if (!await this.chatBatchIsAccessible(transaction, { anchorId, anchorBatchId, ownerDeviceId: owner })) {
+      if (!await this.chatBatchIsAccessible(transaction, { anchorId, anchorBatchId, ownerUserId: owner })) {
         throw new AnchorCorrectionError('not_found', '聊天锚点或其来源记录已不可用。');
       }
       const correction = await transaction.chatAnchorCorrection.findUnique({
-        where: { ownerDeviceId_anchorId: { ownerDeviceId: owner, anchorId } },
+        where: { ownerUserId_anchorId: { ownerUserId: owner, anchorId } },
       });
       if (correction && correction.anchorBatchId !== anchorBatchId) {
         throw new AnchorCorrectionError('not_found', '聊天锚点纠正与来源批次不匹配。');
@@ -230,7 +230,7 @@ export class AnchorCorrectionsService {
     });
   }
 
-  async saveChatCorrection(input: unknown, ownerDeviceId: unknown): Promise<ChatAnchorCorrectionRecord> {
+  async saveChatCorrection(input: unknown, ownerUserId: unknown): Promise<ChatAnchorCorrectionRecord> {
     if (!isRecord(input)) throw new AnchorCorrectionError('invalid_input', '聊天锚点纠正请求无效。');
     const normalized = {
       anchorId: normalizeIdentifier(input.anchorId, 'anchorId'),
@@ -242,14 +242,14 @@ export class AnchorCorrectionsService {
     if (!normalized.correction || Array.from(normalized.correction).length > 240) {
       throw new AnchorCorrectionError('invalid_input', '纠正内容需为 1 至 240 字。');
     }
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     const requestHash = chatCorrectionFingerprint(normalized);
 
     try {
       return await this.prisma.$transaction(async transaction => {
         const commandKey = {
-          ownerDeviceId_idempotencyKey: {
-            ownerDeviceId: owner,
+          ownerUserId_idempotencyKey: {
+            ownerUserId: owner,
             idempotencyKey: normalized.idempotencyKey,
           },
         };
@@ -273,13 +273,13 @@ export class AnchorCorrectionsService {
         if (!await this.chatBatchIsAccessible(transaction, {
           anchorId: normalized.anchorId,
           anchorBatchId: normalized.anchorBatchId,
-          ownerDeviceId: owner,
+          ownerUserId: owner,
         })) {
           throw new AnchorCorrectionError('not_found', '聊天锚点或其来源记录已不可用。');
         }
 
         const uniqueCorrection = {
-          ownerDeviceId_anchorId: { ownerDeviceId: owner, anchorId: normalized.anchorId },
+          ownerUserId_anchorId: { ownerUserId: owner, anchorId: normalized.anchorId },
         };
         const existing = await transaction.chatAnchorCorrection.findUnique({ where: uniqueCorrection });
         let correctionId: string;
@@ -290,7 +290,7 @@ export class AnchorCorrectionsService {
           }
           const created = await transaction.chatAnchorCorrection.create({
             data: {
-              ownerDeviceId: owner,
+              ownerUserId: owner,
               anchorId: normalized.anchorId,
               anchorBatchId: normalized.anchorBatchId,
               correction: normalized.correction,
@@ -307,7 +307,7 @@ export class AnchorCorrectionsService {
           const updated = await transaction.chatAnchorCorrection.updateMany({
             where: {
               id: existing.id,
-              ownerDeviceId: owner,
+              ownerUserId: owner,
               version: normalized.expectedVersion,
             },
             data: {
@@ -323,7 +323,7 @@ export class AnchorCorrectionsService {
         }
         await transaction.chatAnchorCorrectionCommand.create({
           data: {
-            ownerDeviceId: owner,
+            ownerUserId: owner,
             idempotencyKey: normalized.idempotencyKey,
             requestHash,
             correctionId,
@@ -339,8 +339,8 @@ export class AnchorCorrectionsService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const command = await this.prisma.chatAnchorCorrectionCommand.findUnique({
           where: {
-            ownerDeviceId_idempotencyKey: {
-              ownerDeviceId: owner,
+            ownerUserId_idempotencyKey: {
+              ownerUserId: owner,
               idempotencyKey: normalized.idempotencyKey,
             },
           },
@@ -362,18 +362,18 @@ export class AnchorCorrectionsService {
     }
   }
 
-  async getCorrection(input: unknown, ownerDeviceId: unknown): Promise<AnchorCorrectionRecord | null> {
+  async getCorrection(input: unknown, ownerUserId: unknown): Promise<AnchorCorrectionRecord | null> {
     if (!isRecord(input)) {
       throw new AnchorCorrectionError('invalid_input', '锚点纠正查询条件无效。');
     }
     const diaryId = normalizeIdentifier(input.diaryId, 'diaryId');
     const anchorId = normalizeIdentifier(input.anchorId, 'anchorId');
     const diaryVersion = normalizeVersion(input.diaryVersion, 'diaryVersion');
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     return this.prisma.$transaction(async transaction => {
       const diary = await lockDiary(transaction, diaryId);
       if (!diary) throw new AnchorCorrectionError('not_found', '日记不存在。');
-      if (diary.ownerDeviceId !== owner) {
+      if (diary.ownerUserId !== owner) {
         throw new AnchorCorrectionError('permission_denied', '日记不属于当前设备。');
       }
       if (diary.version !== diaryVersion) {
@@ -382,7 +382,7 @@ export class AnchorCorrectionsService {
 
       const anchor = await transaction.diaryAnchor.findFirst({
         where: {
-          ownerDeviceId: owner,
+          ownerUserId: owner,
           diaryId,
           diaryVersion,
           anchorId,
@@ -396,8 +396,8 @@ export class AnchorCorrectionsService {
       }
       const correction = await transaction.anchorCorrection.findUnique({
         where: {
-          ownerDeviceId_diaryId_anchorId_sourceDiaryVersion: {
-            ownerDeviceId: owner,
+          ownerUserId_diaryId_anchorId_sourceDiaryVersion: {
+            ownerUserId: owner,
             diaryId,
             anchorId,
             sourceDiaryVersion: diaryVersion,
@@ -411,7 +411,7 @@ export class AnchorCorrectionsService {
     });
   }
 
-  async saveCorrection(input: unknown, ownerDeviceId: unknown): Promise<AnchorCorrectionRecord> {
+  async saveCorrection(input: unknown, ownerUserId: unknown): Promise<AnchorCorrectionRecord> {
     if (!isRecord(input)) {
       throw new AnchorCorrectionError('invalid_input', '锚点纠正请求无效。');
     }
@@ -424,7 +424,7 @@ export class AnchorCorrectionsService {
       expectedVersion: normalizeVersion(input.expectedVersion, 'expectedVersion', true),
       idempotencyKey: normalizeIdentifier(input.idempotencyKey, 'idempotencyKey'),
     };
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     if (!normalized.correction || Array.from(normalized.correction).length > 240) {
       throw new AnchorCorrectionError('invalid_input', '纠正内容需为 1 至 240 字。');
     }
@@ -433,8 +433,8 @@ export class AnchorCorrectionsService {
     try {
       return await this.prisma.$transaction(async transaction => {
         const commandKey = {
-          ownerDeviceId_idempotencyKey: {
-            ownerDeviceId: owner,
+          ownerUserId_idempotencyKey: {
+            ownerUserId: owner,
             idempotencyKey: normalized.idempotencyKey,
           },
         };
@@ -451,7 +451,7 @@ export class AnchorCorrectionsService {
 
         const diary = await lockDiary(transaction, normalized.diaryId);
         if (!diary) throw new AnchorCorrectionError('not_found', '日记不存在。');
-        if (diary.ownerDeviceId !== owner) {
+        if (diary.ownerUserId !== owner) {
           throw new AnchorCorrectionError('permission_denied', '日记不属于当前设备。');
         }
         if (diary.version !== normalized.diaryVersion) {
@@ -462,7 +462,7 @@ export class AnchorCorrectionsService {
         }
         const anchor = await transaction.diaryAnchor.findFirst({
           where: {
-            ownerDeviceId: owner,
+            ownerUserId: owner,
             diaryId: normalized.diaryId,
             diaryVersion: normalized.diaryVersion,
             anchorId: normalized.anchorId,
@@ -477,8 +477,8 @@ export class AnchorCorrectionsService {
         }
 
         const uniqueCorrection = {
-          ownerDeviceId_diaryId_anchorId_sourceDiaryVersion: {
-            ownerDeviceId: owner,
+          ownerUserId_diaryId_anchorId_sourceDiaryVersion: {
+            ownerUserId: owner,
             diaryId: normalized.diaryId,
             anchorId: normalized.anchorId,
             sourceDiaryVersion: normalized.diaryVersion,
@@ -494,7 +494,7 @@ export class AnchorCorrectionsService {
           }
           const created = await transaction.anchorCorrection.create({
             data: {
-              ownerDeviceId: owner,
+              ownerUserId: owner,
               diaryId: normalized.diaryId,
               anchorId: normalized.anchorId,
               sourceBlockId: normalized.sourceBlockId,
@@ -513,7 +513,7 @@ export class AnchorCorrectionsService {
           const update = await transaction.anchorCorrection.updateMany({
             where: {
               id: existing.id,
-              ownerDeviceId: owner,
+              ownerUserId: owner,
               version: normalized.expectedVersion,
             },
             data: {
@@ -530,7 +530,7 @@ export class AnchorCorrectionsService {
 
         await transaction.anchorCorrectionCommand.create({
           data: {
-            ownerDeviceId: owner,
+            ownerUserId: owner,
             idempotencyKey: normalized.idempotencyKey,
             requestHash,
             correctionId,
@@ -547,8 +547,8 @@ export class AnchorCorrectionsService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const command = await this.prisma.anchorCorrectionCommand.findUnique({
           where: {
-            ownerDeviceId_idempotencyKey: {
-              ownerDeviceId: owner,
+            ownerUserId_idempotencyKey: {
+              ownerUserId: owner,
               idempotencyKey: normalized.idempotencyKey,
             },
           },

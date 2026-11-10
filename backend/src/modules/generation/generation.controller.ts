@@ -1,7 +1,7 @@
-import { BadGatewayException, BadRequestException, Body, CanActivate, ConflictException, Controller, ExecutionContext, ForbiddenException, GatewayTimeoutException, Get, Headers, Injectable, NotFoundException, Param, Post, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { CurrentUserId } from "../auth/auth-request";
+import { BadGatewayException, BadRequestException, Body, ConflictException, Controller, ForbiddenException, GatewayTimeoutException, Get, NotFoundException, Param, Post, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { DiaryGenerationProviderError, type RewriteContextBlock, type RewriteInputSnapshot } from '../../common/diary-generation.service';
-import { resolveDeviceId } from '../../common/device-identity';
 import { GenerationJobError, MemoryStoreService, PermissionDeniedError, RewriteDraftError } from '../../common/memory-store.service';
 import { GenerationPhotoInputError, type UploadedGenerationPhoto } from '../../common/temporary-generation-photo-store';
 import { BoundedMemoryUploadStorage } from './bounded-memory-upload-storage';
@@ -30,16 +30,6 @@ type PhotoMetadata = {
   photoId: string;
   date?: string;
 };
-
-@Injectable()
-export class GenerationIdentityGuard implements CanActivate {
-  canActivate(context: ExecutionContext) {
-    const request = context.switchToHttp().getRequest<{ headers: Record<string, string | string[] | undefined> }>();
-    const header = request.headers['x-device-id'];
-    resolveDeviceId(typeof header === 'string' ? header : undefined);
-    return true;
-  }
-}
 
 function isCreateGenerationBody(value: unknown): value is CreateGenerationBody {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -152,7 +142,6 @@ function isRewriteBody(value: unknown): value is RewriteInputSnapshot {
 }
 
 @Controller('generation')
-@UseGuards(GenerationIdentityGuard)
 export class GenerationController {
   constructor(private readonly store: MemoryStoreService) {}
 
@@ -163,10 +152,10 @@ export class GenerationController {
   }))
   async createJob(
     @Body() rawBody: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
     @UploadedFiles() files: UploadedFile[] = [],
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const body = parseGenerationBody(rawBody);
     if (!isCreateGenerationBody(body)) {
       throw new BadRequestException({
@@ -197,7 +186,7 @@ export class GenerationController {
     try {
       return {
         ok: true,
-        data: await this.store.createGenerationJob(body, ownerDeviceId, uploads),
+        data: await this.store.createGenerationJob(body, ownerUserId, uploads),
       };
     } catch (error) {
       if (error instanceof GenerationJobError && error.code === 'not_found') {
@@ -259,10 +248,10 @@ export class GenerationController {
   }))
   async rewriteBlock(
     @Body() rawBody: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
     @UploadedFiles() files: UploadedFile[] = [],
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const body = parseRewriteBody(rawBody);
     if (!isRewriteBody(body)) {
       throw new BadRequestException({
@@ -293,7 +282,7 @@ export class GenerationController {
     try {
       return {
         ok: true,
-        data: await this.store.rewriteDraftBlock(body, ownerDeviceId, uploads),
+        data: await this.store.rewriteDraftBlock(body, ownerUserId, uploads),
       };
     } catch (error) {
       if (error instanceof RewriteDraftError && error.code === 'not_found') {
@@ -361,9 +350,9 @@ export class GenerationController {
   }
 
   @Get('jobs/:jobId')
-  async getJob(@Param('jobId') jobId: string, @Headers('x-device-id') deviceId?: string) {
+  async getJob(@Param('jobId') jobId: string, @CurrentUserId() ownerUserId: string) {
     try {
-      const job = await this.store.getGenerationJob(jobId, resolveDeviceId(deviceId));
+      const job = await this.store.getGenerationJob(jobId, ownerUserId);
       if (!job) {
         throw new NotFoundException({
           ok: false,
@@ -394,9 +383,9 @@ export class GenerationController {
   }
 
   @Post('jobs/:jobId/cancel')
-  async cancelJob(@Param('jobId') jobId: string, @Headers('x-device-id') deviceId?: string) {
+  async cancelJob(@Param('jobId') jobId: string, @CurrentUserId() ownerUserId: string) {
     try {
-      const job = await this.store.cancelGenerationJob(jobId, resolveDeviceId(deviceId));
+      const job = await this.store.cancelGenerationJob(jobId, ownerUserId);
       if (!job) {
         throw new NotFoundException({
           ok: false,

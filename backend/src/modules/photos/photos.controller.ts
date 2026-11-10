@@ -1,3 +1,4 @@
+import { CurrentUserId } from "../auth/auth-request";
 import {
   BadRequestException,
   Body,
@@ -16,7 +17,6 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { resolveDeviceId } from '../../common/device-identity';
 import { BoundedMemoryUploadStorage } from '../generation/bounded-memory-upload-storage';
 import { PhotoAssetError, PhotoAssetService, type PhotoAssetUploadMetadata } from './photo-asset.service';
 
@@ -58,8 +58,7 @@ export class PhotosController {
   constructor(private readonly assets: PhotoAssetService) {}
 
   @Get('capabilities')
-  getCapabilities(@Headers('x-device-id') deviceId?: string) {
-    resolveDeviceId(deviceId);
+  getCapabilities() {
     return {
       ok: true,
       data: {
@@ -70,10 +69,10 @@ export class PhotosController {
   }
 
   @Get('materials')
-  async listMaterials(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async listMaterials(@CurrentUserId() ownerUserId: string) {
+
     try {
-      return { ok: true, data: await this.assets.listMaterials(ownerDeviceId) };
+      return { ok: true, data: await this.assets.listMaterials(ownerUserId) };
     } catch (error) {
       throwPhotoAssetError(error);
     }
@@ -85,16 +84,16 @@ export class PhotosController {
     limits: { fileSize: 10 * 1024 * 1024, files: 12 },
   }))
   async uploadMaterials(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Body() body: { photoMetadata?: unknown },
     @UploadedFiles() files: UploadedPhotoFile[] = [],
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const metadata = parseMetadata(body?.photoMetadata);
     try {
       return {
         ok: true,
-        data: await this.assets.uploadMaterials(ownerDeviceId, files, metadata ?? []),
+        data: await this.assets.uploadMaterials(ownerUserId, files, metadata ?? []),
       };
     } catch (error) {
       throwPhotoAssetError(error);
@@ -103,12 +102,12 @@ export class PhotosController {
 
   @Delete('materials')
   async deleteMaterials(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Body() body: { photoIds?: unknown },
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     try {
-      return { ok: true, data: await this.assets.deleteMaterials(ownerDeviceId, body?.photoIds as string[]) };
+      return { ok: true, data: await this.assets.deleteMaterials(ownerUserId, body?.photoIds as string[]) };
     } catch (error) {
       throwPhotoAssetError(error);
     }
@@ -116,12 +115,12 @@ export class PhotosController {
 
   @Get('materials/:photoId/content')
   async readMaterial(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Param('photoId') photoId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     try {
-      const file = await this.assets.readMaterialPhoto(ownerDeviceId, photoId);
+      const file = await this.assets.readMaterialPhoto(ownerUserId, photoId);
       return new StreamableFile(file.buffer, { type: file.mimeType });
     } catch (error) {
       throwPhotoAssetError(error);
@@ -148,14 +147,14 @@ export class PhotosController {
   @Get('diaries/assets')
   async listDiaryPhotosForDiaries(
     @Query('diaryIds') diaryIds: string | undefined,
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     try {
       if (!diaryIds) throw new PhotoAssetError('invalid_input', '日记照片查询参数无效。');
       return {
         ok: true,
-        data: await this.assets.listDiaryPhotoCopiesForDiaries(ownerDeviceId, diaryIds.split(',')),
+        data: await this.assets.listDiaryPhotoCopiesForDiaries(ownerUserId, diaryIds.split(',')),
       };
     } catch (error) {
       throwPhotoAssetError(error);
@@ -164,12 +163,12 @@ export class PhotosController {
 
   @Get('diaries/:diaryId/photos')
   async listDiaryPhotoCopies(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Param('diaryId') diaryId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     try {
-      return { ok: true, data: await this.assets.listDiaryPhotoCopies(ownerDeviceId, diaryId) };
+      return { ok: true, data: await this.assets.listDiaryPhotoCopies(ownerUserId, diaryId) };
     } catch (error) {
       throwPhotoAssetError(error);
     }
@@ -177,12 +176,12 @@ export class PhotosController {
 
   @Get('diary-copies/:photoId/content')
   async readAnyDiaryPhotoCopy(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Param('photoId') photoId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     try {
-      const file = await this.assets.readAnyDiaryPhotoCopy(ownerDeviceId, photoId);
+      const file = await this.assets.readAnyDiaryPhotoCopy(ownerUserId, photoId);
       return new StreamableFile(file.buffer, { type: file.mimeType });
     } catch (error) {
       throwPhotoAssetError(error);
@@ -191,16 +190,16 @@ export class PhotosController {
 
   @Get('diaries/:diaryId/photo-content')
   async readDiaryPhotoByQuery(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Param('diaryId') diaryId: string,
     @Query('photoId') photoId: unknown,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof photoId !== 'string' || !photoId.trim() || photoId.length > 191) {
       throwPhotoAssetError(new PhotoAssetError('invalid_input', '日记照片查询参数无效。'));
     }
     try {
-      const file = await this.assets.readDiaryPhotoCopy(ownerDeviceId, diaryId, photoId);
+      const file = await this.assets.readDiaryPhotoCopy(ownerUserId, diaryId, photoId);
       return new StreamableFile(file.buffer, { type: file.mimeType });
     } catch (error) {
       throwPhotoAssetError(error);
@@ -209,13 +208,13 @@ export class PhotosController {
 
   @Get('diaries/:diaryId/photos/:photoId/content')
   async readDiaryPhoto(
-    @Headers('x-device-id') deviceId: string | undefined,
+    @CurrentUserId() ownerUserId: string,
     @Param('diaryId') diaryId: string,
     @Param('photoId') photoId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     try {
-      const file = await this.assets.readDiaryPhotoCopy(ownerDeviceId, diaryId, photoId);
+      const file = await this.assets.readDiaryPhotoCopy(ownerUserId, diaryId, photoId);
       return new StreamableFile(file.buffer, { type: file.mimeType });
     } catch (error) {
       throwPhotoAssetError(error);

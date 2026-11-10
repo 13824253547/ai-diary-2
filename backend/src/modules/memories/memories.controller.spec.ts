@@ -59,12 +59,10 @@ describe('MemoriesController', () => {
     expect(store.listDiaries).not.toHaveBeenCalled();
   });
 
-  test('requires device identity before reporting malformed query values', async () => {
+  test('validates malformed query values for the authenticated account', async () => {
     await expect(
-      controller.listMemories(undefined, undefined, ['first', 'second'], '1', '20'),
-    ).rejects.toMatchObject({
-      response: { error: { code: 'device_identity_required' } },
-    });
+      controller.listMemories(undefined, undefined, ['first', 'second'], '1', '20', 'user-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(store.listDiaries).not.toHaveBeenCalled();
   });
 

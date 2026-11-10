@@ -242,18 +242,18 @@ export class AnchorReadModelService {
     diaryVersion: number;
     requestId: string;
     attempt: number;
-  }, ownerDeviceId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
+  }, ownerUserId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
     assertTrustedProviderRuntime(access);
     const diaryId = normalizeIdentifier(input.diaryId, 'diaryId');
     const diaryVersion = normalizePositiveInteger(input.diaryVersion, 'diaryVersion');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const attempt = normalizePositiveInteger(input.attempt, 'attempt');
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
 
     return this.prisma.$transaction(async transaction => {
       const diary = await lockDiary(transaction, diaryId);
       if (!diary) throw new AnchorReadModelError('not_found', '日记不存在。');
-      if (diary.ownerDeviceId !== owner) {
+      if (diary.ownerUserId !== owner) {
         throw new AnchorReadModelError('permission_denied', '日记不属于当前设备。');
       }
       if (diary.version !== diaryVersion) {
@@ -262,8 +262,8 @@ export class AnchorReadModelService {
       const blocks = currentSourceBlocks(diary.contentSnapshot);
       const sourceHash = snapshotHash(blocks);
       const uniqueVersion = {
-        ownerDeviceId_diaryId_diaryVersion: {
-          ownerDeviceId: owner,
+        ownerUserId_diaryId_diaryVersion: {
+          ownerUserId: owner,
           diaryId,
           diaryVersion,
         },
@@ -295,8 +295,8 @@ export class AnchorReadModelService {
 
       const requestCollision = await transaction.diaryAnchorExtraction.findUnique({
         where: {
-          ownerDeviceId_requestId: {
-            ownerDeviceId: owner,
+          ownerUserId_requestId: {
+            ownerUserId: owner,
             requestId,
           },
         },
@@ -306,7 +306,7 @@ export class AnchorReadModelService {
       }
       const created = await transaction.diaryAnchorExtraction.create({
         data: {
-          ownerDeviceId: owner,
+          ownerUserId: owner,
           diaryId,
           diaryVersion,
           requestId,
@@ -323,12 +323,12 @@ export class AnchorReadModelService {
   async completeExtraction(input: {
     attempt: number;
     result: unknown;
-  }, ownerDeviceId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
+  }, ownerUserId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
     assertTrustedProviderRuntime(access);
     const attempt = normalizePositiveInteger(input.attempt, 'attempt');
     validateProviderResult(input.result);
     const result = input.result;
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     const diaryId = normalizeIdentifier(result.diaryId, 'diaryId');
     const requestId = normalizeIdentifier(result.requestId, 'requestId');
     const diaryVersion = normalizePositiveInteger(result.diaryVersion, 'diaryVersion');
@@ -345,7 +345,7 @@ export class AnchorReadModelService {
     return this.prisma.$transaction(async transaction => {
       const diary = await lockDiary(transaction, diaryId);
       if (!diary) throw new AnchorReadModelError('not_found', '日记不存在。');
-      if (diary.ownerDeviceId !== owner) {
+      if (diary.ownerUserId !== owner) {
         throw new AnchorReadModelError('permission_denied', '日记不属于当前设备。');
       }
       if (diary.version !== diaryVersion) {
@@ -360,8 +360,8 @@ export class AnchorReadModelService {
       }
       const run = await transaction.diaryAnchorExtraction.findUnique({
         where: {
-          ownerDeviceId_diaryId_diaryVersion: {
-            ownerDeviceId: owner,
+          ownerUserId_diaryId_diaryVersion: {
+            ownerUserId: owner,
             diaryId,
             diaryVersion,
           },
@@ -388,7 +388,7 @@ export class AnchorReadModelService {
         await transaction.diaryAnchor.create({
           data: {
             anchorId: anchor.id,
-            ownerDeviceId: owner,
+            ownerUserId: owner,
             diaryId,
             diaryVersion,
             extractionId: run.id,
@@ -420,7 +420,7 @@ export class AnchorReadModelService {
     requestId: string;
     attempt: number;
     failureCode: 'timeout' | 'cancelled' | 'provider_failed';
-  }, ownerDeviceId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
+  }, ownerUserId: string, access?: TrustedAnchorProviderAccess): Promise<AnchorExtractionRun> {
     assertTrustedProviderRuntime(access);
     const diaryId = normalizeIdentifier(input.diaryId, 'diaryId');
     const diaryVersion = normalizePositiveInteger(input.diaryVersion, 'diaryVersion');
@@ -429,11 +429,11 @@ export class AnchorReadModelService {
     if (!['timeout', 'cancelled', 'provider_failed'].includes(input.failureCode)) {
       throw new AnchorReadModelError('invalid_input', '提取失败类型无效。');
     }
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     return this.prisma.$transaction(async transaction => {
       const diary = await lockDiary(transaction, diaryId);
       if (!diary) throw new AnchorReadModelError('not_found', '日记不存在。');
-      if (diary.ownerDeviceId !== owner) {
+      if (diary.ownerUserId !== owner) {
         throw new AnchorReadModelError('permission_denied', '日记不属于当前设备。');
       }
       if (diary.version !== diaryVersion) {
@@ -441,8 +441,8 @@ export class AnchorReadModelService {
       }
       const run = await transaction.diaryAnchorExtraction.findUnique({
         where: {
-          ownerDeviceId_diaryId_diaryVersion: {
-            ownerDeviceId: owner,
+          ownerUserId_diaryId_diaryVersion: {
+            ownerUserId: owner,
             diaryId,
             diaryVersion,
           },
@@ -467,8 +467,8 @@ export class AnchorReadModelService {
     });
   }
 
-  async listByTag(input: unknown, ownerDeviceId: string): Promise<AnchorsByTagPage> {
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+  async listByTag(input: unknown, ownerUserId: string): Promise<AnchorsByTagPage> {
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     if (!isRecord(input)) {
       throw new AnchorReadModelError('invalid_input', '锚点查询条件无效。');
     }
@@ -488,12 +488,12 @@ export class AnchorReadModelService {
       FROM \`DiaryAnchor\` AS a
       INNER JOIN \`DiaryAnchorExtraction\` AS e
         ON e.\`id\` = a.\`extractionId\`
-        AND e.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        AND e.\`ownerUserId\` = a.\`ownerUserId\`
         AND e.\`status\` = 'succeeded'
         AND e.\`source\` = 'provider'
       INNER JOIN \`Diary\` AS d
         ON d.\`id\` = a.\`diaryId\`
-        AND d.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        AND d.\`ownerUserId\` = a.\`ownerUserId\`
         AND d.\`version\` = a.\`diaryVersion\`
       INNER JOIN JSON_TABLE(
         d.\`contentSnapshot\`,
@@ -507,7 +507,7 @@ export class AnchorReadModelService {
         AND source_block.\`blockType\` IN ('text', 'quote')
         AND source_block.\`blockContent\` IS NOT NULL
         AND CHAR_LENGTH(TRIM(source_block.\`blockContent\`)) > 0
-      WHERE a.\`ownerDeviceId\` = ${owner}
+      WHERE a.\`ownerUserId\` = ${owner}
         AND a.\`tagId\` = ${tagId}
         AND a.\`source\` = 'provider'
     `;
@@ -566,8 +566,8 @@ export class AnchorReadModelService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async listFeed(input: unknown, ownerDeviceId: string): Promise<MemoryAnchorFeedPage> {
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+  async listFeed(input: unknown, ownerUserId: string): Promise<MemoryAnchorFeedPage> {
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     if (!isRecord(input)) throw new AnchorReadModelError('invalid_input', '锚点查询条件无效。');
     const tagId = input.tagId === undefined ? null : normalizeIdentifier(input.tagId, 'tagId');
     if (input.sourceType !== undefined && input.sourceType !== 'diary' && input.sourceType !== 'chat') {
@@ -595,7 +595,7 @@ export class AnchorReadModelService {
       FROM \`DiaryAnchor\` AS checked_anchor
       INNER JOIN \`Diary\` AS checked_diary
         ON checked_diary.\`id\` = checked_anchor.\`diaryId\`
-        AND checked_diary.\`ownerDeviceId\` = checked_anchor.\`ownerDeviceId\`
+        AND checked_diary.\`ownerUserId\` = checked_anchor.\`ownerUserId\`
         AND checked_diary.\`version\` = checked_anchor.\`diaryVersion\`
       INNER JOIN JSON_TABLE(
         COALESCE(checked_anchor.\`sourceBlockIds\`, JSON_ARRAY(checked_anchor.\`sourceBlockId\`)),
@@ -615,7 +615,7 @@ export class AnchorReadModelService {
         AND current_source.\`blockType\` IN ('text', 'quote')
         AND current_source.\`blockContent\` IS NOT NULL
         AND CHAR_LENGTH(TRIM(current_source.\`blockContent\`)) > 0
-      WHERE checked_anchor.\`ownerDeviceId\` = ${owner}
+      WHERE checked_anchor.\`ownerUserId\` = ${owner}
       GROUP BY checked_anchor.\`id\`, checked_anchor.\`sourceBlockIds\`, checked_anchor.\`sourceBlockId\`
       HAVING COUNT(DISTINCT checked_source.\`blockId\`)
         = JSON_LENGTH(COALESCE(checked_anchor.\`sourceBlockIds\`, JSON_ARRAY(checked_anchor.\`sourceBlockId\`)))
@@ -625,21 +625,21 @@ export class AnchorReadModelService {
       FROM \`ChatDailyAnchor\` AS source_batch
       INNER JOIN \`ChatDailyAnchorSource\` AS source_link
         ON source_link.\`anchorBatchId\` = source_batch.\`id\`
-        AND source_link.\`ownerDeviceId\` = source_batch.\`ownerDeviceId\`
+        AND source_link.\`ownerUserId\` = source_batch.\`ownerUserId\`
       INNER JOIN \`ChatMessage\` AS source_message
         ON source_message.\`id\` = source_link.\`messageId\`
         AND source_message.\`conversationId\` = source_link.\`conversationId\`
       INNER JOIN \`ChatTurn\` AS source_turn
         ON source_turn.\`id\` = source_link.\`turnId\`
-        AND source_turn.\`ownerDeviceId\` = source_batch.\`ownerDeviceId\`
+        AND source_turn.\`ownerUserId\` = source_batch.\`ownerUserId\`
         AND source_turn.\`memoryAnchorBatchId\` = source_batch.\`id\`
         AND source_turn.\`memoryEligible\` = 1
         AND source_turn.\`status\` = 'completed'
         AND source_turn.\`source\` = 'provider'
       INNER JOIN \`ChatConversation\` AS source_conversation
         ON source_conversation.\`id\` = source_link.\`conversationId\`
-        AND source_conversation.\`ownerDeviceId\` = source_batch.\`ownerDeviceId\`
-      WHERE source_batch.\`ownerDeviceId\` = ${owner}
+        AND source_conversation.\`ownerUserId\` = source_batch.\`ownerUserId\`
+      WHERE source_batch.\`ownerUserId\` = ${owner}
         AND source_batch.\`status\` = 'succeeded'
       GROUP BY source_batch.\`id\`, source_batch.\`sourceCount\`
       HAVING COUNT(DISTINCT source_link.\`messageId\`) = source_batch.\`sourceCount\`
@@ -666,21 +666,21 @@ export class AnchorReadModelService {
       FROM \`DiaryAnchor\` AS a
       INNER JOIN \`DiaryAnchorExtraction\` AS extraction
         ON extraction.\`id\` = a.\`extractionId\`
-        AND extraction.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        AND extraction.\`ownerUserId\` = a.\`ownerUserId\`
         AND extraction.\`status\` = 'succeeded'
         AND extraction.\`source\` = 'provider'
       INNER JOIN \`Diary\` AS d
         ON d.\`id\` = a.\`diaryId\`
-        AND d.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        AND d.\`ownerUserId\` = a.\`ownerUserId\`
         AND d.\`version\` = a.\`diaryVersion\`
       INNER JOIN (${validDiarySources}) AS valid_source
         ON valid_source.\`id\` = a.\`id\`
       LEFT JOIN \`AnchorCorrection\` AS correction
-        ON correction.\`ownerDeviceId\` = a.\`ownerDeviceId\`
+        ON correction.\`ownerUserId\` = a.\`ownerUserId\`
         AND correction.\`diaryId\` = a.\`diaryId\`
         AND correction.\`anchorId\` = a.\`anchorId\`
         AND correction.\`sourceDiaryVersion\` = a.\`diaryVersion\`
-      WHERE a.\`ownerDeviceId\` = ${owner}
+      WHERE a.\`ownerUserId\` = ${owner}
         AND a.\`source\` = 'provider'
         ${diaryTagFilter}
 
@@ -708,10 +708,10 @@ export class AnchorReadModelService {
       INNER JOIN (${validChatSources}) AS valid_chat_source
         ON valid_chat_source.\`id\` = ca.\`id\`
       LEFT JOIN \`ChatAnchorCorrection\` AS chat_correction
-        ON chat_correction.\`ownerDeviceId\` = ca.\`ownerDeviceId\`
+        ON chat_correction.\`ownerUserId\` = ca.\`ownerUserId\`
         AND chat_correction.\`anchorId\` = ca.\`anchorId\`
         AND chat_correction.\`anchorBatchId\` = ca.\`id\`
-      WHERE ca.\`ownerDeviceId\` = ${owner}
+      WHERE ca.\`ownerUserId\` = ${owner}
         AND ca.\`status\` = 'succeeded'
         AND ca.\`tagId\` IS NOT NULL
         AND ca.\`excerpt\` IS NOT NULL
@@ -751,7 +751,7 @@ export class AnchorReadModelService {
         .map(row => row.chatBatchId!);
       const sourceRows = chatBatchIds.length
         ? await transaction.chatDailyAnchorSource.findMany({
-          where: { ownerDeviceId: owner, anchorBatchId: { in: chatBatchIds } },
+          where: { ownerUserId: owner, anchorBatchId: { in: chatBatchIds } },
           orderBy: [
             { localDate: 'asc' },
             { conversationId: 'asc' },
@@ -813,8 +813,8 @@ export class AnchorReadModelService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async getChatHistory(batchId: unknown, input: unknown, ownerDeviceId: string) {
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+  async getChatHistory(batchId: unknown, input: unknown, ownerUserId: string) {
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     const id = normalizeIdentifier(batchId, 'batchId');
     if (!isRecord(input) || !Number.isSafeInteger(input.page) || (input.page as number) < 1
       || !ANCHOR_PAGE_SIZES.includes(input.pageSize as typeof ANCHOR_PAGE_SIZES[number])) {
@@ -826,7 +826,7 @@ export class AnchorReadModelService {
     if (!Number.isSafeInteger(offset)) throw new AnchorReadModelError('invalid_input', '聊天记录页码超出范围。');
     return this.prisma.$transaction(async transaction => {
       const batch = await transaction.chatDailyAnchor.findFirst({
-        where: { id, ownerDeviceId: owner, status: 'succeeded' },
+        where: { id, ownerUserId: owner, status: 'succeeded' },
         include: {
           sources: {
             include: { message: true, turn: { include: { conversation: true } } },
@@ -840,8 +840,8 @@ export class AnchorReadModelService {
       if (!batch) throw new AnchorReadModelError('not_found', '聊天锚点不存在或不可访问。');
       const sources = batch.sources;
       if (!sources.length || sources.length !== batch.sourceCount || sources.some(source =>
-        source.ownerDeviceId !== owner || source.turn.ownerDeviceId !== owner
-        || source.turn.conversation.ownerDeviceId !== owner
+        source.ownerUserId !== owner || source.turn.ownerUserId !== owner
+        || source.turn.conversation.ownerUserId !== owner
         || source.turn.memoryAnchorBatchId !== id || !source.turn.memoryEligible
         || source.turn.status !== 'completed' || source.turn.source !== 'provider'
         || source.conversationId !== source.message.conversationId
@@ -879,8 +879,8 @@ export class AnchorReadModelService {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async countFeed(ownerDeviceId: string): Promise<number> {
-    const page = await this.listFeed({ page: 1, pageSize: ANCHOR_PAGE_SIZES[0] }, ownerDeviceId);
+  async countFeed(ownerUserId: string): Promise<number> {
+    const page = await this.listFeed({ page: 1, pageSize: ANCHOR_PAGE_SIZES[0] }, ownerUserId);
     return page.total;
   }
 

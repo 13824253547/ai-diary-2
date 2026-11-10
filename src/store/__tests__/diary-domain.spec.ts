@@ -100,7 +100,6 @@ describe('domain/store regression', () => {
 
   function createRepository(overrides: Partial<CoreDiaryRepository> = {}): CoreDiaryRepository {
     return {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => ({
         ok: true,
@@ -377,7 +376,6 @@ describe('domain/store regression', () => {
       };
     };
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft,
       createGenerationJob,
       getGenerationJob: async jobId => ({
@@ -473,7 +471,6 @@ describe('domain/store regression', () => {
     const deferredJob = createDeferred<Awaited<ReturnType<NonNullable<CoreDiaryRepository['createGenerationJob']>>>>();
     const createGenerationJob = jest.fn(() => deferredJob.promise);
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob,
       getGenerationJob: async () => ({
@@ -881,7 +878,6 @@ describe('domain/store regression', () => {
   test('remote generation polling stores job snapshots and completes only after backend success', async () => {
     let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => {
         generationRequest = input;
@@ -986,7 +982,6 @@ describe('domain/store regression', () => {
   test('remote generation can advance with stage-only snapshots when backend omits progress percent', async () => {
     let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => {
         generationRequest = input;
@@ -1100,7 +1095,6 @@ describe('domain/store regression', () => {
   test('remote generation fails when backend result references photos outside the selected set', async () => {
     let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => {
         generationRequest = input;
@@ -1190,7 +1184,6 @@ describe('domain/store regression', () => {
   test('remote generation ignores regressing stage snapshots within the same running round', async () => {
     let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => {
         generationRequest = input;
@@ -1294,7 +1287,6 @@ describe('domain/store regression', () => {
       { milestoneId: 'provider-response-received', stage: 'structuring', progressPercent: 80, reachedAt: 5, attemptCount: 1 },
     ] as const;
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => {
         pollResponses.push(
@@ -1409,7 +1401,6 @@ describe('domain/store regression', () => {
       },
     });
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => ({
         ok: true,
@@ -1510,7 +1501,6 @@ describe('domain/store regression', () => {
       },
     });
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: () => generationFaultPlan.next(),
       cancelGenerationJob,
@@ -1598,7 +1588,6 @@ describe('domain/store regression', () => {
 
   test('generation timeout becomes visible failed state and still blocks saving', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => ({
         ok: true,
@@ -1677,7 +1666,6 @@ describe('domain/store regression', () => {
   test('failed generation snapshot keeps backend error message and retry metadata semantics', async () => {
     let generationRequest: CreateGenerationJobRequestContract | undefined;
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => {
         generationRequest = input;
@@ -1841,7 +1829,6 @@ describe('domain/store regression', () => {
 
   test('generation job creation failure becomes visible failed state instead of spinning forever', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: false,
@@ -1915,7 +1902,6 @@ describe('domain/store regression', () => {
 
   test('missing remote draft makes generation start fail with visible recovery message', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: false,
@@ -1989,7 +1975,6 @@ describe('domain/store regression', () => {
 
   test('generation start permission loss becomes a visible failed state with the precise startup device warning', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: false,
@@ -2062,7 +2047,6 @@ describe('domain/store regression', () => {
 
   test('generation start timeout becomes a visible failed state with the precise startup timeout warning', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: false,
@@ -2195,7 +2179,6 @@ describe('domain/store regression', () => {
 
   test('generation start network exception becomes a visible failed state with the precise startup network warning', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => {
         throw new Error('socket hang up');
@@ -2262,7 +2245,6 @@ describe('domain/store regression', () => {
 
   test('generation cancellation keeps old result from being marked successful', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => ({
         ok: true,
@@ -2341,7 +2323,6 @@ describe('domain/store regression', () => {
 
   test('missing generation job becomes visible failed state instead of spinning forever', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => ({
         ok: true,
@@ -2419,7 +2400,6 @@ describe('domain/store regression', () => {
 
   test('generation permission loss becomes a visible failed state with the precise device warning', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => ({
         ok: true,
@@ -2498,7 +2478,6 @@ describe('domain/store regression', () => {
   test('failed generation can start a new round and ignore stale refreshes from the old round', async () => {
     const generationRequests = new Map<string, CreateGenerationJobRequestContract>();
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: jest.fn(async (
         input: CreateGenerationJobRequestContract,
@@ -2647,7 +2626,6 @@ describe('domain/store regression', () => {
       };
     }>();
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -2763,7 +2741,6 @@ describe('domain/store regression', () => {
 
   test('empty remote memories do not fall back to local mock diaries', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -3100,7 +3077,6 @@ describe('domain/store regression', () => {
         },
       });
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -3198,7 +3174,6 @@ describe('domain/store regression', () => {
 
   test('saved diary updates remote memories source immediately', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -3294,7 +3269,6 @@ describe('domain/store regression', () => {
       },
     });
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -3540,7 +3514,6 @@ describe('domain/store regression', () => {
 
   test('save logs version conflict instead of pretending success', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -3622,7 +3595,6 @@ describe('domain/store regression', () => {
 
   test('submitDraft keeps saved diary untouched when edit save hits version conflict', async () => {
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -3711,7 +3683,6 @@ describe('domain/store regression', () => {
   test('submitDraft waits for remote save success before updating local diary', async () => {
     const submittedInputs: Parameters<CoreDiaryRepository['saveDiary']>[0][] = [];
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -3994,7 +3965,6 @@ describe('domain/store regression', () => {
   test('discarding a draft during submit keeps the saved result but does not resurrect the draft', async () => {
     const deferredSave = createDeferred<Awaited<ReturnType<CoreDiaryRepository['saveDiary']>>>();
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -4091,7 +4061,6 @@ describe('domain/store regression', () => {
   test('discarding a draft during failed submit removes the abandoned draft instead of restoring it', async () => {
     const deferredSave = createDeferred<Awaited<ReturnType<CoreDiaryRepository['saveDiary']>>>();
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async () => ({
         ok: true,
@@ -4762,7 +4731,6 @@ describe('domain/store regression', () => {
       },
     });
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: async input => ({
         ok: true,
@@ -4859,7 +4827,6 @@ describe('domain/store regression', () => {
       },
     });
     const repository: CoreDiaryRepository = {
-      getIdentity: async () => ({ id: 'device-1', type: 'anonymous-device' }),
       createDraft: async input => ({ ok: true, version: CORE_DIARY_CONTRACT_VERSION, data: input }),
       createGenerationJob: () => deferredJob.promise,
       cancelGenerationJob,

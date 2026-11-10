@@ -10,7 +10,7 @@ import type { TemporaryGenerationPhotoStore } from './temporary-generation-photo
 function buildDraftRow() {
   return {
     id: 'draft-1',
-    ownerDeviceId: 'device-1',
+    ownerUserId: 'device-1',
     sourceDiaryId: null,
     type: 'travel',
     characterId: 'character-blue',
@@ -133,15 +133,15 @@ describe('MemoryStoreService diary generation task guard', () => {
       draft: { findUnique: jest.fn().mockResolvedValue(draftRow) },
       generationJob: {
         findUnique: jest.fn(async ({ where }: { where: Record<string, any> }) => {
-          if (where.ownerDeviceId_idempotencyKey) {
-            return jobRow?.idempotencyKey === where.ownerDeviceId_idempotencyKey.idempotencyKey ? jobRow : null;
+          if (where.ownerUserId_idempotencyKey) {
+            return jobRow?.idempotencyKey === where.ownerUserId_idempotencyKey.idempotencyKey ? jobRow : null;
           }
           return jobRow?.jobId === where.jobId ? jobRow : null;
         }),
         create: jest.fn(async ({ data }: { data: Record<string, any> }) => {
           jobRow = {
             jobId: 'job-1',
-            ownerDeviceId: 'device-1',
+            ownerUserId: 'device-1',
             createdAt: new Date('2026-10-20T00:00:00.000Z'),
             ...data,
           };

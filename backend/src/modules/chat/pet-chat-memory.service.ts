@@ -8,11 +8,11 @@ export class PetChatMemoryService {
 
   constructor(private readonly anchors: AnchorReadModelService) {}
 
-  async getContext(ownerDeviceId: string): Promise<string> {
+  async getContext(ownerUserId: string): Promise<string> {
     // Revalidate ownership, current diary versions and source blocks before any cache hit.
     const page = await this.anchors.listFeed({
       page: 1, pageSize: 10, sourceType: 'diary',
-    }, ownerDeviceId);
+    }, ownerUserId);
     const records = page.items
       .filter(item => item.sourceType === 'diary' && item.diary && item.excerpt.trim())
       .map(item => ({
@@ -23,14 +23,14 @@ export class PetChatMemoryService {
         summary: item.excerpt.slice(0, 240),
       }));
     const fingerprint = createHash('sha256').update(JSON.stringify(records)).digest('hex');
-    const cached = this.cache.get(ownerDeviceId);
+    const cached = this.cache.get(ownerUserId);
     if (cached?.fingerprint === fingerprint && cached.expiresAt > Date.now()) return cached.text;
     const text = records.length ? JSON.stringify(records) : '';
     for (const [key, entry] of this.cache) {
       if (entry.expiresAt <= Date.now()) this.cache.delete(key);
     }
     if (this.cache.size >= 100) this.cache.delete(this.cache.keys().next().value!);
-    this.cache.set(ownerDeviceId, { fingerprint, text, expiresAt: Date.now() + 60_000 });
+    this.cache.set(ownerUserId, { fingerprint, text, expiresAt: Date.now() + 60_000 });
     return text;
   }
 }

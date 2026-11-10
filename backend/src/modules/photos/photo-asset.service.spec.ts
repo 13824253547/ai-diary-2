@@ -197,7 +197,7 @@ describe('PhotoAssetService', () => {
   test('counts generated images and uploaded photos in the same device quota', async () => {
     materialRows.push(...Array.from({ length: 99 }, (_, index) => ({
       id: `existing-${index}`,
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
     })));
     await service.assertMaterialCapacity('device-1');
     const image = {
@@ -296,7 +296,7 @@ describe('PhotoAssetService', () => {
     await writeFile(join(root, 'public-story-photo.jpg'), bytes);
     discoveryRows.push({
       id: 'story-1',
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
       sourceDiaryId: 'diary-1',
       sourceDiaryVersion: 2,
       publicationStatus: 'published',
@@ -306,12 +306,12 @@ describe('PhotoAssetService', () => {
     });
     savedDiaryRows.push({
       id: 'diary-1',
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
       version: 2,
       privacy: 'public-comments',
     });
     diaryRows.push({
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
       diaryId: 'diary-1',
       photoId: 'photo-1',
       filePath: 'public-story-photo.jpg',
@@ -362,7 +362,7 @@ describe('PhotoAssetService', () => {
     if (!material) throw new Error('material upload returned no asset');
     savedDiaryRows.push({
       id: 'diary-legacy',
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
       photoIds: ['legacy-device-photo'],
     });
 
@@ -386,7 +386,7 @@ describe('PhotoAssetService', () => {
     await rm(join(root, missingRow.filePath), { force: true });
     savedDiaryRows.push({
       id: 'diary-partial-backfill',
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
       photoIds: [missing.sourceAssetId, available.sourceAssetId],
     });
 

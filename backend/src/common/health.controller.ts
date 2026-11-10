@@ -1,11 +1,11 @@
-import { Controller, Get, Headers } from '@nestjs/common';
-import { resolveDeviceId } from './device-identity';
+import { Controller, Get } from '@nestjs/common';
+import { PublicRoute } from '../modules/auth/auth-request';
 
 @Controller('health')
 export class HealthController {
   @Get()
-  getHealth(@Headers('x-device-id') deviceId?: string) {
-    resolveDeviceId(deviceId);
+  @PublicRoute()
+  getHealth() {
     return {
       ok: true,
       service: 'orange-glow-ai-diary-backend',

@@ -51,6 +51,6 @@ Each task and its matching test cases use separate, same-named files. Business d
 
 - Current Chinese-only copy: [app-store-materials-brief.md](app-store-materials-brief.md)
 - Word version: [app-store-materials-brief.docx](app-store-materials-brief.docx)
-- Feishu document: [AI旅行日记 iOS 上架材料（简版）](https://iy5fmr8b2n.feishu.cn/docx/GHjWd53Smo02h5xjD02cTDRdnWe)
+- Historical Feishu copy (not synchronized with account-auth changes): [AI旅行日记 iOS 上架材料（简版）](https://iy5fmr8b2n.feishu.cn/docx/GHjWd53Smo02h5xjD02cTDRdnWe)
 
-Updated on 2026-10-30 for installation identity, AI postcard messages, single-diary deletion, and the privacy-policy entry. AI consent withdrawal and full identity deletion remain unresolved policy/product consistency items, not implemented features. The detailed bilingual materials are historical references.
+Updated on 2026-11-10 for the local account-authentication and email-verification cutover draft. Registration uses a verified email; account deletion requires password and a one-time email code. Backend SMTP credentials are not configured here, isolated MySQL and physical-iPhone verification remain pending, and production still uses its historical installation-identity release. See [BAS-005](delivery/tasks/BAS-005.md), [the account contract](delivery/contracts/account-auth-v1.md), and the [development progress log](delivery/reports/development-progress.md). Do not use the detailed bilingual materials or old installation-identity notes as current release instructions.

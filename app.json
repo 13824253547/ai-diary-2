@@ -11,9 +11,6 @@
       "bundleIdentifier": "io.com.shihangbiji.www.aidiary",
       "appleTeamId": "JWTMTK2F34",
       "supportsTablet": false,
-      "entitlements": {
-        "com.apple.developer.devicecheck.appattest-environment": "production"
-      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }

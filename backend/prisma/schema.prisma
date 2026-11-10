@@ -9,7 +9,7 @@ datasource db {
 
 model Diary {
   id              String   @id @default(cuid())
-  ownerDeviceId   String
+  ownerUserId   String
   draftId         String
   title           String
   summary         String
@@ -24,13 +24,13 @@ model Diary {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@index([ownerDeviceId, date])
-  @@index([ownerDeviceId, publishedLocalDate])
+  @@index([ownerUserId, date])
+  @@index([ownerUserId, publishedLocalDate])
 }
 
 model MaterialPhoto {
   id                  String   @id @default(cuid())
-  ownerDeviceId       String   @db.VarChar(191)
+  ownerUserId       String   @db.VarChar(191)
   sourceAssetId       String   @db.VarChar(191)
   filePath            String   @db.VarChar(1024)
   filename            String   @db.VarChar(255)
@@ -46,20 +46,20 @@ model MaterialPhoto {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  @@unique([ownerDeviceId, generationRequestId])
-  @@index([ownerDeviceId, sourceAssetId])
-  @@index([ownerDeviceId, createdAt])
+  @@unique([ownerUserId, generationRequestId])
+  @@index([ownerUserId, sourceAssetId])
+  @@index([ownerUserId, createdAt])
 }
 
 model MaterialPhotoQuota {
-  ownerDeviceId String   @id @db.VarChar(191)
+  ownerUserId String   @id @db.VarChar(191)
   photoCount    Int      @default(0)
   updatedAt     DateTime @updatedAt
 }
 
 model DiaryPhotoCopy {
   id            String   @id @default(cuid())
-  ownerDeviceId String   @db.VarChar(191)
+  ownerUserId String   @db.VarChar(191)
   diaryId       String   @db.VarChar(191)
   photoId       String   @db.VarChar(191)
   filePath      String   @db.VarChar(1024)
@@ -72,13 +72,13 @@ model DiaryPhotoCopy {
   height        Int?
   createdAt     DateTime @default(now())
 
-  @@unique([ownerDeviceId, diaryId, photoId])
-  @@index([ownerDeviceId, diaryId])
+  @@unique([ownerUserId, diaryId, photoId])
+  @@index([ownerUserId, diaryId])
 }
 
 model DiaryAnchorExtraction {
   id            String        @id @default(cuid())
-  ownerDeviceId String
+  ownerUserId String
   diaryId       String
   diaryVersion  Int
   requestId     String
@@ -92,15 +92,15 @@ model DiaryAnchorExtraction {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  @@unique([ownerDeviceId, diaryId, diaryVersion])
-  @@unique([ownerDeviceId, requestId])
-  @@index([ownerDeviceId, diaryId, status])
+  @@unique([ownerUserId, diaryId, diaryVersion])
+  @@unique([ownerUserId, requestId])
+  @@index([ownerUserId, diaryId, status])
 }
 
 model DiaryAnchor {
   id             String                @id @default(cuid())
   anchorId       String
-  ownerDeviceId  String
+  ownerUserId  String
   diaryId        String
   diaryVersion   Int
   extractionId   String
@@ -113,13 +113,13 @@ model DiaryAnchor {
   createdAt      DateTime              @default(now())
 
   @@unique([extractionId, anchorId])
-  @@index([ownerDeviceId, tagId, diaryVersion])
-  @@index([ownerDeviceId, diaryId, diaryVersion])
+  @@index([ownerUserId, tagId, diaryVersion])
+  @@index([ownerUserId, diaryId, diaryVersion])
 }
 
 model AnchorCorrection {
   id                 String   @id @default(cuid())
-  ownerDeviceId      String
+  ownerUserId      String
   diaryId            String
   anchorId           String
   sourceBlockId      String
@@ -129,37 +129,37 @@ model AnchorCorrection {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([ownerDeviceId, diaryId, anchorId, sourceDiaryVersion], map: "AnchorCorrection_owner_diary_anchor_version_key")
-  @@index([ownerDeviceId, diaryId, sourceDiaryVersion])
+  @@unique([ownerUserId, diaryId, anchorId, sourceDiaryVersion], map: "AnchorCorrection_owner_diary_anchor_version_key")
+  @@index([ownerUserId, diaryId, sourceDiaryVersion])
 }
 
 model AnchorCorrectionCommand {
   id                String   @id @default(cuid())
-  ownerDeviceId     String
+  ownerUserId     String
   idempotencyKey    String
   requestHash       String
   correctionId      String
   correctionVersion Int
   createdAt         DateTime @default(now())
 
-  @@unique([ownerDeviceId, idempotencyKey])
+  @@unique([ownerUserId, idempotencyKey])
 }
 
 model ChatConversation {
   id               String        @id
-  ownerDeviceId    String
+  ownerUserId    String
   nextTurnSequence Int           @default(1)
   messages         ChatMessage[]
   turns            ChatTurn[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  @@index([ownerDeviceId, updatedAt])
+  @@index([ownerUserId, updatedAt])
 }
 
 model ChatTurn {
   id                  String                  @id @default(cuid())
-  ownerDeviceId       String
+  ownerUserId       String
   conversationId      String
   requestId           String
   requestHash         String
@@ -180,10 +180,10 @@ model ChatTurn {
   createdAt           DateTime                @default(now())
   updatedAt           DateTime                @updatedAt
 
-  @@unique([ownerDeviceId, conversationId, requestId])
+  @@unique([ownerUserId, conversationId, requestId])
   @@unique([conversationId, sequence])
-  @@index([ownerDeviceId, conversationId, status])
-  @@index([ownerDeviceId, memoryEligible, deviceLocalDate, status])
+  @@index([ownerUserId, conversationId, status])
+  @@index([ownerUserId, memoryEligible, deviceLocalDate, status])
 }
 
 model ChatMessage {
@@ -207,7 +207,7 @@ model ChatMessage {
 model ChatDailyAnchor {
   id              String                  @id @default(cuid())
   anchorId        String                  @unique @db.VarChar(191)
-  ownerDeviceId   String                  @db.VarChar(191)
+  ownerUserId   String                  @db.VarChar(191)
   requestId       String                  @db.VarChar(191)
   sourceHash      String                  @db.VarChar(191)
   resultHash      String?                 @db.VarChar(191)
@@ -225,13 +225,13 @@ model ChatDailyAnchor {
   sources         ChatDailyAnchorSource[]
   correction      ChatAnchorCorrection?
 
-  @@unique([ownerDeviceId, requestId])
-  @@index([ownerDeviceId, status, generatedAt])
+  @@unique([ownerUserId, requestId])
+  @@index([ownerUserId, status, generatedAt])
 }
 
 model ChatDailyAnchorSource {
   id             String          @id @default(cuid())
-  ownerDeviceId  String          @db.VarChar(191)
+  ownerUserId  String          @db.VarChar(191)
   anchorBatchId  String          @db.VarChar(191)
   turnId         String          @db.VarChar(191)
   messageId      String          @db.VarChar(191)
@@ -242,14 +242,14 @@ model ChatDailyAnchorSource {
   message        ChatMessage     @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([anchorBatchId, messageId])
-  @@index([ownerDeviceId, messageId])
+  @@index([ownerUserId, messageId])
   @@index([turnId])
   @@index([messageId])
 }
 
 model ChatAnchorCorrection {
   id            String                        @id @default(cuid())
-  ownerDeviceId String                        @db.VarChar(191)
+  ownerUserId String                        @db.VarChar(191)
   anchorId      String                        @db.VarChar(191)
   anchorBatchId String                        @unique @db.VarChar(191)
   correction    String                        @db.LongText
@@ -259,13 +259,13 @@ model ChatAnchorCorrection {
   anchorBatch   ChatDailyAnchor               @relation(fields: [anchorBatchId], references: [id], onDelete: Cascade)
   commands      ChatAnchorCorrectionCommand[]
 
-  @@unique([ownerDeviceId, anchorId])
-  @@index([ownerDeviceId, updatedAt])
+  @@unique([ownerUserId, anchorId])
+  @@index([ownerUserId, updatedAt])
 }
 
 model ChatAnchorCorrectionCommand {
   id                String               @id @default(cuid())
-  ownerDeviceId     String               @db.VarChar(191)
+  ownerUserId     String               @db.VarChar(191)
   idempotencyKey    String               @db.VarChar(191)
   requestHash       String               @db.VarChar(191)
   correctionId      String               @db.VarChar(191)
@@ -273,13 +273,13 @@ model ChatAnchorCorrectionCommand {
   correction        ChatAnchorCorrection @relation(fields: [correctionId], references: [id], onDelete: Cascade)
   createdAt         DateTime             @default(now())
 
-  @@unique([ownerDeviceId, idempotencyKey])
+  @@unique([ownerUserId, idempotencyKey])
   @@index([correctionId])
 }
 
 model GrowthFlower {
   id                 String   @id @default(cuid()) @db.VarChar(191)
-  ownerDeviceId      String   @db.VarChar(191)
+  ownerUserId      String   @db.VarChar(191)
   flowerKey          String   @db.VarChar(32)
   summary            String   @db.VarChar(240)
   sourceDiaryIds     Json
@@ -288,13 +288,13 @@ model GrowthFlower {
   awardedAt          DateTime @default(now())
   createdAt          DateTime @default(now())
 
-  @@unique([ownerDeviceId, flowerKey])
-  @@index([ownerDeviceId, awardedAt])
+  @@unique([ownerUserId, flowerKey])
+  @@index([ownerUserId, awardedAt])
 }
 
 model GrowthRecognitionRun {
   id                   String   @id @default(cuid()) @db.VarChar(191)
-  ownerDeviceId        String   @db.VarChar(191)
+  ownerUserId        String   @db.VarChar(191)
   runKey               String   @db.VarChar(191)
   kind                 String   @db.VarChar(24)
   sourceVersion        String   @db.VarChar(191)
@@ -311,25 +311,25 @@ model GrowthRecognitionRun {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  @@unique([ownerDeviceId, runKey])
-  @@index([ownerDeviceId, status, createdAt])
+  @@unique([ownerUserId, runKey])
+  @@index([ownerUserId, status, createdAt])
 }
 
 model GrowthMilestone {
   id              String   @id @default(cuid()) @db.VarChar(191)
-  ownerDeviceId   String   @db.VarChar(191)
+  ownerUserId   String   @db.VarChar(191)
   milestoneId     String   @db.VarChar(32)
   sourceDiaryIds  Json
   achievedAt      DateTime @default(now())
   createdAt       DateTime @default(now())
 
-  @@unique([ownerDeviceId, milestoneId])
-  @@index([ownerDeviceId, achievedAt])
+  @@unique([ownerUserId, milestoneId])
+  @@index([ownerUserId, achievedAt])
 }
 
 model GrowthInsightReport {
   id                 String   @id @default(cuid()) @db.VarChar(191)
-  ownerDeviceId      String   @db.VarChar(191)
+  ownerUserId      String   @db.VarChar(191)
   sourceVersion      String   @db.VarChar(191)
   sourceDiaryIds     Json
   sourceDiaryVersions Json
@@ -338,13 +338,13 @@ model GrowthInsightReport {
   generatedAt        DateTime @default(now())
   createdAt          DateTime @default(now())
 
-  @@unique([ownerDeviceId, sourceVersion])
-  @@index([ownerDeviceId, generatedAt])
+  @@unique([ownerUserId, sourceVersion])
+  @@index([ownerUserId, generatedAt])
 }
 
 model GrowthReportJob {
   id                 String   @id @default(cuid()) @db.VarChar(191)
-  ownerDeviceId      String   @db.VarChar(191)
+  ownerUserId      String   @db.VarChar(191)
   requestId          String   @db.VarChar(191)
   sourceVersion      String   @db.VarChar(191)
   sourceDiaryRefs    Json
@@ -358,14 +358,14 @@ model GrowthReportJob {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([ownerDeviceId, requestId])
-  @@unique([ownerDeviceId, sourceVersion])
-  @@index([ownerDeviceId, status, createdAt])
+  @@unique([ownerUserId, requestId])
+  @@unique([ownerUserId, sourceVersion])
+  @@index([ownerUserId, status, createdAt])
 }
 
 model Draft {
   id               String   @id @default(cuid())
-  ownerDeviceId    String
+  ownerUserId    String
   sourceDiaryId    String?
   type             String
   characterId      String
@@ -375,12 +375,12 @@ model Draft {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  @@index([ownerDeviceId, createdAt])
+  @@index([ownerUserId, createdAt])
 }
 
 model SaveCommand {
   id                 String   @id @default(cuid())
-  ownerDeviceId      String
+  ownerUserId      String
   idempotencyKey     String
   draftId            String
   sourceDiaryId      String?
@@ -390,12 +390,12 @@ model SaveCommand {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([ownerDeviceId, idempotencyKey])
+  @@unique([ownerUserId, idempotencyKey])
 }
 
 model GenerationJob {
   jobId              String   @id @default(cuid())
-  ownerDeviceId      String
+  ownerUserId      String
   draftId            String
   draftVersion       Int
   idempotencyKey     String
@@ -413,13 +413,13 @@ model GenerationJob {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([ownerDeviceId, idempotencyKey])
-  @@index([ownerDeviceId, createdAt])
+  @@unique([ownerUserId, idempotencyKey])
+  @@index([ownerUserId, createdAt])
 }
 
 model DiscoveryStory {
   id                String          @id @default(cuid())
-  ownerDeviceId     String
+  ownerUserId     String
   sourceDiaryId     String?         @unique(map: "DiscoveryStory_sourceDiaryId_key") @db.VarChar(191)
   sourceDiaryVersion Int?
   publicationStatus String
@@ -442,51 +442,71 @@ model DiscoveryStory {
 
   @@index([publicationStatus, publishedAt, withdrawnAt, date, id], map: "DiscoveryStory_visible_latest_idx")
   @@index([publicationStatus, publishedAt, withdrawnAt, cityKey, date, id], map: "DiscoveryStory_visible_same_city_idx")
-  @@index([ownerDeviceId, createdAt])
+  @@index([ownerUserId, createdAt])
 }
 
 model DiscoveryLike {
   storyId       String
-  ownerDeviceId String
+  ownerUserId String
   createdAt     DateTime       @default(now())
   story         DiscoveryStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
 
-  @@id([storyId, ownerDeviceId])
-  @@index([ownerDeviceId, createdAt])
+  @@id([storyId, ownerUserId])
+  @@index([ownerUserId, createdAt])
 }
 
-model AppAttestDevice {
-  deviceId     String    @id
-  keyId        String    @unique
-  publicKey    String    @db.LongText
-  signCount    Int       @default(0)
-  tokenVersion Int       @default(1)
-  environment  String
-  revokedAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  @@index([revokedAt, updatedAt])
+model UserAccount {
+  id                String          @id @default(cuid())
+  username          String          @unique @db.VarChar(32)
+  email             String          @unique @db.VarChar(320)
+  emailVerifiedAt   DateTime
+  passwordHash      String          @db.VarChar(255)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  session           AccountSession?
 }
 
-model AppAttestChallenge {
+model AccountSession {
+  id        String      @id
+  userId    String      @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime    @default(now())
+  user      UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt, revokedAt])
+}
+
+model CaptchaChallenge {
   id         String    @id
-  challenge  String    @unique
-  purpose    String
-  keyId      String?
-  deviceId   String?
-  method     String?
-  path       String?
-  bodyHash   String?
+  purpose    String    @db.VarChar(16)
+  targetX    Int
+  imageSeed  String    @db.VarChar(64)
   expiresAt  DateTime
   consumedAt DateTime?
   createdAt  DateTime  @default(now())
 
   @@index([expiresAt, consumedAt])
-  @@index([keyId, purpose])
 }
 
-model AppAttestRateLimit {
+model EmailVerificationChallenge {
+  id            String    @id
+  email         String    @db.VarChar(320)
+  purpose       String    @db.VarChar(16)
+  ownerUserId   String?   @db.VarChar(191)
+  codeHash      String    @db.VarChar(64)
+  attemptCount  Int       @default(0)
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([email, purpose])
+  @@index([email, purpose, createdAt])
+  @@index([ownerUserId, purpose, createdAt])
+  @@index([expiresAt, consumedAt])
+}
+
+model AuthRateLimit {
   id        String   @id
   count     Int      @default(0)
   expiresAt DateTime
@@ -494,4 +514,14 @@ model AppAttestRateLimit {
   updatedAt DateTime @updatedAt
 
   @@index([expiresAt])
+}
+
+model AccountDeletionJob {
+  id             String   @id
+  ownerUserId    String   @unique @db.VarChar(191)
+  status         String   @db.VarChar(24)
+  attemptCount   Int      @default(0)
+  lastFailureCode String? @db.VarChar(48)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }

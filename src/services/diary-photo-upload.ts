@@ -50,7 +50,7 @@ async function getReadableUri(
   if (localUri) return { uri: localUri };
   if (!photo.uri
     || !photo.sourceAssetId
-    || !photo.remoteHeaders?.['x-device-id']
+    || !photo.remoteHeaders?.Authorization
     || !(photo.source === 'device' || (photo.source === 'generated' && photo.generationSource === 'provider'))
     || photo.uri !== getMaterialPhotoContentUrl(photo.id)
     || !FileSystem.cacheDirectory) {

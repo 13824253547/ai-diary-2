@@ -179,8 +179,8 @@ async function lockConversation(
 export class ChatSessionsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listConversations(input: unknown, ownerDeviceId: string): Promise<ChatConversationPage> {
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+  async listConversations(input: unknown, ownerUserId: string): Promise<ChatConversationPage> {
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     if (!isRecord(input)
       || typeof input.page !== 'number'
       || !Number.isSafeInteger(input.page)
@@ -193,7 +193,7 @@ export class ChatSessionsService {
     const pageSize = input.pageSize as typeof CHAT_PAGE_SIZES[number];
     const skip = (page - 1) * pageSize;
     if (!Number.isSafeInteger(skip)) throw new ChatSessionError('invalid_input', '会话页码超出范围。');
-    const where = { ownerDeviceId: owner };
+    const where = { ownerUserId: owner };
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.chatConversation.findMany({
         where,
@@ -216,13 +216,13 @@ export class ChatSessionsService {
     };
   }
 
-  async getConversation(conversationIdInput: string, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
+  async getConversation(conversationIdInput: string, ownerUserId: string): Promise<ChatConversationSnapshot> {
     const conversationId = normalizeIdentifier(conversationIdInput, 'conversationId');
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     return this.prisma.$transaction(async transaction => {
       const conversation = await lockConversation(transaction, conversationId);
       if (!conversation) throw new ChatSessionError('not_found', '聊天会话不存在。');
-      if (conversation.ownerDeviceId !== owner) {
+      if (conversation.ownerUserId !== owner) {
         throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
       }
       const [messages, turns] = await Promise.all([
@@ -231,7 +231,7 @@ export class ChatSessionsService {
           orderBy: [{ order: 'asc' }, { id: 'asc' }],
         }),
         transaction.chatTurn.findMany({
-          where: { ownerDeviceId: owner, conversationId },
+          where: { ownerUserId: owner, conversationId },
           orderBy: [{ sequence: 'asc' }, { id: 'asc' }],
         }),
       ]);
@@ -250,7 +250,7 @@ export class ChatSessionsService {
     userMessageId: string;
     text: string;
     deviceLocalDate?: string;
-  }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
+  }, ownerUserId: string): Promise<ChatConversationSnapshot> {
     const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const userMessageId = normalizeIdentifier(input.userMessageId, 'userMessageId');
@@ -262,7 +262,7 @@ export class ChatSessionsService {
       throw new ChatSessionError(policyCode, getPetChatPolicyMessage(policyCode));
     }
     assertReplyProviderAvailable();
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     const requestHash = fingerprint([conversationId, requestId, userMessageId, text, deviceLocalDate ?? null]);
 
     try {
@@ -270,18 +270,18 @@ export class ChatSessionsService {
         let conversation = await transaction.chatConversation.findUnique({ where: { id: conversationId } });
         if (!conversation) {
           conversation = await transaction.chatConversation.create({
-            data: { id: conversationId, ownerDeviceId: owner },
+            data: { id: conversationId, ownerUserId: owner },
           });
         }
-        if (conversation.ownerDeviceId !== owner) {
+        if (conversation.ownerUserId !== owner) {
           throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
         }
         conversation = await lockConversation(transaction, conversationId);
         if (!conversation) throw new ChatSessionError('not_found', '聊天会话不存在。');
 
         const uniqueTurn = {
-          ownerDeviceId_conversationId_requestId: {
-            ownerDeviceId: owner,
+          ownerUserId_conversationId_requestId: {
+            ownerUserId: owner,
             conversationId,
             requestId,
           },
@@ -302,7 +302,7 @@ export class ChatSessionsService {
         });
         await transaction.chatTurn.create({
           data: {
-            ownerDeviceId: owner,
+            ownerUserId: owner,
             conversationId,
             requestId,
             requestHash,
@@ -335,7 +335,7 @@ export class ChatSessionsService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const existing = await this.prisma.chatTurn.findUnique({
           where: {
-            ownerDeviceId_conversationId_requestId: { ownerDeviceId: owner, conversationId, requestId },
+            ownerUserId_conversationId_requestId: { ownerUserId: owner, conversationId, requestId },
           },
         });
         if (existing && existing.requestHash === requestHash && existing.userMessageId === userMessageId) {
@@ -349,7 +349,7 @@ export class ChatSessionsService {
           throw new ChatSessionError('invalid_input', '消息标识已被其他请求使用。');
         }
         const conversation = await this.prisma.chatConversation.findUnique({ where: { id: conversationId } });
-        if (conversation && conversation.ownerDeviceId !== owner) {
+        if (conversation && conversation.ownerUserId !== owner) {
           throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
         }
         return this.beginTurn(input, owner);
@@ -366,8 +366,8 @@ export class ChatSessionsService {
     text: string;
     source: 'mock' | 'provider';
     providerRequestId?: string;
-  }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
-    return this.persistTurnReply(input, ownerDeviceId, false);
+  }, ownerUserId: string): Promise<ChatConversationSnapshot> {
+    return this.persistTurnReply(input, ownerUserId, false);
   }
 
   async completeGeneratedTurn(input: {
@@ -378,32 +378,32 @@ export class ChatSessionsService {
     text: string;
     source: 'provider';
     providerRequestId?: string;
-  }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
+  }, ownerUserId: string): Promise<ChatConversationSnapshot> {
     if (!isArkPetChatProviderConfigured()) {
       throw new ChatSessionError('provider_failed', '正式环境尚未配置可信的聊天回复服务。');
     }
-    return this.persistTurnReply(input, ownerDeviceId, true);
+    return this.persistTurnReply(input, ownerUserId, true);
   }
 
   async discardPolicyBlockedTurn(input: {
     conversationId: string;
     requestId: string;
     attempt: number;
-  }, ownerDeviceId: string): Promise<void> {
+  }, ownerUserId: string): Promise<void> {
     const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const attempt = normalizePositiveInteger(input.attempt, 'attempt');
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
 
     await this.prisma.$transaction(async transaction => {
       const conversation = await lockConversation(transaction, conversationId);
       if (!conversation) throw new ChatSessionError('not_found', '聊天会话不存在。');
-      if (conversation.ownerDeviceId !== owner) {
+      if (conversation.ownerUserId !== owner) {
         throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
       }
       const turn = await transaction.chatTurn.findUnique({
         where: {
-          ownerDeviceId_conversationId_requestId: { ownerDeviceId: owner, conversationId, requestId },
+          ownerUserId_conversationId_requestId: { ownerUserId: owner, conversationId, requestId },
         },
       });
       if (!turn) return;
@@ -425,7 +425,7 @@ export class ChatSessionsService {
     text: string;
     source: 'mock' | 'provider';
     providerRequestId?: string;
-  }, ownerDeviceId: string, trustedProvider: boolean): Promise<ChatConversationSnapshot> {
+  }, ownerUserId: string, trustedProvider: boolean): Promise<ChatConversationSnapshot> {
     const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const attempt = normalizePositiveInteger(input.attempt, 'attempt');
@@ -444,18 +444,18 @@ export class ChatSessionsService {
     const providerRequestId = input.providerRequestId
       ? normalizeIdentifier(input.providerRequestId, 'providerRequestId')
       : undefined;
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     const resultHash = fingerprint([attempt, assistantMessageId, text, input.source, providerRequestId]);
 
     return this.prisma.$transaction(async transaction => {
       const conversation = await lockConversation(transaction, conversationId);
       if (!conversation) throw new ChatSessionError('not_found', '聊天会话不存在。');
-      if (conversation.ownerDeviceId !== owner) {
+      if (conversation.ownerUserId !== owner) {
         throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
       }
       const turn = await transaction.chatTurn.findUnique({
         where: {
-          ownerDeviceId_conversationId_requestId: { ownerDeviceId: owner, conversationId, requestId },
+          ownerUserId_conversationId_requestId: { ownerUserId: owner, conversationId, requestId },
         },
       });
       if (!turn) throw new ChatSessionError('not_found', '聊天请求不存在。');
@@ -508,23 +508,23 @@ export class ChatSessionsService {
     requestId: string;
     attempt: number;
     failureCode: 'timeout' | 'cancelled' | 'provider_failed';
-  }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
+  }, ownerUserId: string): Promise<ChatConversationSnapshot> {
     const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const attempt = normalizePositiveInteger(input.attempt, 'attempt');
     if (!['timeout', 'cancelled', 'provider_failed'].includes(input.failureCode)) {
       throw new ChatSessionError('invalid_input', '聊天失败类型无效。');
     }
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     return this.prisma.$transaction(async transaction => {
       const conversation = await lockConversation(transaction, conversationId);
       if (!conversation) throw new ChatSessionError('not_found', '聊天会话不存在。');
-      if (conversation.ownerDeviceId !== owner) {
+      if (conversation.ownerUserId !== owner) {
         throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
       }
       const turn = await transaction.chatTurn.findUnique({
         where: {
-          ownerDeviceId_conversationId_requestId: { ownerDeviceId: owner, conversationId, requestId },
+          ownerUserId_conversationId_requestId: { ownerUserId: owner, conversationId, requestId },
         },
       });
       if (!turn) throw new ChatSessionError('not_found', '聊天请求不存在。');
@@ -553,21 +553,21 @@ export class ChatSessionsService {
     conversationId: string;
     requestId: string;
     nextAttempt: number;
-  }, ownerDeviceId: string): Promise<ChatConversationSnapshot> {
+  }, ownerUserId: string): Promise<ChatConversationSnapshot> {
     const conversationId = normalizeIdentifier(input.conversationId, 'conversationId');
     const requestId = normalizeIdentifier(input.requestId, 'requestId');
     const nextAttempt = normalizePositiveInteger(input.nextAttempt, 'nextAttempt');
     assertReplyProviderAvailable();
-    const owner = normalizeIdentifier(ownerDeviceId, 'ownerDeviceId');
+    const owner = normalizeIdentifier(ownerUserId, 'ownerUserId');
     return this.prisma.$transaction(async transaction => {
       const conversation = await lockConversation(transaction, conversationId);
       if (!conversation) throw new ChatSessionError('not_found', '聊天会话不存在。');
-      if (conversation.ownerDeviceId !== owner) {
+      if (conversation.ownerUserId !== owner) {
         throw new ChatSessionError('permission_denied', '聊天会话不属于当前设备。');
       }
       const turn = await transaction.chatTurn.findUnique({
         where: {
-          ownerDeviceId_conversationId_requestId: { ownerDeviceId: owner, conversationId, requestId },
+          ownerUserId_conversationId_requestId: { ownerUserId: owner, conversationId, requestId },
         },
       });
       if (!turn) throw new ChatSessionError('not_found', '聊天请求不存在。');

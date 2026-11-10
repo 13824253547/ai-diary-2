@@ -311,7 +311,7 @@ export type GenerationJobRecord = {
 };
 
 type StoredGenerationJobRecord = GenerationJobRecord & {
-  ownerDeviceId: string;
+  ownerUserId: string;
   inputSnapshot?: GenerationInputSnapshot;
 };
 
@@ -336,12 +336,12 @@ export class MemoryStoreService implements OnModuleDestroy {
     private readonly generationPhotoStore: TemporaryGenerationPhotoStore,
   ) {}
 
-  private acquireDiaryAiTask(ownerDeviceId: string, taskKey: string) {
-    let current = this.activeDiaryAiTasks.get(ownerDeviceId);
+  private acquireDiaryAiTask(ownerUserId: string, taskKey: string) {
+    let current = this.activeDiaryAiTasks.get(ownerUserId);
     if (current && current.taskKey !== taskKey) return undefined;
     if (!current) {
       current = { taskKey, token: Symbol(taskKey), references: 0 };
-      this.activeDiaryAiTasks.set(ownerDeviceId, current);
+      this.activeDiaryAiTasks.set(ownerUserId, current);
     }
     current.references += 1;
     const token = current.token;
@@ -349,14 +349,14 @@ export class MemoryStoreService implements OnModuleDestroy {
     return () => {
       if (released) return;
       released = true;
-      const active = this.activeDiaryAiTasks.get(ownerDeviceId);
+      const active = this.activeDiaryAiTasks.get(ownerUserId);
       if (active?.token !== token) return;
       active.references -= 1;
-      if (active.references <= 0) this.activeDiaryAiTasks.delete(ownerDeviceId);
+      if (active.references <= 0) this.activeDiaryAiTasks.delete(ownerUserId);
     };
   }
 
-  async createDraft(input: Omit<DraftRecord, 'id'> & { id?: string }, ownerDeviceId: string) {
+  async createDraft(input: Omit<DraftRecord, 'id'> & { id?: string }, ownerUserId: string) {
     if (!isRecord(input)
       || (input.id !== undefined && !isNonEmptyString(input.id))
       || (input.sourceDiaryId !== undefined && !isNonEmptyString(input.sourceDiaryId))
@@ -385,7 +385,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       const existing = await this.prisma.draft.findUnique({
         where: { id: input.id },
       });
-      if (existing && existing.ownerDeviceId !== ownerDeviceId) {
+      if (existing && existing.ownerUserId !== ownerUserId) {
         throw new PermissionDeniedError('draft does not belong to current device');
       }
       if (existing && existing.sourceDiaryId === null && !canCreateDiaryType(input.type)) {
@@ -401,7 +401,7 @@ export class MemoryStoreService implements OnModuleDestroy {
           where: { id: input.id },
           create: {
             id: input.id,
-            ownerDeviceId,
+            ownerUserId,
             sourceDiaryId: input.sourceDiaryId,
             type: input.type,
             characterId: input.characterId,
@@ -420,7 +420,7 @@ export class MemoryStoreService implements OnModuleDestroy {
         })
       : await this.prisma.draft.create({
           data: {
-            ownerDeviceId,
+            ownerUserId,
             sourceDiaryId: input.sourceDiaryId,
             type: input.type,
             characterId: input.characterId,
@@ -433,30 +433,30 @@ export class MemoryStoreService implements OnModuleDestroy {
     return this.mapDraftRecord(draft);
   }
 
-  async getDraft(id: string, ownerDeviceId: string) {
+  async getDraft(id: string, ownerUserId: string) {
     const draft = await this.prisma.draft.findUnique({ where: { id } });
     if (!draft) return undefined;
-    if (draft.ownerDeviceId !== ownerDeviceId) {
+    if (draft.ownerUserId !== ownerUserId) {
       throw new PermissionDeniedError('draft does not belong to current device');
     }
     return this.mapDraftRecord(draft);
   }
 
-  async listDrafts(ownerDeviceId: string) {
+  async listDrafts(ownerUserId: string) {
     const drafts = await this.prisma.draft.findMany({
-      where: { ownerDeviceId },
+      where: { ownerUserId },
       orderBy: { createdAt: 'desc' },
     });
     return drafts.map(draft => this.mapDraftRecord(draft));
   }
 
-  async saveDiary(input: Omit<DiaryRecord, 'id'> & { id?: string }, ownerDeviceId: string) {
+  async saveDiary(input: Omit<DiaryRecord, 'id'> & { id?: string }, ownerUserId: string) {
     let publishedAt: Date | undefined;
     if (input.id) {
       const existing = await this.prisma.diary.findUnique({
         where: { id: input.id },
       });
-      if (existing && existing.ownerDeviceId !== ownerDeviceId) {
+      if (existing && existing.ownerUserId !== ownerUserId) {
         throw new PermissionDeniedError('diary does not belong to current device');
       }
       publishedAt = existing?.createdAt;
@@ -472,7 +472,7 @@ export class MemoryStoreService implements OnModuleDestroy {
           where: { id: input.id },
           create: {
             id: input.id,
-            ownerDeviceId,
+            ownerUserId,
             draftId: input.draftId,
             title: input.title,
             summary: input.summary,
@@ -499,7 +499,7 @@ export class MemoryStoreService implements OnModuleDestroy {
         })
       : await this.prisma.diary.create({
           data: {
-            ownerDeviceId,
+            ownerUserId,
             draftId: input.draftId,
             title: input.title,
             summary: input.summary,
@@ -522,7 +522,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     sourceDiaryVersion?: number;
     idempotencyKey: string;
     contentSnapshot: DiaryContentSnapshotRecord;
-  }, ownerDeviceId: string, assetHook?: DiarySaveAssetHook): Promise<SaveDiaryCommandResult> {
+  }, ownerUserId: string, assetHook?: DiarySaveAssetHook): Promise<SaveDiaryCommandResult> {
     if (!isRecord(input)
       || !isNonEmptyString(input.draftId)
       || !isNonEmptyString(input.idempotencyKey)
@@ -557,15 +557,15 @@ export class MemoryStoreService implements OnModuleDestroy {
     let publishedAt: Date | undefined;
     const existingCommand = await this.prisma.saveCommand.findUnique({
       where: {
-        ownerDeviceId_idempotencyKey: {
-          ownerDeviceId,
+        ownerUserId_idempotencyKey: {
+          ownerUserId,
           idempotencyKey: input.idempotencyKey,
         },
       },
     });
     if (existingCommand) {
       assertSaveCommandIdentity(existingCommand, input);
-      const existingDiary = await this.getDiary(existingCommand.diaryId, ownerDeviceId);
+      const existingDiary = await this.getDiary(existingCommand.diaryId, ownerUserId);
       if (existingDiary) {
         return {
           diaryId: existingCommand.diaryId,
@@ -589,7 +589,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       if (!sourceDiary) {
         throw new SaveDiaryError('not_found', 'source diary not found');
       }
-      if (sourceDiary.ownerDeviceId !== ownerDeviceId) {
+      if (sourceDiary.ownerUserId !== ownerUserId) {
         throw new PermissionDeniedError('source diary does not belong to current device');
       }
       if (sourceDiary.version !== sourceDiaryVersion) {
@@ -603,7 +603,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       const existingDiary = await this.prisma.diary.findUnique({
         where: { id: input.id },
       });
-      if (existingDiary && existingDiary.ownerDeviceId !== ownerDeviceId) {
+      if (existingDiary && existingDiary.ownerUserId !== ownerUserId) {
         throw new PermissionDeniedError('diary does not belong to current device');
       }
       if (existingDiary && !input.sourceDiaryId) {
@@ -619,7 +619,7 @@ export class MemoryStoreService implements OnModuleDestroy {
           const update = await prisma.diary.updateMany({
             where: {
               id: input.sourceDiaryId,
-              ownerDeviceId,
+              ownerUserId,
               version: expectedVersion,
             },
             data: {
@@ -638,8 +638,8 @@ export class MemoryStoreService implements OnModuleDestroy {
           if (update.count !== 1) {
             const racedCommand = await prisma.saveCommand.findUnique({
               where: {
-                ownerDeviceId_idempotencyKey: {
-                  ownerDeviceId,
+                ownerUserId_idempotencyKey: {
+                  ownerUserId,
                   idempotencyKey: input.idempotencyKey,
                 },
               },
@@ -647,7 +647,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             if (racedCommand) {
               assertSaveCommandIdentity(racedCommand, input);
               const racedDiary = await prisma.diary.findUnique({ where: { id: racedCommand.diaryId } });
-              if (racedDiary?.ownerDeviceId === ownerDeviceId) {
+              if (racedDiary?.ownerUserId === ownerUserId) {
                 return {
                   diaryId: racedCommand.diaryId,
                   draftId: racedCommand.draftId,
@@ -658,7 +658,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             }
             const currentSource = await prisma.diary.findUnique({ where: { id: input.sourceDiaryId } });
             if (!currentSource) throw new SaveDiaryError('not_found', 'source diary not found');
-            if (currentSource.ownerDeviceId !== ownerDeviceId) {
+            if (currentSource.ownerUserId !== ownerUserId) {
               throw new PermissionDeniedError('source diary does not belong to current device');
             }
             throw new SaveDiaryError('version_conflict', 'source diary version conflict');
@@ -668,7 +668,7 @@ export class MemoryStoreService implements OnModuleDestroy {
           savedDiary = await prisma.diary.create({
             data: {
               ...(input.id ? { id: input.id } : {}),
-              ownerDeviceId,
+              ownerUserId,
               draftId: input.draftId,
               title: input.title,
               summary: input.summary,
@@ -689,7 +689,7 @@ export class MemoryStoreService implements OnModuleDestroy {
 
         await prisma.saveCommand.create({
           data: {
-            ownerDeviceId,
+            ownerUserId,
             idempotencyKey: input.idempotencyKey,
             draftId: input.draftId,
             sourceDiaryId: input.sourceDiaryId,
@@ -713,15 +713,15 @@ export class MemoryStoreService implements OnModuleDestroy {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const racedCommand = await this.prisma.saveCommand.findUnique({
           where: {
-            ownerDeviceId_idempotencyKey: {
-              ownerDeviceId,
+            ownerUserId_idempotencyKey: {
+              ownerUserId,
               idempotencyKey: input.idempotencyKey,
             },
           },
         });
         if (racedCommand) {
           assertSaveCommandIdentity(racedCommand, input);
-          const racedDiary = await this.getDiary(racedCommand.diaryId, ownerDeviceId);
+          const racedDiary = await this.getDiary(racedCommand.diaryId, ownerUserId);
           if (racedDiary) {
             return {
               diaryId: racedCommand.diaryId,
@@ -736,17 +736,17 @@ export class MemoryStoreService implements OnModuleDestroy {
     }
   }
 
-  async getSaveResult(idempotencyKey: string, ownerDeviceId: string) {
+  async getSaveResult(idempotencyKey: string, ownerUserId: string) {
     const command = await this.prisma.saveCommand.findUnique({
       where: {
-        ownerDeviceId_idempotencyKey: {
-          ownerDeviceId,
+        ownerUserId_idempotencyKey: {
+          ownerUserId,
           idempotencyKey,
         },
       },
     });
     if (!command) return undefined;
-    const diary = await this.getDiary(command.diaryId, ownerDeviceId);
+    const diary = await this.getDiary(command.diaryId, ownerUserId);
     if (!diary) return undefined;
     return {
       diaryId: diary.id,
@@ -757,17 +757,17 @@ export class MemoryStoreService implements OnModuleDestroy {
     };
   }
 
-  async getDiary(id: string, ownerDeviceId: string) {
+  async getDiary(id: string, ownerUserId: string) {
     const diary = await this.prisma.diary.findUnique({ where: { id } });
     if (!diary) return undefined;
-    if (diary.ownerDeviceId !== ownerDeviceId) {
+    if (diary.ownerUserId !== ownerUserId) {
       throw new PermissionDeniedError('diary does not belong to current device');
     }
     return this.mapDiaryRecord(diary);
   }
 
-  async deleteDiary(id: string, ownerDeviceId: string, assetHook?: DiaryDeleteAssetHook) {
-    if (!isNonEmptyString(id) || id !== id.trim() || id.length > 191 || !isNonEmptyString(ownerDeviceId)) {
+  async deleteDiary(id: string, ownerUserId: string, assetHook?: DiaryDeleteAssetHook) {
+    if (!isNonEmptyString(id) || id !== id.trim() || id.length > 191 || !isNonEmptyString(ownerUserId)) {
       throw new DeleteDiaryError('invalid_input', '日记标识无效。');
     }
 
@@ -776,7 +776,7 @@ export class MemoryStoreService implements OnModuleDestroy {
         const ownerDiaries = await transaction.$queryRaw<Array<{ id: string; version: number; draftId: string }>>(Prisma.sql`
           SELECT \`id\`, \`version\`, \`draftId\`
           FROM \`Diary\`
-          WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+          WHERE \`ownerUserId\` = ${ownerUserId}
           ORDER BY \`id\`
           FOR UPDATE
         `);
@@ -786,54 +786,54 @@ export class MemoryStoreService implements OnModuleDestroy {
         await assetHook?.beforeCommit(transaction, id);
 
         const stories = await transaction.discoveryStory.findMany({
-          where: { ownerDeviceId, sourceDiaryId: id },
+          where: { ownerUserId, sourceDiaryId: id },
           select: { id: true },
         });
         const storyIds = stories.map(story => story.id);
         if (storyIds.length) {
           await transaction.discoveryLike.deleteMany({ where: { storyId: { in: storyIds } } });
-          await transaction.discoveryStory.deleteMany({ where: { id: { in: storyIds }, ownerDeviceId } });
+          await transaction.discoveryStory.deleteMany({ where: { id: { in: storyIds }, ownerUserId } });
         }
 
         const drafts = await transaction.draft.findMany({
           where: {
-            ownerDeviceId,
+            ownerUserId,
             OR: [{ id: diary.draftId }, { sourceDiaryId: id }],
           },
           select: { id: true },
         });
         const draftIds = drafts.map(draft => draft.id);
         if (draftIds.length) {
-          await transaction.generationJob.deleteMany({ where: { ownerDeviceId, draftId: { in: draftIds } } });
+          await transaction.generationJob.deleteMany({ where: { ownerUserId, draftId: { in: draftIds } } });
         }
 
         const corrections = await transaction.anchorCorrection.findMany({
-          where: { ownerDeviceId, diaryId: id },
+          where: { ownerUserId, diaryId: id },
           select: { id: true },
         });
         const correctionIds = corrections.map(correction => correction.id);
         if (correctionIds.length) {
           await transaction.anchorCorrectionCommand.deleteMany({
-            where: { ownerDeviceId, correctionId: { in: correctionIds } },
+            where: { ownerUserId, correctionId: { in: correctionIds } },
           });
-          await transaction.anchorCorrection.deleteMany({ where: { ownerDeviceId, diaryId: id } });
+          await transaction.anchorCorrection.deleteMany({ where: { ownerUserId, diaryId: id } });
         }
-        await transaction.diaryAnchor.deleteMany({ where: { ownerDeviceId, diaryId: id } });
-        await transaction.diaryAnchorExtraction.deleteMany({ where: { ownerDeviceId, diaryId: id } });
+        await transaction.diaryAnchor.deleteMany({ where: { ownerUserId, diaryId: id } });
+        await transaction.diaryAnchorExtraction.deleteMany({ where: { ownerUserId, diaryId: id } });
 
         const flowers = await transaction.growthFlower.findMany({
-          where: { ownerDeviceId },
+          where: { ownerUserId },
           select: { id: true, sourceDiaryIds: true },
         });
         const affectedFlowerIds = flowers
           .filter(flower => readJsonStringIds(flower.sourceDiaryIds).includes(id))
           .map(flower => flower.id);
         if (affectedFlowerIds.length) {
-          await transaction.growthFlower.deleteMany({ where: { ownerDeviceId, id: { in: affectedFlowerIds } } });
+          await transaction.growthFlower.deleteMany({ where: { ownerUserId, id: { in: affectedFlowerIds } } });
         }
 
         const milestones = await transaction.growthMilestone.findMany({
-          where: { ownerDeviceId },
+          where: { ownerUserId },
           select: { id: true, sourceDiaryIds: true },
         });
         for (const milestone of milestones) {
@@ -847,7 +847,7 @@ export class MemoryStoreService implements OnModuleDestroy {
         }
 
         const recognitionRuns = await transaction.growthRecognitionRun.findMany({
-          where: { ownerDeviceId },
+          where: { ownerUserId },
           select: { id: true, sourceDiaryId: true, sourceDiaryRefs: true },
         });
         const affectedRunIds = recognitionRuns
@@ -855,19 +855,19 @@ export class MemoryStoreService implements OnModuleDestroy {
           .map(run => run.id);
         if (affectedRunIds.length) {
           await transaction.growthRecognitionRun.deleteMany({
-            where: { ownerDeviceId, id: { in: affectedRunIds } },
+            where: { ownerUserId, id: { in: affectedRunIds } },
           });
         }
 
         // Reports summarize the full diary set, so any deletion invalidates their stored output and jobs.
-        await transaction.growthReportJob.deleteMany({ where: { ownerDeviceId } });
-        await transaction.growthInsightReport.deleteMany({ where: { ownerDeviceId } });
+        await transaction.growthReportJob.deleteMany({ where: { ownerUserId } });
+        await transaction.growthInsightReport.deleteMany({ where: { ownerUserId } });
 
         await transaction.saveCommand.deleteMany({
-          where: { ownerDeviceId, OR: [{ diaryId: id }, { sourceDiaryId: id }] },
+          where: { ownerUserId, OR: [{ diaryId: id }, { sourceDiaryId: id }] },
         });
         if (draftIds.length) {
-          await transaction.draft.deleteMany({ where: { ownerDeviceId, id: { in: draftIds } } });
+          await transaction.draft.deleteMany({ where: { ownerUserId, id: { in: draftIds } } });
         }
         await transaction.diary.delete({ where: { id } });
       });
@@ -884,7 +884,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     transaction: Prisma.TransactionClient,
     diary: {
       id: string;
-      ownerDeviceId: string;
+      ownerUserId: string;
       title: string;
       location: string;
       date: Date;
@@ -898,7 +898,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     const existing = await transaction.discoveryStory.findUnique({
       where: { sourceDiaryId: diary.id },
     });
-    if (existing && existing.ownerDeviceId !== diary.ownerDeviceId) {
+    if (existing && existing.ownerUserId !== diary.ownerUserId) {
       throw new PermissionDeniedError('discovery story does not belong to current device');
     }
 
@@ -938,7 +938,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       ? existing.publishedAt
       : new Date();
     const baseData = {
-      ownerDeviceId: diary.ownerDeviceId,
+      ownerUserId: diary.ownerUserId,
       sourceDiaryVersion: diary.version,
       publicationStatus: 'published',
       title: snapshot.title,
@@ -994,7 +994,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     diaryId: string;
     privacy: string;
     publicBlockIds?: string[];
-  }, ownerDeviceId: string) {
+  }, ownerUserId: string) {
     if (!isRecord(input)
       || !isNonEmptyString(input.diaryId)
       || typeof input.privacy !== 'string'
@@ -1013,7 +1013,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       if (!lockedDiary) throw new SaveDiaryError('not_found', 'diary not found');
       const diary = await transaction.diary.findUnique({ where: { id: input.diaryId } });
       if (!diary) throw new SaveDiaryError('not_found', 'diary not found');
-      if (diary.ownerDeviceId !== ownerDeviceId) {
+      if (diary.ownerUserId !== ownerUserId) {
         throw new PermissionDeniedError('diary does not belong to current device');
       }
 
@@ -1053,7 +1053,7 @@ export class MemoryStoreService implements OnModuleDestroy {
 
   async rewriteDraftBlock(
     input: RewriteInputSnapshot,
-    ownerDeviceId: string,
+    ownerUserId: string,
     uploads: UploadedGenerationPhoto[] = [],
   ): Promise<RewriteResultRecord> {
     if (!isRecord(input)
@@ -1090,7 +1090,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     }
 
     const taskKey = `rewrite:${input.draftId}:${input.blockId}:${++this.rewriteTaskSequence}`;
-    const releaseTask = this.acquireDiaryAiTask(ownerDeviceId, taskKey);
+    const releaseTask = this.acquireDiaryAiTask(ownerUserId, taskKey);
     if (!releaseTask) {
       throw new RewriteDraftError(
         'version_conflict',
@@ -1099,7 +1099,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     }
 
     try {
-      const draft = await this.getDraft(input.draftId, ownerDeviceId);
+      const draft = await this.getDraft(input.draftId, ownerUserId);
       if (!draft) {
         throw new RewriteDraftError('not_found', 'draft not found');
       }
@@ -1133,9 +1133,9 @@ export class MemoryStoreService implements OnModuleDestroy {
     }
   }
 
-  async listDiaries(ownerDeviceId: string) {
+  async listDiaries(ownerUserId: string) {
     const diaries = await this.prisma.diary.findMany({
-      where: { ownerDeviceId },
+      where: { ownerUserId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     return diaries.map(diary => this.mapDiaryRecord(diary));
@@ -1145,12 +1145,12 @@ export class MemoryStoreService implements OnModuleDestroy {
     draftId: string;
     draftVersion: number;
     idempotencyKey: string;
-  }, ownerDeviceId: string, uploads: UploadedGenerationPhoto[] = []) {
+  }, ownerUserId: string, uploads: UploadedGenerationPhoto[] = []) {
     const restoreIdempotentJob = async () => {
       const existing = await this.prisma.generationJob.findUnique({
         where: {
-          ownerDeviceId_idempotencyKey: {
-            ownerDeviceId,
+          ownerUserId_idempotencyKey: {
+            ownerUserId,
             idempotencyKey: input.idempotencyKey,
           },
         },
@@ -1159,13 +1159,13 @@ export class MemoryStoreService implements OnModuleDestroy {
       if (existing.draftId !== input.draftId || existing.draftVersion !== input.draftVersion) {
         throw new GenerationJobError('version_conflict', '生成任务幂等键已绑定到其他草稿版本。');
       }
-      return this.getGenerationJob(existing.jobId, ownerDeviceId);
+      return this.getGenerationJob(existing.jobId, ownerUserId);
     };
 
     const restored = await restoreIdempotentJob();
     if (restored) return restored;
 
-    const draft = await this.getDraft(input.draftId, ownerDeviceId);
+    const draft = await this.getDraft(input.draftId, ownerUserId);
     if (!draft) {
       throw new GenerationJobError('not_found', 'draft not found');
     }
@@ -1173,7 +1173,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       throw new GenerationJobError('invalid_input', '生成日记至少需要3张不同的有效照片。');
     }
     const taskKey = `generation:${input.draftId}:${input.draftVersion}:${input.idempotencyKey}`;
-    const releaseTask = this.acquireDiaryAiTask(ownerDeviceId, taskKey);
+    const releaseTask = this.acquireDiaryAiTask(ownerUserId, taskKey);
     if (!releaseTask) {
       throw new GenerationJobError(
         'version_conflict',
@@ -1184,14 +1184,14 @@ export class MemoryStoreService implements OnModuleDestroy {
     try {
       try {
         await this.generationPhotoStore.stage(
-          ownerDeviceId,
+          ownerUserId,
           draft.id,
           input.draftVersion,
           draft.selectedPhotoIds,
           uploads,
         );
       } catch (error) {
-        await this.generationPhotoStore.cleanupGeneration(ownerDeviceId, draft.id, input.draftVersion).catch(() => undefined);
+        await this.generationPhotoStore.cleanupGeneration(ownerUserId, draft.id, input.draftVersion).catch(() => undefined);
         if (error instanceof GenerationPhotoInputError) {
           throw new GenerationJobError(error.code, error.message);
         }
@@ -1201,7 +1201,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       try {
         const job = await this.prisma.generationJob.create({
           data: {
-            ownerDeviceId,
+            ownerUserId,
             draftId: input.draftId,
             draftVersion: input.draftVersion,
             idempotencyKey: input.idempotencyKey,
@@ -1224,7 +1224,7 @@ export class MemoryStoreService implements OnModuleDestroy {
             result: Prisma.JsonNull,
           },
         });
-        this.ensureGenerationJobProcessing(job.jobId, ownerDeviceId, taskKey, releaseTask);
+        this.ensureGenerationJobProcessing(job.jobId, ownerUserId, taskKey, releaseTask);
         processingOwnsTask = true;
         return this.toPublicGenerationJob(this.mapGenerationJobRecord(job));
       } catch (error) {
@@ -1232,7 +1232,7 @@ export class MemoryStoreService implements OnModuleDestroy {
           const raced = await restoreIdempotentJob();
           if (raced) return raced;
         }
-        await this.generationPhotoStore.cleanupGeneration(ownerDeviceId, draft.id, input.draftVersion).catch(() => undefined);
+        await this.generationPhotoStore.cleanupGeneration(ownerUserId, draft.id, input.draftVersion).catch(() => undefined);
         throw error;
       }
     } catch (error) {
@@ -1242,12 +1242,12 @@ export class MemoryStoreService implements OnModuleDestroy {
     }
   }
 
-  async getGenerationJob(jobId: string, ownerDeviceId: string) {
+  async getGenerationJob(jobId: string, ownerUserId: string) {
     const job = await this.prisma.generationJob.findUnique({
       where: { jobId },
     });
     if (!job) return undefined;
-    if (job.ownerDeviceId !== ownerDeviceId) {
+    if (job.ownerUserId !== ownerUserId) {
       throw new PermissionDeniedError('generation job does not belong to current device');
     }
     const current = this.mapGenerationJobRecord(job);
@@ -1255,16 +1255,16 @@ export class MemoryStoreService implements OnModuleDestroy {
       return this.toPublicGenerationJob(current);
     }
     const taskKey = `generation:${job.draftId}:${job.draftVersion}:${job.idempotencyKey}`;
-    void this.ensureGenerationJobProcessing(jobId, ownerDeviceId, taskKey);
+    void this.ensureGenerationJobProcessing(jobId, ownerUserId, taskKey);
     return this.toPublicGenerationJob(current);
   }
 
-  async cancelGenerationJob(jobId: string, ownerDeviceId: string) {
+  async cancelGenerationJob(jobId: string, ownerUserId: string) {
     const job = await this.prisma.generationJob.findUnique({
       where: { jobId },
     });
     if (!job) return undefined;
-    if (job.ownerDeviceId !== ownerDeviceId) {
+    if (job.ownerUserId !== ownerUserId) {
       throw new PermissionDeniedError('generation job does not belong to current device');
     }
     const current = this.mapGenerationJobRecord(job);
@@ -1399,7 +1399,7 @@ export class MemoryStoreService implements OnModuleDestroy {
 
   private mapGenerationJobRecord(job: {
     jobId: string;
-    ownerDeviceId: string;
+    ownerUserId: string;
     draftId: string;
     draftVersion: number;
     idempotencyKey: string;
@@ -1418,7 +1418,7 @@ export class MemoryStoreService implements OnModuleDestroy {
   }) {
     return {
       jobId: job.jobId,
-      ownerDeviceId: job.ownerDeviceId,
+      ownerUserId: job.ownerUserId,
       draftId: job.draftId,
       draftVersion: job.draftVersion,
       idempotencyKey: job.idempotencyKey,
@@ -1517,7 +1517,7 @@ export class MemoryStoreService implements OnModuleDestroy {
 
   private ensureGenerationJobProcessing(
     jobId: string,
-    ownerDeviceId: string,
+    ownerUserId: string,
     taskKey: string,
     reservedTaskRelease?: () => void,
   ) {
@@ -1525,7 +1525,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       reservedTaskRelease?.();
       return;
     }
-    const releaseTask = reservedTaskRelease ?? this.acquireDiaryAiTask(ownerDeviceId, taskKey);
+    const releaseTask = reservedTaskRelease ?? this.acquireDiaryAiTask(ownerUserId, taskKey);
     if (!releaseTask) return;
     const active = {
       controller: new AbortController(),
@@ -1553,7 +1553,7 @@ export class MemoryStoreService implements OnModuleDestroy {
     try {
       const job = await this.prisma.generationJob.findUnique({ where: { jobId } });
       if (!job || !['cancelled', 'failed', 'succeeded'].includes(job.status)) return;
-      await this.generationPhotoStore.cleanupGeneration(job.ownerDeviceId, job.draftId, job.draftVersion);
+      await this.generationPhotoStore.cleanupGeneration(job.ownerUserId, job.draftId, job.draftVersion);
     } catch {
       this.logger.warn('Unable to clean terminal generation photo assets.');
     }
@@ -1635,7 +1635,7 @@ export class MemoryStoreService implements OnModuleDestroy {
       try {
         await this.recordGenerationMilestone(jobId, 'photo-processing-started', attempt);
         const photos = await this.generationPhotoStore.readForGeneration(
-          current.ownerDeviceId,
+          current.ownerUserId,
           current.draftId,
           current.draftVersion,
           current.inputSnapshot.selectedPhotoIds,

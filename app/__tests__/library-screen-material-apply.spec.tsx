@@ -17,6 +17,11 @@ jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
 }));
 
+jest.mock('../../src/services/account-auth', () => ({
+  getAccountUserId: jest.fn().mockResolvedValue('user-test'),
+  getAccountAuthHeaders: jest.fn().mockResolvedValue({ Authorization: 'Bearer test-token' }),
+}));
+
 jest.mock('../../src/components/layout/screen', () => ({
   Screen: ({ children, header }: { children: React.ReactNode; header?: React.ReactNode }) => {
     const { View } = require('react-native');
@@ -115,6 +120,11 @@ describe('Library screen apply material photo to diary', () => {
       granted: true,
       canAskAgain: true,
     });
+    jest.spyOn(photoLibrary, 'listDevicePhotoAlbums').mockResolvedValue([{
+      id: '__all__',
+      title: '全部照片',
+      assetCount: 1,
+    }]);
     const listPhotos = jest.spyOn(photoLibrary, 'listDevicePhotos').mockResolvedValue({
       album: { id: '__all__', title: '全部照片', assetCount: 1 },
       photos: [buildDevicePhoto()],
@@ -128,7 +138,7 @@ describe('Library screen apply material photo to diary', () => {
 
     await waitFor(() => expect(screen.getByLabelText('添加素材照片P4')).toBeTruthy());
     expect(permission).toHaveBeenCalledTimes(1);
-    expect(listPhotos).toHaveBeenCalledWith({ first: 36 });
+    expect(listPhotos).toHaveBeenCalledWith({ albumId: '__all__', first: 36 });
   });
 
   test('opens a new diary with this material photo preselected from the material library', async () => {

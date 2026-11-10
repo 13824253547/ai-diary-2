@@ -157,7 +157,7 @@ describe('ApiClient request lifecycle', () => {
     form.append('photos', { uri: 'file:///photo.jpg', name: 'photo.jpg', type: 'image/jpeg' } as unknown as Blob);
     const client = new ApiClient({
       baseUrl: 'http://127.0.0.1:3001/api',
-      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+      getHeaders: () => ({ Authorization: 'Bearer test-token' }),
     });
 
     try {
@@ -170,7 +170,7 @@ describe('ApiClient request lifecycle', () => {
       expect(openedUrl).toBe('http://127.0.0.1:3001/api/generation/jobs');
       expect(sentBody).toBe(form);
       expect(sentHeaders).toMatchObject({
-        'x-device-id': 'device-test-1',
+        Authorization: 'Bearer test-token',
         'x-request-id': 'diag-request-test',
       });
       expect(sentHeaders).not.toHaveProperty('Content-Type');

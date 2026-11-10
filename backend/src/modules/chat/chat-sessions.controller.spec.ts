@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
+import { AccountAiTaskCoordinator } from '../../common/account-ai-task-coordinator';
 import { ChatDailyAnchorService } from '../anchors/chat-daily-anchor.service';
 import { ArkPetChatProvider, PetChatProviderError } from './ark-pet-chat-provider';
 import { PetChatMemoryService } from './pet-chat-memory.service';
@@ -22,8 +22,8 @@ describe('ChatSessionsController', () => {
   } as unknown as ChatSessionsService;
   const provider = { reply: jest.fn() } as unknown as ArkPetChatProvider;
   const taskCoordinator = {
-    runInteractive: (_ownerDeviceId: string, task: () => Promise<unknown>) => task(),
-  } as DeviceAiTaskCoordinator;
+    runInteractive: (_ownerUserId: string, task: () => Promise<unknown>) => task(),
+  } as AccountAiTaskCoordinator;
   const dailyAnchors = {
     enqueueAfterCompletedTurn: jest.fn(),
   } as unknown as ChatDailyAnchorService;
@@ -35,7 +35,7 @@ describe('ChatSessionsController', () => {
     jest.mocked(memories.getContext).mockResolvedValue('recent-diary-memory');
   });
 
-  test('requires device identity and forwards scoped conversation listing', async () => {
+  test('forwards conversation listing for the authenticated account', async () => {
     jest.mocked(service.listConversations).mockResolvedValue({
       items: [],
       page: 1,
@@ -43,8 +43,6 @@ describe('ChatSessionsController', () => {
       total: 0,
     });
 
-    await expect(controller.listConversations(undefined, undefined, undefined))
-      .rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.listConversations(undefined, undefined, 'device-1'))
       .resolves.toMatchObject({
         ok: true,
@@ -54,19 +52,13 @@ describe('ChatSessionsController', () => {
     expect(service.listConversations).toHaveBeenCalledWith({ page: 1, pageSize: 20 }, 'device-1');
   });
 
-  test('requires device identity before validating malformed query and turn input', async () => {
-    await expect(controller.listConversations(['1', '2'], undefined, undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
-    await expect(controller.beginTurn('conversation-1', undefined as never, undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
-    await expect(controller.generateReply('conversation-1', 'request-1', undefined as never, undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
+  test('validates malformed query and turn input for the authenticated account', async () => {
+    await expect(controller.listConversations(['1', '2'], undefined, 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.beginTurn('conversation-1', undefined as never, 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.generateReply('conversation-1', 'request-1', undefined as never, 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
     expect(service.listConversations).not.toHaveBeenCalled();
     expect(service.beginTurn).not.toHaveBeenCalled();
     expect(provider.reply).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
+import { AccountAiTaskCoordinator } from '../../common/account-ai-task-coordinator';
 import { PrismaService } from '../../common/prisma.service';
 import { AnchorReadModelService } from './anchor-read-model.service';
 import { ArkMemoryAnchorProvider } from './ark-memory-anchor-provider';
@@ -39,8 +39,8 @@ function createService(snapshot: unknown) {
     }),
   } as unknown as ArkMemoryAnchorProvider;
   const taskCoordinator = {
-    runBackground: jest.fn(async (_ownerDeviceId: string, task: () => Promise<unknown>) => task()),
-  } as unknown as DeviceAiTaskCoordinator;
+    runBackground: jest.fn(async (_ownerUserId: string, task: () => Promise<unknown>) => task()),
+  } as unknown as AccountAiTaskCoordinator;
 
   return {
     prisma,

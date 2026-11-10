@@ -21,9 +21,9 @@ describe('AnchorReadModelController', () => {
     jest.clearAllMocks();
   });
 
-  test('checks history identity first and forwards batch-scoped pagination', async () => {
-    await expect(controller.getChatHistory(undefined, 'bad', '15', undefined))
-      .rejects.toMatchObject({ response: { error: { code: 'device_identity_required' } } });
+  test('validates history input and forwards batch-scoped pagination for the account', async () => {
+    await expect(controller.getChatHistory(undefined, 'bad', '15', 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
     expect(service.getChatHistory).not.toHaveBeenCalled();
     await expect(controller.getChatHistory('batch-1', '1e1', '100', 'device-1'))
       .rejects.toBeInstanceOf(BadRequestException);
@@ -33,7 +33,7 @@ describe('AnchorReadModelController', () => {
     expect(service.getChatHistory).toHaveBeenCalledWith('batch-1', { page: 1, pageSize: 100 }, 'device-1');
   });
 
-  test('requires an explicit tag and device identity for read queries', async () => {
+  test('requires an explicit tag for read queries', async () => {
     jest.mocked(service.listByTag).mockResolvedValue({
       items: [],
       tagId: 'tag-stable',
@@ -43,8 +43,6 @@ describe('AnchorReadModelController', () => {
     });
 
     await expect(controller.listByTag(undefined, undefined, undefined, 'device-1'))
-      .rejects.toBeInstanceOf(BadRequestException);
-    await expect(controller.listByTag('tag-stable', undefined, undefined, undefined))
       .rejects.toBeInstanceOf(BadRequestException);
     await expect(controller.listByTag('tag-stable', undefined, undefined, 'device-1'))
       .resolves.toMatchObject({
@@ -69,15 +67,13 @@ describe('AnchorReadModelController', () => {
     });
     jest.mocked(service.countFeed).mockResolvedValue(3);
 
-    await expect(controller.listFeed(undefined, undefined, undefined, undefined))
-      .rejects.toMatchObject({ response: { error: { code: 'device_identity_required' } } });
-    await expect(controller.listFeed(undefined, undefined, undefined, 'device-1'))
+    await expect(controller.listFeed(undefined, undefined, undefined, 'user-1'))
       .resolves.toMatchObject({
         ok: true,
         version: 'memory-anchor-v1',
         data: { tagId: null, total: 3 },
       });
-    expect(service.listFeed).toHaveBeenCalledWith({ page: 1, pageSize: 20 }, 'device-1');
+    expect(service.listFeed).toHaveBeenCalledWith({ page: 1, pageSize: 20 }, 'user-1');
     await expect(controller.getSummary('device-1')).resolves.toEqual({
       ok: true,
       version: 'memory-anchor-v1',
@@ -86,15 +82,11 @@ describe('AnchorReadModelController', () => {
     expect(service.countFeed).toHaveBeenCalledWith('device-1');
   });
 
-  test('requires device identity before validating malformed queries and extraction bodies', async () => {
-    await expect(controller.listByTag(undefined, '0', '15', undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
-    await expect(controller.beginExtraction(undefined as never, undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
+  test('validates malformed queries and extraction bodies for the authenticated account', async () => {
+    await expect(controller.listByTag(undefined, '0', '15', 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.beginExtraction(undefined as never, 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
     expect(service.listByTag).not.toHaveBeenCalled();
     expect(service.beginExtraction).not.toHaveBeenCalled();
   });

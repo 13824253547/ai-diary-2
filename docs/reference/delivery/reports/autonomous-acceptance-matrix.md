@@ -2,7 +2,7 @@
 
 ## 最新统计（TEST-14 / DEV-19）
 
-coverage 有效验收总数为 225，当前明确 passed 为 96（42.7%）。TEST-14 最近完整测试仍为 backend unit 17/17 suites、199/199 tests，隔离 MySQL e2e 49/49；DEV-19 当前定向前端 3 suites / 166 tests、后端 6 suites / 105 tests，root typecheck、backend build、diff check 通过。DEV-19 未执行完整 TEST、隔离 MySQL E2E、真实 Ark 质量红队或多 Nest 实例锁验证；`CASE-CRE-005-012`、`CASE-DIA-002-011` 仅部分执行，不增加 passed，矩阵仍为 96/225。以下日期记录为其时证据，历史 passed/failure 均保留。
+coverage 有效验收总数为 233，当前明确 passed 为 96（41.2%）。新增 BAS-005 的 8 项验收和 8 条 CASE 均未执行；本任务未增加 passed。TEST-14 最近完整测试仍为 backend unit 17/17 suites、199/199 tests，隔离 MySQL e2e 49/49；DEV-19 当前定向前端 3 suites / 166 tests、后端 6 suites / 105 tests，root typecheck、backend build、diff check 通过。DEV-19 未执行完整 TEST、隔离 MySQL E2E、真实 Ark 质量红队或多 Nest 实例锁验证；`CASE-CRE-005-012`、`CASE-DIA-002-011` 仅部分执行，不增加 passed。以下日期记录为其时证据，历史 passed/failure 均保留。
 
 本矩阵仅记录真实 CASE 验收证据，不代表开发工作量。当前 DEV/TEST 轮次、修复记录及验收通过总数以本页“最新统计”、同名任务/CASE 与 `development-progress.md` 为准；外部能力缺失时的 mock/unit 测试不替代真实 provider、设备、文件或渠道 CASE。
 
@@ -13,6 +13,7 @@ coverage 有效验收总数为 225，当前明确 passed 为 96（42.7%）。TES
 | BAS-001 | 进行中 | A01、A02、A03 | A04、A05 | DEV-3 新增 MAT-005 配图生成与 GRW-006 洞察报告 v1 契约/Store 校验，以及回忆查询有效年月/日期约束；相关新测试尚未运行，不据此新增通过项。真实 provider 与后续模块的正式质量评测仍待扩展 |
 | BAS-004 | 已完成 | A01、A02、A03、A04、A05 | - | TEST-13/14 在专用本机 schema 上直接运行当前 Jest config，setup guard 成功；当前完整 backend e2e 49/49，TEST-10 当前 worktree normal/reverse runner 各 15/15。TEST-12 首轮真实 malformed-body 断言失败已修复复测，TEST-14 将该集扩展到 discovery/chat/anchor flows；所有测试临时 schema 已清理。此完成状态仅针对 BAS-004，不代表其他 task 的设备/文件/provider CASE 通过 |
 | BAS-002 | 进行中 | A01、A04 | A03 | A04 已验证可配置传输超时、`AbortSignal` 取消映射、旧回包保护、重复提交幂等、来源版本冲突，以及建单/保存超时后的同键追认；A02、A05 仍待真实供应商与双环境证据；A03 的公开内容读取、完整对象权限矩阵与正式账号边界仍待补齐。后端拒绝缺失/空白 `x-device-id`、非法公开选段，正文快照随作品事务持久化 |
+| BAS-005 | 进行中 | - | A01–A08 | 已按 2026-11-09 用户决策登记用户名/密码、自建拼图、单活跃会话和账号删除范围；认证、数据归属替换、旧匿名数据清理及验收均未开始/未运行，不增加 passed |
 | BAS-003 | 进行中 | A04 | A01、A02、A03、A05 | A04 已通过真实 MySQL 事务内保存命令写入异常回滚及同幂等键重试验证；A05 现有初始 Prisma schema 和 `contentSnapshot` 演进迁移，并验证空库部署、旧 schema 元数据保留及 drift-guarded baseline 工具；本地未知快照版本也有防清除/覆盖保护。当前本地 `ai_diary` 已在只读 diff 无漂移后登记两条 migration，记录数保持 2 且状态 up-to-date；legacy 正文回填和数据库损坏恢复仍未完成。生成任务已迁入 Prisma 并补了跨应用实例恢复证据；未提交草稿已按第一阶段默认值实现同设备本地恢复/坏记录隔离，快照读取失败也不会中断后续回忆 hydration；DEV-3 新增快照并发、修订恢复、正文完整性、数据库损坏 marker、公开范围恢复及 release 默认空 diary/photo fixture 回归，均未运行、不构成 CASE 通过。A03 的 release diary/photo 默认样例隔离已开发待测；个人统计/锚点/资料原型仍受 Q-005/Q-016/Q-012 约束，故 A03 仍不通过。已保存作品/素材资产的完整重启恢复、legacy 回填与冲突处理仍待 Q-001/Q-015 收口 |
 | CRE-001 | 进行中 | A02、A04、A05 | A01、A03 | 权限说明页、系统请求、草稿绑定、授权不改私密状态、关闭后迟到回调保护与启动同步均已落地；相册页进入前也会再次与原生权限状态同步，但未授权读取次数、有限访问/拒绝/撤回矩阵与实机证据仍待 Q-018 收口 |
 | CRE-002 | 进行中 | A01、A02、A03、A04 | A05 | 真实相册目录读取、页面内暂存选择、新建/替换确认写回同草稿、新建取消继续/放弃、替换取消隔离、确认前可读性复核、进入读取前的原生权限重同步，以及旧请求不覆盖新相册结果和分页失败反馈均已落地；新建链路的整篇换图也已补上“replace 不再偷偷继承上一轮旧照片”的回归。真实 iOS 资源失效验证已定位到模拟器 `E_NO_PERMISSIONS` 原生异常，但 Q-003/Q-018/Q-008 对应规则与真实设备矩阵仍待补齐 |

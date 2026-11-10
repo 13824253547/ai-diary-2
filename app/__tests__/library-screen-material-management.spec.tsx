@@ -142,7 +142,7 @@ describe('Library screen material management', () => {
           sourceAssetId: photo.id,
           uri: `https://api.example.test/photos/materials/cloud-${photo.id}/content`,
           localUri: undefined,
-          remoteHeaders: { 'x-device-id': 'test-device' },
+          remoteHeaders: { 'Authorization': 'test-device' },
         })),
       }),
     );
@@ -190,7 +190,7 @@ describe('Library screen material management', () => {
       sourceAssetId: devicePhoto.id,
       uri: 'https://api.example.test/photos/materials/cloud-previous-upload/content',
       localUri: undefined,
-      remoteHeaders: { 'x-device-id': 'test-device' },
+      remoteHeaders: { 'Authorization': 'test-device' },
     };
     jest.spyOn(materialPhotoApi, 'listMaterialPhotosFromBackend')
       .mockResolvedValue({ ok: true, photos: [previousUpload] });
@@ -209,7 +209,7 @@ describe('Library screen material management', () => {
           sourceAssetId: photo.id,
           uri: `https://api.example.test/photos/materials/${id}/content`,
           localUri: undefined,
-          remoteHeaders: { 'x-device-id': 'test-device' },
+          remoteHeaders: { 'Authorization': 'test-device' },
         })),
       };
     });
@@ -370,13 +370,13 @@ describe('Library screen material management', () => {
       generationSource: 'provider',
       uri: 'https://api.example.test/photos/materials/generated-remote-1/content',
       localUri: undefined,
-      remoteHeaders: { 'x-device-id': 'test-device' },
+      remoteHeaders: { 'Authorization': 'test-device' },
     };
     const uploaded: DiaryPhoto = {
       ...buildPhoto('uploaded-remote-1'),
       uri: 'https://api.example.test/photos/materials/uploaded-remote-1/content',
       localUri: undefined,
-      remoteHeaders: { 'x-device-id': 'test-device' },
+      remoteHeaders: { 'Authorization': 'test-device' },
     };
     jest.spyOn(materialPhotoApi, 'listMaterialPhotosFromBackend')
       .mockResolvedValue({ ok: true, photos: [generated, uploaded] });

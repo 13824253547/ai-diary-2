@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { DraftSnapshotStore, PersistedDraftsSnapshot } from '../store/adapters/types';
 import { appConfig } from '../config/app-config';
-import { ensureDeviceIdentity } from './device-identity';
+import { getAccountUserId } from './account-auth';
 import { sha256 } from '@noble/hashes/sha256';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
 
@@ -51,21 +51,17 @@ async function clearDraftSnapshot(fileName: string) {
   if (info.exists) await FileSystem.deleteAsync(fileUri, { idempotent: true });
 }
 
-async function installationScope() {
-  if (process.env.JEST_WORKER_ID || appConfig.identityMode !== 'installation') return undefined;
-  return `${appConfig.backendBaseUrl}:${await ensureDeviceIdentity()}`;
+async function accountScope() {
+  if (process.env.JEST_WORKER_ID) return undefined;
+  return `${appConfig.backendBaseUrl}:${await getAccountUserId()}`;
 }
 
-export function createLocalDraftSnapshotStore(getScope: () => Promise<string | undefined> = installationScope): DraftSnapshotStore {
-  let pendingFileName: Promise<string> | undefined;
-  const fileName = () => {
-    pendingFileName ??= getScope().then(scope => scope
-      ? `orange-glow-drafts-installation-v1-${bytesToHex(sha256(utf8ToBytes(scope)))}.json`
-      : DRAFT_SNAPSHOT_FILE_NAME).catch(error => {
-        pendingFileName = undefined;
-        throw error;
-      });
-    return pendingFileName;
+export function createLocalDraftSnapshotStore(getScope: () => Promise<string | undefined> = accountScope): DraftSnapshotStore {
+  const fileName = async () => {
+    const scope = await getScope();
+    return scope
+      ? `orange-glow-drafts-account-v1-${bytesToHex(sha256(utf8ToBytes(scope)))}.json`
+      : DRAFT_SNAPSHOT_FILE_NAME;
   };
   return {
     load: async () => readDraftSnapshot(await fileName()),

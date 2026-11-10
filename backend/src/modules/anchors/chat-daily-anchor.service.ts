@@ -1,14 +1,14 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
+import { AccountAiTaskCoordinator } from '../../common/account-ai-task-coordinator';
 import { PrismaService } from '../../common/prisma.service';
 import { classifyPetChatInput, classifyPetChatReply } from '../chat/pet-chat-safety-policy';
 import { ArkMemoryAnchorProvider, MemoryAnchorProviderError } from './ark-memory-anchor-provider';
 
 type SourceTurn = {
   id: string;
-  ownerDeviceId: string;
+  ownerUserId: string;
   conversationId: string;
   requestId: string;
   sequence: number;
@@ -28,7 +28,7 @@ type SourceMessage = {
 
 type DailyBatch = {
   id: string;
-  ownerDeviceId: string;
+  ownerUserId: string;
   requestId: string;
   attempt: number;
   status: string;
@@ -58,10 +58,10 @@ function sourceHash(messages: SourceMessage[]) {
     .digest('hex');
 }
 
-function stableRequestId(ownerDeviceId: string, messages: SourceMessage[]) {
+function stableRequestId(ownerUserId: string, messages: SourceMessage[]) {
   const sourceIds = messages.map(message => message.id).sort();
   const digest = createHash('sha256')
-    .update(`${ownerDeviceId}\u0000${sourceIds.join('\u0000')}`)
+    .update(`${ownerUserId}\u0000${sourceIds.join('\u0000')}`)
     .digest('hex')
     .slice(0, 40);
   return `chat-anchor-${digest}`;
@@ -77,61 +77,61 @@ export class ChatDailyAnchorService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly provider: ArkMemoryAnchorProvider,
-    private readonly taskCoordinator: DeviceAiTaskCoordinator,
+    private readonly taskCoordinator: AccountAiTaskCoordinator,
   ) {}
 
   async onModuleInit() {
     if (process.env.NODE_ENV === 'test') return;
     const pending = await this.prisma.chatDailyAnchor.findMany({
       where: { status: 'pending' },
-      select: { id: true, ownerDeviceId: true },
+      select: { id: true, ownerUserId: true },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
-    for (const item of pending) this.enqueueBatch(item.id, item.ownerDeviceId);
+    for (const item of pending) this.enqueueBatch(item.id, item.ownerUserId);
   }
 
-  enqueueAfterCompletedTurn(ownerDeviceId: string, deviceLocalDate?: string) {
+  enqueueAfterCompletedTurn(ownerUserId: string, deviceLocalDate?: string) {
     if (process.env.NODE_ENV === 'test') return;
     if (!validLocalDate(deviceLocalDate)) return;
-    const active = this.pendingTriggers.get(ownerDeviceId);
+    const active = this.pendingTriggers.get(ownerUserId);
     if (active) {
       if (deviceLocalDate > active.date) active.date = deviceLocalDate;
       active.requested = true;
       return;
     }
     const trigger: PendingDailyTrigger = { date: deviceLocalDate, requested: true };
-    this.pendingTriggers.set(ownerDeviceId, trigger);
-    void this.drainTriggers(ownerDeviceId, trigger);
+    this.pendingTriggers.set(ownerUserId, trigger);
+    void this.drainTriggers(ownerUserId, trigger);
   }
 
-  private async drainTriggers(ownerDeviceId: string, trigger: PendingDailyTrigger) {
-    if (this.processingOwners.has(ownerDeviceId)) return;
-    this.processingOwners.add(ownerDeviceId);
+  private async drainTriggers(ownerUserId: string, trigger: PendingDailyTrigger) {
+    if (this.processingOwners.has(ownerUserId)) return;
+    this.processingOwners.add(ownerUserId);
     try {
       while (trigger.requested) {
         trigger.requested = false;
-        await this.processCompletedDate(ownerDeviceId, trigger.date);
+        await this.processCompletedDate(ownerUserId, trigger.date);
       }
     } catch (error) {
       const code = error instanceof MemoryAnchorProviderError ? error.code : 'provider_failed';
       this.logger.warn(`Daily chat anchor task stopped (${code}).`);
     } finally {
-      this.processingOwners.delete(ownerDeviceId);
-      if (this.pendingTriggers.get(ownerDeviceId) === trigger) {
-        this.pendingTriggers.delete(ownerDeviceId);
+      this.processingOwners.delete(ownerUserId);
+      if (this.pendingTriggers.get(ownerUserId) === trigger) {
+        this.pendingTriggers.delete(ownerUserId);
       }
     }
   }
 
-  async processCompletedDate(ownerDeviceId: string, beforeLocalDate: string) {
+  async processCompletedDate(ownerUserId: string, beforeLocalDate: string) {
     if (!validLocalDate(beforeLocalDate)) return;
-    const batch = await this.claimOrResumeBatch(ownerDeviceId, beforeLocalDate);
-    if (batch) await this.processBatch(batch.id, ownerDeviceId);
+    const batch = await this.claimOrResumeBatch(ownerUserId, beforeLocalDate);
+    if (batch) await this.processBatch(batch.id, ownerUserId);
   }
 
-  private async claimOrResumeBatch(ownerDeviceId: string, beforeLocalDate: string): Promise<DailyBatch | null> {
+  private async claimOrResumeBatch(ownerUserId: string, beforeLocalDate: string): Promise<DailyBatch | null> {
     const pending = await this.prisma.chatDailyAnchor.findFirst({
-      where: { ownerDeviceId, status: 'pending' },
+      where: { ownerUserId, status: 'pending' },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     if (pending) return pending;
@@ -142,8 +142,8 @@ export class ChatDailyAnchorService implements OnModuleInit {
         FROM \`ChatTurn\` AS t
         INNER JOIN \`ChatConversation\` AS c
           ON c.\`id\` = t.\`conversationId\`
-          AND c.\`ownerDeviceId\` = t.\`ownerDeviceId\`
-        WHERE t.\`ownerDeviceId\` = ${ownerDeviceId}
+          AND c.\`ownerUserId\` = t.\`ownerUserId\`
+        WHERE t.\`ownerUserId\` = ${ownerUserId}
           AND t.\`memoryEligible\` = 1
           AND t.\`memoryAnchorBatchId\` IS NULL
           AND t.\`deviceLocalDate\` < ${beforeLocalDate}
@@ -158,7 +158,7 @@ export class ChatDailyAnchorService implements OnModuleInit {
       const turns = await transaction.chatTurn.findMany({
         where: {
           id: { in: ids },
-          ownerDeviceId,
+          ownerUserId,
           memoryEligible: true,
           memoryAnchorBatchId: null,
           status: 'completed',
@@ -203,7 +203,7 @@ export class ChatDailyAnchorService implements OnModuleInit {
         turnsWithMessages.push({
           turn: {
             id: turn.id,
-            ownerDeviceId: turn.ownerDeviceId,
+            ownerUserId: turn.ownerUserId,
             conversationId: turn.conversationId,
             requestId: turn.requestId,
             sequence: turn.sequence,
@@ -226,11 +226,11 @@ export class ChatDailyAnchorService implements OnModuleInit {
       const allMessages = turnsWithMessages.flatMap(item => item.messages);
       const orderedTurns = turnsWithMessages.map(item => item.turn);
       const dates = orderedTurns.map(turn => turn.deviceLocalDate!).sort();
-      const requestId = stableRequestId(ownerDeviceId, allMessages);
+      const requestId = stableRequestId(ownerUserId, allMessages);
       const batch = await transaction.chatDailyAnchor.create({
         data: {
           anchorId: requestId,
-          ownerDeviceId,
+          ownerUserId,
           requestId,
           sourceHash: sourceHash(allMessages),
           sourceDateStart: dates[0],
@@ -241,7 +241,7 @@ export class ChatDailyAnchorService implements OnModuleInit {
           sources: {
             createMany: {
               data: turnsWithMessages.flatMap(({ turn, messages }) => messages.map(message => ({
-                ownerDeviceId,
+                ownerUserId,
                 turnId: turn.id,
                 messageId: message.id,
                 conversationId: message.conversationId,
@@ -254,7 +254,7 @@ export class ChatDailyAnchorService implements OnModuleInit {
       await transaction.chatTurn.updateMany({
         where: {
           id: { in: orderedTurns.map(turn => turn.id) },
-          ownerDeviceId,
+          ownerUserId,
           memoryAnchorBatchId: null,
         },
         data: { memoryAnchorBatchId: batch.id },
@@ -263,8 +263,8 @@ export class ChatDailyAnchorService implements OnModuleInit {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  private enqueueBatch(batchId: string, ownerDeviceId: string) {
-    void this.processBatch(batchId, ownerDeviceId)
+  private enqueueBatch(batchId: string, ownerUserId: string) {
+    void this.processBatch(batchId, ownerUserId)
       .catch(error => {
         const code = error instanceof MemoryAnchorProviderError ? error.code : 'provider_failed';
         this.logger.warn(`Daily chat anchor batch stopped (${code}).`);
@@ -272,12 +272,12 @@ export class ChatDailyAnchorService implements OnModuleInit {
       .finally(() => this.processingBatches.delete(batchId));
   }
 
-  private async processBatch(batchId: string, ownerDeviceId: string) {
+  private async processBatch(batchId: string, ownerUserId: string) {
     if (this.processingBatches.has(batchId)) return;
     this.processingBatches.add(batchId);
     try {
       const batch = await this.prisma.chatDailyAnchor.findFirst({
-        where: { id: batchId, ownerDeviceId },
+        where: { id: batchId, ownerUserId },
         include: {
           sources: {
             include: {
@@ -327,7 +327,7 @@ export class ChatDailyAnchorService implements OnModuleInit {
       let nextAttempt = batch.attempt === 0 ? 1 : batch.attempt + 1;
       if (nextAttempt > 3) {
         await this.prisma.chatDailyAnchor.updateMany({
-          where: { id: batchId, ownerDeviceId, status: 'pending' },
+          where: { id: batchId, ownerUserId, status: 'pending' },
           data: { status: 'failed', failureCode: 'provider_failed' },
         });
         return;
@@ -339,7 +339,7 @@ export class ChatDailyAnchorService implements OnModuleInit {
         });
         try {
           const summary = await this.taskCoordinator.runBackground(
-            ownerDeviceId,
+            ownerUserId,
             () => this.provider.summarize({
               kind: 'chat',
               messages: messages.map(({ role, text }) => ({ role, content: text })),
@@ -352,7 +352,7 @@ export class ChatDailyAnchorService implements OnModuleInit {
             const current = await transaction.chatDailyAnchor.findUnique({
               where: { id: batchId },
             });
-            if (!current || current.ownerDeviceId !== ownerDeviceId) {
+            if (!current || current.ownerUserId !== ownerUserId) {
               throw new Error('daily anchor batch is unavailable');
             }
             if (current.status === 'succeeded') {

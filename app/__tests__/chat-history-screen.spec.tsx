@@ -21,8 +21,8 @@ jest.mock('../../src/store/adapters/backend-pet-chat-adapter', () => ({
 jest.mock('../../src/store/adapters/backend-anchor-read-model-adapter', () => ({
   createBackendAnchorReadModelRepository: () => ({ getChatHistory: mockGetChatHistory }),
 }));
-jest.mock('../../src/services/device-identity', () => ({
-  ensureDeviceIdentity: () => mockIdentity(),
+jest.mock('../../src/services/account-auth', () => ({
+  getAccountUserId: () => mockIdentity(),
 }));
 jest.mock('../../src/components/layout/screen', () => ({
   Screen: ({ header, children }: { header: React.ReactNode; children: React.ReactNode }) => {

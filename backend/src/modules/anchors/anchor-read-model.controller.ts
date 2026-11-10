@@ -1,3 +1,4 @@
+import { CurrentUserId } from "../auth/auth-request";
 import {
   BadRequestException,
   Body,
@@ -12,7 +13,6 @@ import {
   Query,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { resolveDeviceId } from '../../common/device-identity';
 import {
   ANCHOR_PAGE_SIZES,
   AnchorReadModelError,
@@ -55,9 +55,9 @@ export class AnchorReadModelController {
     @Query('tagId') tagId: unknown,
     @Query('page') pageParam: unknown,
     @Query('pageSize') pageSizeParam: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const page = parseDecimalIntegerParam(pageParam, 1);
     const pageSize = parseDecimalIntegerParam(pageSizeParam, 20);
     if (typeof tagId !== 'string' || !tagId.trim()) throw this.invalidInput('请明确提供标签标识。');
@@ -69,7 +69,7 @@ export class AnchorReadModelController {
       return {
         ok: true,
         version: 'anchor-extraction-v1',
-        data: await this.service.listByTag({ tagId, page, pageSize }, ownerDeviceId),
+        data: await this.service.listByTag({ tagId, page, pageSize }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -81,9 +81,9 @@ export class AnchorReadModelController {
     @Query('tagId') tagId: unknown,
     @Query('page') pageParam: unknown,
     @Query('pageSize') pageSizeParam: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const page = parseDecimalIntegerParam(pageParam, 1);
     const pageSize = parseDecimalIntegerParam(pageSizeParam, 20);
     if (tagId !== undefined && (typeof tagId !== 'string' || !tagId.trim())) {
@@ -101,7 +101,7 @@ export class AnchorReadModelController {
           ...(tagId === undefined ? {} : { tagId }),
           page,
           pageSize,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -113,9 +113,9 @@ export class AnchorReadModelController {
     @Param('batchId') batchId: unknown,
     @Query('page') pageParam: unknown,
     @Query('pageSize') pageSizeParam: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const page = parseDecimalIntegerParam(pageParam, 1);
     const pageSize = parseDecimalIntegerParam(pageSizeParam, 100);
     if (page === null || page < 1 || pageSize === null
@@ -125,7 +125,7 @@ export class AnchorReadModelController {
     try {
       return {
         ok: true, version: 'memory-anchor-v1',
-        data: await this.service.getChatHistory(batchId, { page, pageSize }, ownerDeviceId),
+        data: await this.service.getChatHistory(batchId, { page, pageSize }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -133,13 +133,13 @@ export class AnchorReadModelController {
   }
 
   @Get('summary')
-  async getSummary(@Headers('x-device-id') deviceId?: string) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+  async getSummary(@CurrentUserId() ownerUserId: string) {
+
     try {
       return {
         ok: true,
         version: 'memory-anchor-v1',
-        data: { total: await this.service.countFeed(ownerDeviceId) },
+        data: { total: await this.service.countFeed(ownerUserId) },
       };
     } catch (error) {
       this.handleError(error);
@@ -149,9 +149,9 @@ export class AnchorReadModelController {
   @Post('extractions/begin')
   async beginExtraction(
     @Body() body: BeginExtractionBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.diaryId !== 'string'
       || typeof body.diaryVersion !== 'number'
       || typeof body.requestId !== 'string'
@@ -167,7 +167,7 @@ export class AnchorReadModelController {
           diaryVersion: body.diaryVersion,
           requestId: body.requestId,
           attempt: body.attempt,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -177,9 +177,9 @@ export class AnchorReadModelController {
   @Post('extractions/complete')
   async completeExtraction(
     @Body() body: CompleteExtractionBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.attempt !== 'number' || body.result === undefined) {
       throw this.invalidInput('锚点提取结果信息不完整。');
     }
@@ -190,7 +190,7 @@ export class AnchorReadModelController {
         data: await this.service.completeExtraction({
           attempt: body.attempt,
           result: body.result,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -200,9 +200,9 @@ export class AnchorReadModelController {
   @Post('extractions/failure')
   async failExtraction(
     @Body() body: FailExtractionBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof body?.diaryId !== 'string'
       || typeof body.diaryVersion !== 'number'
       || typeof body.requestId !== 'string'
@@ -222,7 +222,7 @@ export class AnchorReadModelController {
           requestId: body.requestId,
           attempt: body.attempt,
           failureCode: body.failureCode,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);

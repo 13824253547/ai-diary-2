@@ -33,10 +33,9 @@ describe('HTTP AI image generation provider', () => {
       },
       PROVIDER_REQUEST_CLIENT_TIMEOUT_MS: 360_000,
     }));
-    jest.doMock('../device-identity', () => ({
-      getDeviceIdentityHeaders: jest.fn(async () => ({
-        'x-device-id': 'device-1',
-        Authorization: 'Bearer test-token',
+    jest.doMock('../account-auth', () => ({
+      getAccountAuthHeaders: jest.fn(async () => ({
+         Authorization: 'Bearer test-token',
       })),
     }));
     createProvider = require('../http-ai-image-generation-provider')
@@ -48,7 +47,7 @@ describe('HTTP AI image generation provider', () => {
     if (originalWorkerId === undefined) delete process.env.JEST_WORKER_ID;
     else process.env.JEST_WORKER_ID = originalWorkerId;
     jest.dontMock('../api-client');
-    jest.dontMock('../device-identity');
+    jest.dontMock('../account-auth');
     jest.resetModules();
   });
 
@@ -97,8 +96,7 @@ describe('HTTP AI image generation provider', () => {
       timeoutMs: 360_000,
     });
     await expect(clientOptions?.getHeaders?.()).resolves.toEqual({
-      'x-device-id': 'device-1',
-      Authorization: 'Bearer test-token',
+       Authorization: 'Bearer test-token',
     });
     expect(result.photo).toMatchObject({
       id: 'material-1',
@@ -107,7 +105,7 @@ describe('HTTP AI image generation provider', () => {
       generationPrompt: '雨后的老街',
       generationSource: 'provider',
       uri: 'https://api.example.test/photos/materials/material-1/content',
-      remoteHeaders: { 'x-device-id': 'device-1', Authorization: 'Bearer test-token' },
+      remoteHeaders: {  Authorization: 'Bearer test-token' },
     });
     await expect(provider.isAssetReadable(result.photo)).resolves.toBe(true);
     expect(imageModule.Image.prefetch).toHaveBeenCalledWith(result.photo.uri, {

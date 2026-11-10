@@ -4,7 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { configureApiBodyParser } from '../../common/api-body-parser';
 import { GenerationJobError, MemoryStoreService } from '../../common/memory-store.service';
-import { GenerationController, GenerationIdentityGuard } from './generation.controller';
+import { GenerationController } from './generation.controller';
 
 describe('GenerationController', () => {
   const store = {
@@ -17,14 +17,17 @@ describe('GenerationController', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [GenerationController],
-      providers: [
-        GenerationIdentityGuard,
-        { provide: MemoryStoreService, useValue: store },
-      ],
+      providers: [{ provide: MemoryStoreService, useValue: store }],
     }).compile();
     httpApp = moduleRef.createNestApplication({ bodyParser: false });
     configureApiBodyParser(httpApp);
     httpApp.setGlobalPrefix('api');
+    httpApp.useGlobalGuards({
+      canActivate: (context: { switchToHttp: () => { getRequest: () => { auth?: unknown } } }) => {
+        context.switchToHttp().getRequest().auth = { userId: 'user-http', sessionId: 'session-http' };
+        return true;
+      },
+    } as never);
     await httpApp.init();
   });
 
@@ -44,24 +47,24 @@ describe('GenerationController', () => {
     { draftId: 'draft-1', draftVersion: Number.MAX_SAFE_INTEGER + 1, idempotencyKey: 'draft-1-round-1' },
     { draftId: 'draft-1', draftVersion: 1, idempotencyKey: ' ' },
   ])('rejects malformed generation requests before touching the store', async body => {
-    await expect(controller.createJob(body)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.createJob(body, 'user-1')).rejects.toBeInstanceOf(BadRequestException);
     expect(store.createGenerationJob).not.toHaveBeenCalled();
   });
 
-  test('requires device identity before reporting malformed generation input', async () => {
+  test('validates malformed generation input for the authenticated account', async () => {
     try {
-      await controller.createJob(null);
-      fail('expected missing device identity to be rejected');
+      await controller.createJob(null, 'user-1');
+      fail('expected malformed input to be rejected');
     } catch (error) {
       expect(error).toBeInstanceOf(BadRequestException);
       expect((error as BadRequestException).getResponse()).toMatchObject({
-        error: { code: 'device_identity_required' },
+        error: { code: 'invalid_input' },
       });
     }
     expect(store.createGenerationJob).not.toHaveBeenCalled();
   });
 
-  test('passes a valid versioned request to the device-scoped store', async () => {
+  test('passes a valid versioned request to the authenticated account store', async () => {
     const uploads = [{
       mimetype: 'image/jpeg',
       buffer: Buffer.from('synthetic-image'),
@@ -77,7 +80,7 @@ describe('GenerationController', () => {
       draftVersion: 2,
       idempotencyKey: 'draft-1-round-2',
       photoMetadata: [{ photoId: 'photo-1', title: '河边散步', location: '台南', date: '2026.10.20' }],
-    }, ' device ', uploads)).resolves.toEqual({
+    }, 'user-1', uploads)).resolves.toEqual({
       ok: true,
       data: { jobId: 'job-1' },
     });
@@ -86,7 +89,7 @@ describe('GenerationController', () => {
       draftId: 'draft-1',
       draftVersion: 2,
       idempotencyKey: 'draft-1-round-2',
-    }, 'device', pairedUploads);
+    }, 'user-1', pairedUploads);
   });
 
   test('rejects generation requests that omit the ordered photo upload set', async () => {
@@ -171,9 +174,9 @@ describe('GenerationController', () => {
     expect(store.rewriteDraftBlock).not.toHaveBeenCalled();
   });
 
-  test('requires device identity before reporting malformed rewrite input', async () => {
-    await expect(controller.rewriteBlock(null)).rejects.toMatchObject({
-      response: { error: { code: 'device_identity_required' } },
+  test('validates malformed rewrite input for the authenticated account', async () => {
+    await expect(controller.rewriteBlock(null, 'user-1')).rejects.toMatchObject({
+      response: { error: { code: 'invalid_input' } },
     });
     expect(store.rewriteDraftBlock).not.toHaveBeenCalled();
   });
@@ -215,7 +218,6 @@ describe('GenerationController', () => {
     ];
     await request(httpApp.getHttpServer())
       .post('/api/generation/jobs')
-      .set('x-device-id', 'device-http')
       .field('draftId', 'draft-http')
       .field('draftVersion', '4')
       .field('idempotencyKey', 'draft-http-round-4')
@@ -228,7 +230,7 @@ describe('GenerationController', () => {
       draftId: 'draft-http',
       draftVersion: 4,
       idempotencyKey: 'draft-http-round-4',
-    }, 'device-http', [
+      }, 'user-http', [
       expect.objectContaining({ photoId: 'photo-2', date: '2026.10.20', mimeType: 'image/jpeg' }),
       expect.objectContaining({ photoId: 'photo-1', date: '2026.10.20', mimeType: 'image/jpeg' }),
     ]);
@@ -237,7 +239,7 @@ describe('GenerationController', () => {
     expect(receivedUploads[0]).not.toHaveProperty('location');
   });
 
-  test('checks device identity before parsing multipart photo uploads', async () => {
+  test('validates multipart fields after injecting the authenticated account', async () => {
     await request(httpApp.getHttpServer())
       .post('/api/generation/jobs')
       .field('draftId', 'draft-http')
@@ -247,7 +249,7 @@ describe('GenerationController', () => {
       .attach('photos', Buffer.from('jpeg'), { filename: 'photo.jpg', contentType: 'image/jpeg' })
       .expect(400)
       .expect(({ body }) => {
-        expect(body.error.code).toBe('device_identity_required');
+        expect(body.error.code).toBe('asset_unreadable');
       });
 
     expect(store.createGenerationJob).not.toHaveBeenCalled();
@@ -257,7 +259,6 @@ describe('GenerationController', () => {
     const targetPhoto = { photoId: 'photo-2', title: 'IMG_1234.jpg', location: '家庭相册', date: '2026.10.20' };
     await request(httpApp.getHttpServer())
       .post('/api/generation/rewrite')
-      .set('x-device-id', 'device-http')
       .field('draftId', 'draft-http')
       .field('blockId', 'block-2')
       .field('draftVersion', '4')
@@ -276,7 +277,7 @@ describe('GenerationController', () => {
       content: '目标段落',
       photoIds: ['photo-2'],
       contextBlocks: [{ id: 'block-1', type: 'text', content: '只读前文' }],
-    }), 'device-http', [
+    }), 'user-http', [
       expect.objectContaining({ photoId: 'photo-2', mimeType: 'image/jpeg' }),
     ]);
     const receivedUploads = (store.rewriteDraftBlock as jest.Mock).mock.calls[0][2];

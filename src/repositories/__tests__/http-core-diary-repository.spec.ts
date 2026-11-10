@@ -82,7 +82,7 @@ describe('HttpCoreDiaryRepository', () => {
     });
     const repository = new HttpCoreDiaryRepository(new ApiClient({
       baseUrl: 'http://127.0.0.1:3001/api',
-      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+      getHeaders: () => ({ Authorization: 'Bearer test-token' }),
     }));
     const legacyPhotoUploads = [
       {
@@ -112,7 +112,7 @@ describe('HttpCoreDiaryRepository', () => {
 
       expect(result.ok).toBe(true);
       const xhr = MultipartXMLHttpRequestFixture.lastRequest!;
-      expect(xhr.headers).toMatchObject({ 'x-device-id': 'device-test-1' });
+      expect(xhr.headers).toMatchObject({ Authorization: 'Bearer test-token' });
       expect(xhr.headers).not.toHaveProperty('Content-Type');
       const parts = (xhr.body as unknown as FormDataFixture)._parts;
       expect(parts.filter(([name]) => name === 'photos').map(([, file]) => file)).toEqual([
@@ -159,7 +159,7 @@ describe('HttpCoreDiaryRepository', () => {
     });
     const repository = new HttpCoreDiaryRepository(new ApiClient({
       baseUrl: 'http://127.0.0.1:3001/api',
-      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+      getHeaders: () => ({ Authorization: 'Bearer test-token' }),
     }));
 
     try {
@@ -194,7 +194,7 @@ describe('HttpCoreDiaryRepository', () => {
 
       expect(result.ok).toBe(true);
       const xhr = MultipartXMLHttpRequestFixture.lastRequest!;
-      expect(xhr.headers).toMatchObject({ 'x-device-id': 'device-test-1' });
+      expect(xhr.headers).toMatchObject({ Authorization: 'Bearer test-token' });
       expect(xhr.headers).not.toHaveProperty('Content-Type');
       const parts = (xhr.body as unknown as FormDataFixture)._parts;
       expect(parts.some(([name, value]) => name === 'sourceDiaryId' || value === 'undefined')).toBe(false);
@@ -311,7 +311,7 @@ describe('HttpCoreDiaryRepository', () => {
       new ApiClient({
         baseUrl: 'http://127.0.0.1:3001/api',
         getHeaders: async () => ({
-          'x-device-id': 'device-test-1',
+          Authorization: 'Bearer test-token',
         }),
       }),
     );
@@ -329,7 +329,7 @@ describe('HttpCoreDiaryRepository', () => {
       'http://127.0.0.1:3001/api/drafts',
       expect.objectContaining({
         headers: expect.objectContaining({
-          'x-device-id': 'device-test-1',
+          Authorization: 'Bearer test-token',
           'Content-Type': 'application/json',
         }),
       }),
@@ -716,7 +716,7 @@ describe('HttpCoreDiaryRepository', () => {
     });
     const repository = new HttpCoreDiaryRepository(new ApiClient({
       baseUrl: 'http://127.0.0.1:3001/api',
-      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+      getHeaders: () => ({ Authorization: 'Bearer test-token' }),
     }));
     const contextBlocks = [{ id: 'block-1', type: 'text' as const, content: '只读的前段。' }];
 
@@ -740,7 +740,7 @@ describe('HttpCoreDiaryRepository', () => {
 
       expect(result.ok).toBe(true);
       const xhr = MultipartXMLHttpRequestFixture.lastRequest!;
-      expect(xhr.headers).toMatchObject({ 'x-device-id': 'device-test-1' });
+      expect(xhr.headers).toMatchObject({ Authorization: 'Bearer test-token' });
       expect(xhr.headers).not.toHaveProperty('Content-Type');
       const parts = (xhr.body as unknown as FormDataFixture)._parts;
       const fields = Object.fromEntries(parts.filter(([name]) => name !== 'photos'));
@@ -1221,7 +1221,7 @@ describe('HttpCoreDiaryRepository', () => {
   test('deletes one diary through the device-scoped DELETE endpoint and validates the response ID', async () => {
     const repository = new HttpCoreDiaryRepository(new ApiClient({
       baseUrl: 'http://127.0.0.1:3001/api',
-      getHeaders: () => ({ 'x-device-id': 'device-test-1' }),
+      getHeaders: () => ({ Authorization: 'Bearer test-token' }),
     }));
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
@@ -1237,7 +1237,7 @@ describe('HttpCoreDiaryRepository', () => {
       'http://127.0.0.1:3001/api/diaries/diary-1',
       expect.objectContaining({
         method: 'DELETE',
-        headers: expect.objectContaining({ 'x-device-id': 'device-test-1' }),
+        headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
       }),
     );
 

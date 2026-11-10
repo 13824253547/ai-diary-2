@@ -1,10 +1,9 @@
 import { appConfig } from '../../config/app-config';
 import { createDiscoveryMediaSource, resolveDiscoveryMediaUri } from '../discovery-media';
-import { getDeviceIdentityHeaders } from '../device-identity';
+import { getAccountAuthHeaders } from '../account-auth';
 
-jest.mock('../device-identity', () => ({
-  getDeviceIdentityHeaders: jest.fn(async () => ({
-    'x-device-id': 'device-discovery-test',
+jest.mock('../account-auth', () => ({
+  getAccountAuthHeaders: jest.fn(async () => ({
     Authorization: 'Bearer discovery-test-token',
   })),
 }));
@@ -30,17 +29,16 @@ describe('resolveDiscoveryMediaUri', () => {
     expect(source).toEqual({
       uri: `${appConfig.backendBaseUrl.replace(/\/+$/u, '')}/photos/discovery/story-1/photo-content?photoId=photo-1`,
       headers: {
-        'x-device-id': 'device-discovery-test',
         Authorization: 'Bearer discovery-test-token',
       },
     });
-    expect(getDeviceIdentityHeaders).toHaveBeenCalledTimes(1);
+    expect(getAccountAuthHeaders).toHaveBeenCalledTimes(1);
   });
 
   test('does not send device credentials to externally hosted story media', async () => {
     await expect(createDiscoveryMediaSource('https://media.example/story.png')).resolves.toEqual({
       uri: 'https://media.example/story.png',
     });
-    expect(getDeviceIdentityHeaders).not.toHaveBeenCalled();
+    expect(getAccountAuthHeaders).not.toHaveBeenCalled();
   });
 });

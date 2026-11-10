@@ -16,12 +16,10 @@ describe('AnchorCorrectionsController', () => {
     jest.clearAllMocks();
   });
 
-  test('requires device identity and returns the versioned empty read envelope', async () => {
+  test('returns the versioned empty read envelope for the authenticated account', async () => {
     jest.mocked(service.getCorrection).mockResolvedValue(null);
 
-    await expect(controller.getCorrection('anchor-1', 'diary-1', '3', undefined))
-      .rejects.toBeInstanceOf(BadRequestException);
-    await expect(controller.getCorrection('anchor-1', 'diary-1', '3', 'device-1'))
+    await expect(controller.getCorrection('anchor-1', 'diary-1', '3', 'user-1'))
       .resolves.toEqual({
         ok: true,
         version: 'anchor-correction-v1',
@@ -31,18 +29,14 @@ describe('AnchorCorrectionsController', () => {
       diaryId: 'diary-1',
       diaryVersion: 3,
       anchorId: 'anchor-1',
-    }, 'device-1');
+    }, 'user-1');
   });
 
-  test('requires device identity before validating malformed correction input', async () => {
-    await expect(controller.getCorrection('anchor-1', undefined, ['3', '4'], undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
-    await expect(controller.saveCorrection('anchor-1', undefined as never, undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
+  test('validates malformed correction input after the auth guard supplies an account', async () => {
+    await expect(controller.getCorrection('anchor-1', undefined, ['3', '4'], 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
+    await expect(controller.saveCorrection('anchor-1', undefined as never, 'user-1'))
+      .rejects.toBeInstanceOf(BadRequestException);
     expect(service.getCorrection).not.toHaveBeenCalled();
     expect(service.saveCorrection).not.toHaveBeenCalled();
   });

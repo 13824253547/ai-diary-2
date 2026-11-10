@@ -2,7 +2,7 @@
 
 版本：v0.1 · 2026-10-13。本文记录文档追踪关系，不是测试通过报告；下列 CASE 执行分布为初始登记快照，当前结果见 [验收矩阵](reports/autonomous-acceptance-matrix.md) 与 [执行快照](reports/current-execution-snapshot.md)。
 
-共 36 个业务功能、140 条有效原始 AC、42 项任务、225 条任务验收与 310 条 CASE。任务与测试文件各 42 份，逐项同名。初始登记时 65 条 CASE 明确待决策，其余 245 条未执行；这些数量不是当前执行状态。带契约/真实环境前置的案例须满足前置后执行。
+共 36 个业务功能、140 条有效原始 AC、43 项任务、233 条任务验收与 318 条 CASE。任务与测试文件逐项同名。BAS-005 为新增工程任务，不增加原始业务 AC；初始登记时的历史 CASE 数量保留在历史记录中，不作为当前执行状态。带契约/真实环境前置的案例须满足前置后执行。
 
 原始 AC 来自 [FSD](../business-spec/README.md)；工程补充验收由任务定义。`DIA-007-AC05` 已停用，不计入有效 AC。原型条件与正式实施语义的差异应按任务中的 Q 处理；这里的覆盖不代表规则已经确认。未决项见[决策登记](decision-register.md)，执行证据格式见[共同约定](execution-context.md)。
 
@@ -221,6 +221,14 @@
 | [T-BAS-004-A03](tasks/BAS-004.md) | [CASE-BAS-004-003](test-cases/BAS-004.md) |
 | [T-BAS-004-A04](tasks/BAS-004.md) | [CASE-BAS-004-004](test-cases/BAS-004.md) |
 | [T-BAS-004-A05](tasks/BAS-004.md) | [CASE-BAS-004-005](test-cases/BAS-004.md) |
+| [T-BAS-005-A01](tasks/BAS-005.md) | [CASE-BAS-005-001](test-cases/BAS-005.md) |
+| [T-BAS-005-A02](tasks/BAS-005.md) | [CASE-BAS-005-002](test-cases/BAS-005.md) |
+| [T-BAS-005-A03](tasks/BAS-005.md) | [CASE-BAS-005-003](test-cases/BAS-005.md) |
+| [T-BAS-005-A04](tasks/BAS-005.md) | [CASE-BAS-005-004](test-cases/BAS-005.md) |
+| [T-BAS-005-A05](tasks/BAS-005.md) | [CASE-BAS-005-005](test-cases/BAS-005.md) |
+| [T-BAS-005-A06](tasks/BAS-005.md) | [CASE-BAS-005-006](test-cases/BAS-005.md) |
+| [T-BAS-005-A07](tasks/BAS-005.md) | [CASE-BAS-005-007](test-cases/BAS-005.md) |
+| [T-BAS-005-A08](tasks/BAS-005.md) | [CASE-BAS-005-008](test-cases/BAS-005.md) |
 | [T-CRE-001-A05](tasks/CRE-001.md) | [CASE-CRE-001-005](test-cases/CRE-001.md)；[CASE-CRE-001-006](test-cases/CRE-001.md)；[CASE-CRE-001-007](test-cases/CRE-001.md) |
 | [T-CRE-002-A05](tasks/CRE-002.md) | [CASE-CRE-002-006](test-cases/CRE-002.md)；[CASE-CRE-002-007](test-cases/CRE-002.md)；[CASE-CRE-002-008](test-cases/CRE-002.md) |
 | [T-CRE-003-A04](tasks/CRE-003.md) | [CASE-CRE-003-004](test-cases/CRE-003.md)；[CASE-CRE-003-005](test-cases/CRE-003.md) |

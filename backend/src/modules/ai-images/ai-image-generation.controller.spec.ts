@@ -22,15 +22,13 @@ function createHttpContext(body: unknown) {
 }
 
 describe('AIImageGenerationController', () => {
-  test('requires the device identity before validating a generation request', async () => {
+  test('validates a malformed generation request for the authenticated account', async () => {
     const generation = { generate: jest.fn() };
     const controller = new AIImageGenerationController(generation as unknown as AIImageGenerationService);
     const { request, response } = createHttpContext({});
 
-    await expect(controller.generate(undefined, request, response))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
+    await expect(controller.generate('user-1', request, response))
+      .rejects.toMatchObject({ response: { error: { code: 'invalid_input' } } });
     expect(generation.generate).not.toHaveBeenCalled();
   });
 

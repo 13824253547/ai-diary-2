@@ -176,7 +176,7 @@ describe('Report screen', () => {
     await waitFor(() => expect(ensureCurrentGrowthReport).toHaveBeenCalledTimes(1));
     expect(screen.getByText('基于你的 1 篇日记生成')).toBeTruthy();
     expect(screen.getByText('这是第 1 条来自日记的真实观察。')).toBeTruthy();
-    expect(screen.getByText(/按设备身份隔离保存/)).toBeTruthy();
+    expect(screen.getByText(/按账号隔离保存/)).toBeTruthy();
   });
 
   test('keeps the last successful report visible while a new source version updates', async () => {

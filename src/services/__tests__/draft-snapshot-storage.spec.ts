@@ -96,7 +96,7 @@ describe('local draft snapshot storage', () => {
     );
   });
 
-  test('isolates installation snapshots without reading or deleting the old shared snapshot', async () => {
+  test('isolates account snapshots without reading or deleting the old anonymous snapshot', async () => {
     jest.mocked(FileSystem.readAsStringAsync).mockResolvedValue('{}');
     const first = createLocalDraftSnapshotStore(async () => 'https://production/api:device-one');
     const second = createLocalDraftSnapshotStore(async () => 'https://staging/api:device-one');
@@ -106,15 +106,26 @@ describe('local draft snapshot storage', () => {
     await third.load();
     const paths = jest.mocked(FileSystem.readAsStringAsync).mock.calls.map(([uri]) => uri);
     expect(new Set(paths).size).toBe(3);
-    expect(paths.every(uri => uri.includes('orange-glow-drafts-installation-v1-'))).toBe(true);
+    expect(paths.every(uri => uri.includes('orange-glow-drafts-account-v1-'))).toBe(true);
     expect(paths).not.toContain('file:///documents/orange-glow-drafts-v1.json');
     await first.clear();
     expect(FileSystem.deleteAsync).toHaveBeenCalledWith(paths[0], { idempotent: true });
   });
 
-  test('does not access shared snapshots when installation identity cannot be resolved', async () => {
-    const storage = createLocalDraftSnapshotStore(async () => { throw new Error('identity unavailable'); });
-    await expect(storage.load()).rejects.toThrow('identity unavailable');
+  test('resolves the account namespace for every operation so account switches stay isolated', async () => {
+    let scope = 'https://production/api:user-one';
+    const storage = createLocalDraftSnapshotStore(async () => scope);
+    await storage.load();
+    scope = 'https://production/api:user-two';
+    await storage.load();
+    const paths = jest.mocked(FileSystem.readAsStringAsync).mock.calls.map(([uri]) => uri);
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).not.toBe(paths[1]);
+  });
+
+  test('does not access shared snapshots when account identity cannot be resolved', async () => {
+    const storage = createLocalDraftSnapshotStore(async () => { throw new Error('account unavailable'); });
+    await expect(storage.load()).rejects.toThrow('account unavailable');
     expect(FileSystem.readAsStringAsync).not.toHaveBeenCalled();
     expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
   });

@@ -20,7 +20,7 @@ import { createBackendAnchorCorrectionRepository } from './adapters/backend-anch
 import { createBackendAnchorReadModelRepository } from './adapters/backend-anchor-read-model-adapter';
 import { createBackendPetChatRepository } from './adapters/backend-pet-chat-adapter';
 import { createBackendGrowthInsightRepository } from './adapters/backend-growth-insight-adapter';
-import { ensureDeviceIdentity } from '../services/device-identity';
+import { getAccountUserId } from '../services/account-auth';
 import type { AppStoreAdapters, PersistedDraftsSnapshot } from './adapters/types';
 import type { PetChatConversation } from '../contracts/pet-chat-contract';
 import { PetChatRepositoryError } from '../repositories/pet-chat-repository';
@@ -516,7 +516,7 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
   return create<AppStore>((set, get) => {
     let memoriesRequestVersion = 0;
     let chatHistoryRequestVersion = 0;
-    let chatHistoryDeviceId: string | undefined;
+    let chatHistoryUserId: string | undefined;
     let pendingChatRestore: Promise<boolean> | undefined;
     let growthRequestVersion = 0;
     let nextMonthlyExportRequestId = 1;
@@ -1434,11 +1434,11 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
       return true;
     };
 
-    const bindChatHistoryDevice = (deviceId: string) => {
-      if (chatHistoryDeviceId && chatHistoryDeviceId !== deviceId) {
+    const bindChatHistoryUser = (userId: string) => {
+      if (chatHistoryUserId && chatHistoryUserId !== userId) {
         set({ chatMessages: [], chatConversationId: undefined, chatTurnRequests: [] });
       }
-      chatHistoryDeviceId = deviceId;
+      chatHistoryUserId = userId;
     };
 
     const requestPersistedChatReply = async (requestId: string, retry: boolean) => {
@@ -2481,14 +2481,14 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         const requestVersion = ++chatHistoryRequestVersion;
         set({ chatHistoryStatus: 'loading' });
         try {
-          const deviceId = await ensureDeviceIdentity();
+          const userId = await getAccountUserId();
           if (requestVersion !== chatHistoryRequestVersion) return false;
-          bindChatHistoryDevice(deviceId);
+          bindChatHistoryUser(userId);
           const conversation = await repository.getConversation(conversationId);
           if (requestVersion !== chatHistoryRequestVersion) return false;
-          const currentDeviceId = await ensureDeviceIdentity();
-          if (currentDeviceId !== deviceId) {
-            bindChatHistoryDevice(currentDeviceId);
+          const currentUserId = await getAccountUserId();
+          if (currentUserId !== userId) {
+            bindChatHistoryUser(currentUserId);
             set({ chatHistoryStatus: 'error' });
             return false;
           }
@@ -2518,18 +2518,18 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
         set({ chatHistoryStatus: 'loading' });
         const request = (async () => {
           try {
-            const deviceId = await ensureDeviceIdentity();
+            const userId = await getAccountUserId();
             if (requestVersion !== chatHistoryRequestVersion) return false;
-            bindChatHistoryDevice(deviceId);
+            bindChatHistoryUser(userId);
             if (get().chatConversationId || get().chatTurnRequests.some(turn => turn.status === 'pending')) {
               set({ chatHistoryStatus: 'ready' });
               return true;
             }
             const page = await repository.listConversations({ page: 1, pageSize: 10 });
             if (requestVersion !== chatHistoryRequestVersion || get().chatConversationId) return false;
-            const listedDeviceId = await ensureDeviceIdentity();
-            if (listedDeviceId !== deviceId) {
-              bindChatHistoryDevice(listedDeviceId);
+            const listedUserId = await getAccountUserId();
+            if (listedUserId !== userId) {
+              bindChatHistoryUser(listedUserId);
               set({ chatHistoryStatus: 'error' });
               return false;
             }
@@ -2538,9 +2538,9 @@ export function createAppStore(deps: AppStoreDeps = createDefaultAppStoreDeps())
             if (requestVersion !== chatHistoryRequestVersion
               || get().chatConversationId
               || get().chatTurnRequests.some(turn => turn.status === 'pending')) return false;
-            const currentDeviceId = await ensureDeviceIdentity();
-            if (currentDeviceId !== deviceId) {
-              bindChatHistoryDevice(currentDeviceId);
+            const currentUserId = await getAccountUserId();
+            if (currentUserId !== userId) {
+              bindChatHistoryUser(currentUserId);
               set({ chatHistoryStatus: 'error' });
               return false;
             }

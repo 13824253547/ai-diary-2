@@ -3,10 +3,9 @@ import {
   PostcardMessageRequestError,
 } from '../postcard-message-api';
 
-jest.mock('../device-identity', () => ({
-  getDeviceIdentityHeaders: jest.fn(async () => ({
+jest.mock('../account-auth', () => ({
+  getAccountAuthHeaders: jest.fn(async () => ({
     Authorization: 'Bearer test-token',
-    'x-device-id': 'device-1',
   })),
 }));
 
@@ -41,7 +40,6 @@ describe('postcard message API', () => {
     expect(url).toMatch(/\/postcards\/message$/);
     expect(request.headers).toMatchObject({
       Authorization: 'Bearer test-token',
-      'x-device-id': 'device-1',
     });
     expect(JSON.parse(String(request.body))).toEqual({
       version: 'postcard-message-v1',

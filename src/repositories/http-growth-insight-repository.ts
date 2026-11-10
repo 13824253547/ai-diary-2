@@ -16,7 +16,7 @@ type ErrorEnvelope = {
 };
 
 const ERROR_CODES = new Set([
-  'device_identity_required',
+  'account_session_invalid',
   'permission_denied',
   'not_found',
   'not_unlocked',

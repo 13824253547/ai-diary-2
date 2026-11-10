@@ -11,7 +11,7 @@ import {
   type AIImageGenerationProvider,
 } from './ai-image-generation-provider';
 import { ApiClient, ApiRequestError, PROVIDER_REQUEST_CLIENT_TIMEOUT_MS } from './api-client';
-import { getDeviceIdentityHeaders } from './device-identity';
+import { getAccountAuthHeaders } from './account-auth';
 
 type GeneratedAssetContract = {
   id: string;
@@ -41,7 +41,7 @@ type GenerationEnvelope =
 
 const client = new ApiClient({
   baseUrl: appConfig.backendBaseUrl,
-  getHeaders: getDeviceIdentityHeaders,
+  getHeaders: getAccountAuthHeaders,
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -105,7 +105,7 @@ export function createHttpAIImageGenerationProvider(): AIImageGenerationProvider
           throw new AIImageGenerationError('provider_failed', message || '配图暂时无法生成，请稍后重试。');
         }
 
-        const headers = await getDeviceIdentityHeaders();
+        const headers = await getAccountAuthHeaders();
         const photo: DiaryPhoto = {
           id: envelope.data.photo.id,
           sourceAssetId: envelope.data.photo.sourceAssetId,

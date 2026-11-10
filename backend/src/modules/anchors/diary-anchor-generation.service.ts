@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
+import { AccountAiTaskCoordinator } from '../../common/account-ai-task-coordinator';
 import { PrismaService } from '../../common/prisma.service';
 import {
   AnchorReadModelError,
@@ -37,9 +37,9 @@ function sourceBlocks(snapshot: unknown): DiarySourceBlock[] {
   });
 }
 
-function stableRequestId(ownerDeviceId: string, diaryId: string, diaryVersion: number) {
+function stableRequestId(ownerUserId: string, diaryId: string, diaryVersion: number) {
   const digest = createHash('sha256')
-    .update(`${ownerDeviceId}\u0000${diaryId}\u0000${diaryVersion}`)
+    .update(`${ownerUserId}\u0000${diaryId}\u0000${diaryVersion}`)
     .digest('hex')
     .slice(0, 40);
   return `diary-anchor-${digest}`;
@@ -58,25 +58,25 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly readModel: AnchorReadModelService,
     private readonly provider: ArkMemoryAnchorProvider,
-    private readonly taskCoordinator: DeviceAiTaskCoordinator,
+    private readonly taskCoordinator: AccountAiTaskCoordinator,
   ) {}
 
   async onModuleInit() {
     if (process.env.NODE_ENV === 'test') return;
     const pending = await this.prisma.diaryAnchorExtraction.findMany({
       where: { status: 'pending' },
-      select: { ownerDeviceId: true, diaryId: true, diaryVersion: true },
+      select: { ownerUserId: true, diaryId: true, diaryVersion: true },
     });
     for (const task of pending) {
-      this.enqueue(task.ownerDeviceId, task.diaryId, task.diaryVersion);
+      this.enqueue(task.ownerUserId, task.diaryId, task.diaryVersion);
     }
   }
 
-  enqueue(ownerDeviceId: string, diaryId: string, diaryVersion: number) {
+  enqueue(ownerUserId: string, diaryId: string, diaryVersion: number) {
     if (process.env.NODE_ENV === 'test') return;
-    const key = `${ownerDeviceId}\u0000${diaryId}\u0000${diaryVersion}`;
+    const key = `${ownerUserId}\u0000${diaryId}\u0000${diaryVersion}`;
     if (this.active.has(key)) return;
-    const task = this.processDiaryVersion(ownerDeviceId, diaryId, diaryVersion)
+    const task = this.processDiaryVersion(ownerUserId, diaryId, diaryVersion)
       .catch(error => {
         const code = error instanceof AnchorReadModelError ? error.code : 'provider_failed';
         this.logger.warn(`Diary anchor task ended without an anchor (${code}).`);
@@ -87,27 +87,27 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
     this.active.set(key, task);
   }
 
-  async processDiaryVersion(ownerDeviceId: string, diaryId: string, diaryVersion: number) {
-    const requestId = stableRequestId(ownerDeviceId, diaryId, diaryVersion);
+  async processDiaryVersion(ownerUserId: string, diaryId: string, diaryVersion: number) {
+    const requestId = stableRequestId(ownerUserId, diaryId, diaryVersion);
     const diary = await this.prisma.diary.findFirst({
-      where: { id: diaryId, ownerDeviceId, version: diaryVersion },
+      where: { id: diaryId, ownerUserId, version: diaryVersion },
       select: { contentSnapshot: true },
     });
     if (!diary) return;
 
     const blocks = sourceBlocks(diary.contentSnapshot);
     if (!blocks.length) {
-      await this.saveSkipped(ownerDeviceId, diaryId, diaryVersion, requestId);
+      await this.saveSkipped(ownerUserId, diaryId, diaryVersion, requestId);
       return;
     }
     if (new Set(blocks.map(block => block.id)).size !== blocks.length) {
-      await this.saveSkipped(ownerDeviceId, diaryId, diaryVersion, requestId);
+      await this.saveSkipped(ownerUserId, diaryId, diaryVersion, requestId);
       return;
     }
 
     const existing = await this.prisma.diaryAnchorExtraction.findUnique({
       where: {
-        ownerDeviceId_diaryId_diaryVersion: { ownerDeviceId, diaryId, diaryVersion },
+        ownerUserId_diaryId_diaryVersion: { ownerUserId, diaryId, diaryVersion },
       },
     });
     if (existing?.status === 'succeeded' || existing?.status === 'skipped'
@@ -120,7 +120,7 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
         diaryVersion,
         requestId,
         attempt,
-      }, ownerDeviceId, SERVER_ANCHOR_PROVIDER_ACCESS);
+      }, ownerUserId, SERVER_ANCHOR_PROVIDER_ACCESS);
       if (run.status === 'succeeded') return;
       if (run.status === 'failed') {
         attempt = run.attempt + 1;
@@ -129,7 +129,7 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
 
       try {
         const summary = await this.taskCoordinator.runBackground(
-          ownerDeviceId,
+          ownerUserId,
           () => this.provider.summarize({ kind: 'diary', blocks }),
         );
         await this.readModel.completeExtraction({
@@ -140,18 +140,18 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
             diaryVersion,
             source: 'provider',
             anchors: [{
-              id: stableRequestId(ownerDeviceId, diaryId, diaryVersion),
+              id: stableRequestId(ownerUserId, diaryId, diaryVersion),
               tagId: summary.tagId,
               sourceBlockId: blocks[0].id,
               sourceBlockIds: blocks.map(block => block.id),
               excerpt: summary.excerpt,
             }],
           },
-        }, ownerDeviceId, SERVER_ANCHOR_PROVIDER_ACCESS);
+        }, ownerUserId, SERVER_ANCHOR_PROVIDER_ACCESS);
         return;
       } catch (error) {
         if (error instanceof AnchorReadModelError && error.code === 'version_conflict') {
-          await this.markSourceChanged(ownerDeviceId, diaryId, diaryVersion, requestId);
+          await this.markSourceChanged(ownerUserId, diaryId, diaryVersion, requestId);
           return;
         }
         const failureCode = error instanceof MemoryAnchorProviderError && error.code === 'timeout'
@@ -163,7 +163,7 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
           requestId,
           attempt,
           failureCode,
-        }, ownerDeviceId, SERVER_ANCHOR_PROVIDER_ACCESS);
+        }, ownerUserId, SERVER_ANCHOR_PROVIDER_ACCESS);
         if (attempt >= 3) return;
         await pause(3_000);
         attempt += 1;
@@ -172,7 +172,7 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
   }
 
   private async saveSkipped(
-    ownerDeviceId: string,
+    ownerUserId: string,
     diaryId: string,
     diaryVersion: number,
     requestId: string,
@@ -183,17 +183,17 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
         SELECT \`id\`
         FROM \`Diary\`
         WHERE \`id\` = ${diaryId}
-          AND \`ownerDeviceId\` = ${ownerDeviceId}
+          AND \`ownerUserId\` = ${ownerUserId}
           AND \`version\` = ${diaryVersion}
         FOR UPDATE
       `);
       if (!source) return;
       await transaction.diaryAnchorExtraction.upsert({
         where: {
-          ownerDeviceId_diaryId_diaryVersion: { ownerDeviceId, diaryId, diaryVersion },
+          ownerUserId_diaryId_diaryVersion: { ownerUserId, diaryId, diaryVersion },
         },
         create: {
-          ownerDeviceId,
+          ownerUserId,
           diaryId,
           diaryVersion,
           requestId,
@@ -208,14 +208,14 @@ export class DiaryAnchorGenerationService implements OnModuleInit {
   }
 
   private async markSourceChanged(
-    ownerDeviceId: string,
+    ownerUserId: string,
     diaryId: string,
     diaryVersion: number,
     requestId: string,
   ) {
     await this.prisma.diaryAnchorExtraction.updateMany({
       where: {
-        ownerDeviceId,
+        ownerUserId,
         diaryId,
         diaryVersion,
         requestId,

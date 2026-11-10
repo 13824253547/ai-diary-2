@@ -10,18 +10,18 @@ function harness() {
     const userMessageId = `message-${turnIndex * 2}`;
     const assistantMessageId = `message-${turnIndex * 2 + 1}`;
     return {
-      ownerDeviceId: 'device-1', conversationId, messageId: `message-${index}`, localDate: '2026-10-27',
+      ownerUserId: 'device-1', conversationId, messageId: `message-${index}`, localDate: '2026-10-27',
       message: {
         id: `message-${index}`, conversationId, requestId: `request-${turnIndex}`,
         role, text: turnIndex === 3 ? '金色的海面' : `source-${index}`,
         order: index, createdAt: new Date(Date.UTC(2026, 9, 27, 8, turnIndex)),
       },
       turn: {
-        ownerDeviceId: 'device-1', conversationId, memoryAnchorBatchId: 'batch-1',
+        ownerUserId: 'device-1', conversationId, memoryAnchorBatchId: 'batch-1',
         memoryEligible: true, status: 'completed', source: 'provider', deviceLocalDate: '2026-10-27',
         userMessageId, assistantMessageId, requestId: `request-${turnIndex}`, sequence: turnIndex + 1,
         createdAt: new Date(Date.UTC(2026, 9, 27, 8, turnIndex)),
-        conversation: { ownerDeviceId: 'device-1' },
+        conversation: { ownerUserId: 'device-1' },
       },
     };
   });
@@ -48,7 +48,7 @@ describe('Chat anchor complete history', () => {
     expect([...first.items, ...second.items].map(item => item.id)).toEqual(h.batch.sources.map(s => s.messageId));
     expect(first.items.some(item => item.text === '金色的海面' && item.conversationId === 'chat-b')).toBe(true);
     expect(h.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'batch-1', ownerDeviceId: 'device-1', status: 'succeeded' },
+      where: { id: 'batch-1', ownerUserId: 'device-1', status: 'succeeded' },
     }));
   });
 
@@ -58,14 +58,14 @@ describe('Chat anchor complete history', () => {
     await expect(h.service.getChatHistory('batch-1', { page: 1, pageSize: 100 }, 'device-2'))
       .rejects.toMatchObject({ code: 'not_found' });
     expect(h.findFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'batch-1', ownerDeviceId: 'device-2', status: 'succeeded' },
+      where: { id: 'batch-1', ownerUserId: 'device-2', status: 'succeeded' },
     }));
   });
 
   test.each(['count', 'owner', 'message', 'turn', 'date'])('rejects unavailable or mismatched sources: %s', async kind => {
     const h = harness();
     if (kind === 'count') h.batch.sourceCount += 1;
-    if (kind === 'owner') h.batch.sources[0].turn.conversation.ownerDeviceId = 'device-2';
+    if (kind === 'owner') h.batch.sources[0].turn.conversation.ownerUserId = 'device-2';
     if (kind === 'message') h.batch.sources[0].message.conversationId = 'foreign-chat';
     if (kind === 'turn') h.batch.sources[0].turn.status = 'failed';
     if (kind === 'date') h.batch.sources[0].localDate = '2026-10-28';

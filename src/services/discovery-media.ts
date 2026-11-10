@@ -1,5 +1,5 @@
 import { appConfig } from '../config/app-config';
-import { getDeviceIdentityHeaders } from './device-identity';
+import { getAccountAuthHeaders } from './account-auth';
 
 export function resolveDiscoveryMediaUri(uri: string) {
   if (!uri || /^(https?:|file:|content:|data:)/iu.test(uri)) return uri;
@@ -29,6 +29,6 @@ export async function createDiscoveryMediaSource(uri: string) {
   if (!requiresBackendIdentity(resolvedUri)) return { uri: resolvedUri };
   return {
     uri: resolvedUri,
-    headers: await getDeviceIdentityHeaders(),
+    headers: await getAccountAuthHeaders(),
   };
 }

@@ -1,3 +1,4 @@
+import { CurrentUserId } from "../auth/auth-request";
 import {
   BadRequestException,
   Body,
@@ -11,7 +12,6 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { resolveDeviceId } from '../../common/device-identity';
 import {
   AnchorCorrectionError,
   AnchorCorrectionsService,
@@ -41,9 +41,9 @@ export class AnchorCorrectionsController {
     @Param('anchorId') anchorId: unknown,
     @Query('diaryId') diaryId: unknown,
     @Query('diaryVersion') versionParam: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     const diaryVersion = parseDecimalIntegerParam(versionParam);
     if (typeof anchorId !== 'string' || !anchorId.trim()
       || typeof diaryId !== 'string' || !diaryId.trim()
@@ -58,7 +58,7 @@ export class AnchorCorrectionsController {
           diaryId,
           diaryVersion,
           anchorId,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -69,9 +69,9 @@ export class AnchorCorrectionsController {
   async saveCorrection(
     @Param('anchorId') anchorId: unknown,
     @Body() body: SaveCorrectionBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof anchorId !== 'string' || !anchorId.trim()
       || typeof body?.diaryId !== 'string'
       || typeof body.diaryVersion !== 'number'
@@ -93,7 +93,7 @@ export class AnchorCorrectionsController {
           correction: body.correction,
           expectedVersion: body.expectedVersion,
           idempotencyKey: body.idempotencyKey,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -104,9 +104,9 @@ export class AnchorCorrectionsController {
   async getChatCorrection(
     @Param('anchorId') anchorId: unknown,
     @Query('anchorBatchId') anchorBatchId: unknown,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof anchorId !== 'string' || !anchorId.trim()
       || typeof anchorBatchId !== 'string' || !anchorBatchId.trim()) {
       throw this.invalidInput('请提供有效的聊天锚点来源。');
@@ -115,7 +115,7 @@ export class AnchorCorrectionsController {
       return {
         ok: true,
         version: 'chat-anchor-correction-v1',
-        data: await this.service.getChatCorrection({ anchorId, anchorBatchId }, ownerDeviceId),
+        data: await this.service.getChatCorrection({ anchorId, anchorBatchId }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);
@@ -126,9 +126,9 @@ export class AnchorCorrectionsController {
   async saveChatCorrection(
     @Param('anchorId') anchorId: unknown,
     @Body() body: SaveChatCorrectionBody,
-    @Headers('x-device-id') deviceId?: string,
+    @CurrentUserId() ownerUserId: string,
   ) {
-    const ownerDeviceId = resolveDeviceId(deviceId);
+
     if (typeof anchorId !== 'string' || !anchorId.trim()
       || typeof body?.anchorBatchId !== 'string'
       || typeof body.correction !== 'string'
@@ -146,7 +146,7 @@ export class AnchorCorrectionsController {
           correction: body.correction,
           expectedVersion: body.expectedVersion,
           idempotencyKey: body.idempotencyKey,
-        }, ownerDeviceId),
+        }, ownerUserId),
       };
     } catch (error) {
       this.handleError(error);

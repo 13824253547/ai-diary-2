@@ -19,6 +19,12 @@ describe('PostcardMessageController', () => {
     }).compile();
     app = module.createNestApplication();
     app.setGlobalPrefix('api');
+    app.useGlobalGuards({
+      canActivate: (context: { switchToHttp: () => { getRequest: () => { auth?: unknown } } }) => {
+        context.switchToHttp().getRequest().auth = { userId: 'user-http', sessionId: 'session-http' };
+        return true;
+      },
+    } as never);
     await app.init();
   });
 
@@ -31,10 +37,9 @@ describe('PostcardMessageController', () => {
     await app.close();
   });
 
-  test('generates a versioned phrase for the authenticated device material', async () => {
+  test('generates a versioned phrase for the authenticated account material', async () => {
     const response = await request(app.getHttpServer())
       .post('/api/postcards/message')
-      .set('x-device-id', 'device-1')
       .send({ version: 'postcard-message-v1', photoId: 'material-1', location: '苏州' })
       .expect(201);
 
@@ -43,21 +48,20 @@ describe('PostcardMessageController', () => {
       version: 'postcard-message-v1',
       data: { message: '海风轻吻落日' },
     });
-    expect(messages.generate).toHaveBeenCalledWith('device-1', {
+    expect(messages.generate).toHaveBeenCalledWith('user-http', {
       version: 'postcard-message-v1', photoId: 'material-1', location: '苏州',
     }, expect.any(AbortSignal));
   });
 
-  test('rejects missing identity and malformed inputs before generation', async () => {
+  test('rejects malformed inputs after authentication and before generation', async () => {
     await request(app.getHttpServer())
       .post('/api/postcards/message')
-      .send({ version: 'postcard-message-v1', photoId: 'material-1', location: '' })
+      .send({})
       .expect(400)
-      .expect(({ body }) => expect(body.error.code).toBe('device_identity_required'));
+      .expect(({ body }) => expect(body.error.code).toBe('invalid_input'));
 
     await request(app.getHttpServer())
       .post('/api/postcards/message')
-      .set('x-device-id', 'device-1')
       .send({ version: 'postcard-message-v1', photoId: '', location: '' })
       .expect(400)
       .expect(({ body }) => expect(body.error.code).toBe('invalid_input'));
@@ -69,7 +73,6 @@ describe('PostcardMessageController', () => {
 
     await request(app.getHttpServer())
       .post('/api/postcards/message')
-      .set('x-device-id', 'device-1')
       .send({ version: 'postcard-message-v1', photoId: 'other-device-photo', location: '' })
       .expect(404)
       .expect(({ body }) => {
@@ -83,7 +86,6 @@ describe('PostcardMessageController', () => {
 
     await request(app.getHttpServer())
       .post('/api/postcards/message')
-      .set('x-device-id', 'device-1')
       .send({ version: 'postcard-message-v1', photoId: 'material-1', location: '' })
       .expect(502)
       .expect(({ body }) => {

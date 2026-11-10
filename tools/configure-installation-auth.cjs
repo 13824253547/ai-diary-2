@@ -1,4 +1,6 @@
 // Execute on the server through a locally built Node container, never expose key material.
+throw new Error('This legacy installation-auth deployment utility is retired; account authentication is the only supported identity flow.');
+
 const fs = require('node:fs');
 const path = require('node:path');
 const { generateKeyPairSync } = require('node:crypto');

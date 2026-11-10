@@ -1,26 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
 import { PhotosController } from './photos.controller';
 
 describe('PhotosController', () => {
   const controller = new PhotosController({} as never);
 
-  test('requires a valid device identity before returning photo capabilities', () => {
-    for (const deviceId of [undefined, '', '   ']) {
-      expect(() => controller.getCapabilities(deviceId)).toThrow(BadRequestException);
-    }
-    try {
-      controller.getCapabilities(undefined);
-      fail('expected missing device identity to be rejected');
-    } catch (error) {
-      expect(error).toBeInstanceOf(BadRequestException);
-      expect((error as BadRequestException).getResponse()).toMatchObject({
-        error: { code: 'device_identity_required' },
-      });
-    }
-  });
-
-  test('returns capabilities for a device-scoped request', () => {
-    expect(controller.getCapabilities('device-1')).toEqual({
+  test('returns capabilities for an authenticated request', () => {
+    expect(controller.getCapabilities()).toEqual({
       ok: true,
       data: {
         source: 'device-client',
@@ -38,10 +22,10 @@ describe('PhotosController', () => {
     };
     const scopedController = new PhotosController(assets as never);
 
-    await scopedController.readDiaryPhotoByQuery('device-1', 'diary-1', 'asset/L0/001');
+    await scopedController.readDiaryPhotoByQuery('user-1', 'diary-1', 'asset/L0/001');
 
     expect(assets.readDiaryPhotoCopy).toHaveBeenCalledWith(
-      'device-1',
+      'user-1',
       'diary-1',
       'asset/L0/001',
     );
@@ -61,10 +45,8 @@ describe('PhotosController', () => {
     expect(assets.readDiscoveryPhotoCopy).toHaveBeenCalledWith('story-1', 'asset/L0/001');
   });
 
-  test('validates device identity before the photo query parameter', async () => {
-    await expect(controller.readDiaryPhotoByQuery(undefined, 'diary-1', undefined))
-      .rejects.toMatchObject({
-        response: { error: { code: 'device_identity_required' } },
-      });
+  test('validates photo query parameters after the auth guard supplies an account', async () => {
+    await expect(controller.readDiaryPhotoByQuery('user-1', 'diary-1', undefined))
+      .rejects.toMatchObject({ response: { error: { code: 'invalid_input' } } });
   });
 });

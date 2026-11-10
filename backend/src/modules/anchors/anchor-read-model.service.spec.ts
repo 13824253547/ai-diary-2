@@ -7,7 +7,7 @@ import {
 function createHarness() {
   const diary: Record<string, any> = {
     id: 'diary-1',
-    ownerDeviceId: 'device-1',
+    ownerUserId: 'device-1',
     version: 3,
     title: 'A saved diary',
     date: new Date('2026-10-16T00:00:00.000Z'),
@@ -22,8 +22,8 @@ function createHarness() {
   const runs = new Map<string, Record<string, any>>();
   const anchors = new Map<string, Record<string, any>>();
   let nextId = 1;
-  const runKey = (ownerDeviceId: string, diaryId: string, diaryVersion: number) =>
-    `${ownerDeviceId}:${diaryId}:${diaryVersion}`;
+  const runKey = (ownerUserId: string, diaryId: string, diaryVersion: number) =>
+    `${ownerUserId}:${diaryId}:${diaryVersion}`;
 
   const transaction = {
     $queryRaw: jest.fn(async (query: { sql?: string }) => {
@@ -52,14 +52,14 @@ function createHarness() {
     diaryAnchorExtraction: {
       findUnique: jest.fn(async ({ where }: { where: Record<string, any> }) => {
         if (where.id) return [...runs.values()].find(run => run.id === where.id) ?? null;
-        if (where.ownerDeviceId_diaryId_diaryVersion) {
-          const key = where.ownerDeviceId_diaryId_diaryVersion;
-          return runs.get(runKey(key.ownerDeviceId, key.diaryId, key.diaryVersion)) ?? null;
+        if (where.ownerUserId_diaryId_diaryVersion) {
+          const key = where.ownerUserId_diaryId_diaryVersion;
+          return runs.get(runKey(key.ownerUserId, key.diaryId, key.diaryVersion)) ?? null;
         }
-        if (where.ownerDeviceId_requestId) {
-          const key = where.ownerDeviceId_requestId;
+        if (where.ownerUserId_requestId) {
+          const key = where.ownerUserId_requestId;
           return [...runs.values()].find(run =>
-            run.ownerDeviceId === key.ownerDeviceId && run.requestId === key.requestId,
+            run.ownerUserId === key.ownerUserId && run.requestId === key.requestId,
           ) ?? null;
         }
         return null;
@@ -75,7 +75,7 @@ function createHarness() {
           updatedAt: new Date('2026-10-16T00:00:00.000Z'),
           ...data,
         };
-        runs.set(runKey(data.ownerDeviceId, data.diaryId, data.diaryVersion), run);
+        runs.set(runKey(data.ownerUserId, data.diaryId, data.diaryVersion), run);
         return run;
       }),
       update: jest.fn(async ({ where, data }: { where: { id: string }; data: Record<string, any> }) => {
@@ -100,7 +100,7 @@ function createHarness() {
       findMany: jest.fn(async ({ where }: { where: Record<string, any> }) =>
         [...anchors.values()]
           .filter(anchor =>
-            anchor.ownerDeviceId === where.ownerDeviceId
+            anchor.ownerUserId === where.ownerUserId
             && anchor.tagId === where.tagId
             && anchor.source === where.source,
           )

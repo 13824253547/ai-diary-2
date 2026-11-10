@@ -10,7 +10,7 @@ import type {
 
 export type AnchorCorrectionRepositoryErrorCode =
   | 'permission_denied'
-  | 'device_identity_required'
+  | 'account_session_invalid'
   | 'timeout'
   | 'cancelled'
   | 'not_found'

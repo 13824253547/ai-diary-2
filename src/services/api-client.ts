@@ -3,6 +3,7 @@ import {
   isDevDiagnosticsEnabled,
   logDevDiagnostic,
 } from './dev-diagnostics';
+import { clearAccountSessionIfToken, isCurrentAccountSessionToken } from './account-auth';
 
 export type ApiClientOptions = {
   baseUrl: string;
@@ -207,6 +208,14 @@ export class ApiClient {
         && /^[A-Za-z0-9_.:-]{1,80}$/.test(envelope.error.code)
         ? envelope.error.code
         : undefined;
+      const authorization = Object.entries(headers).find(([name]) => name.toLowerCase() === 'authorization')?.[1];
+      const accountToken = authorization?.match(/^Bearer (.+)$/i)?.[1];
+      if (accountToken?.split('.').length === 3 && !isCurrentAccountSessionToken(accountToken)) {
+        throw new ApiRequestError('cancelled', '账号已切换，已忽略旧请求结果。', false);
+      }
+      if (response.status === 401 && errorCode === 'account_session_invalid' && accountToken) {
+        void clearAccountSessionIfToken(accountToken);
+      }
       if (requestId) {
         logDevDiagnostic(response.ok ? 'info' : 'warn', 'api.response.received', {
           requestId,

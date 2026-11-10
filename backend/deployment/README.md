@@ -3,6 +3,20 @@
 Deployment files are specific to this application. Never copy the local development
 Compose file or development credentials to production.
 
+## Authentication Cutover Hold
+
+The checked-in application now uses username/password accounts, verified
+registration email, email-confirmed account deletion, and
+`ACCOUNT_AUTH_JWT_SECRET`; the existing production deployment still uses the
+historical installation-identity release. Do not deploy this source, run its
+account migration, or purge production data until the database and media targets
+have been independently confirmed and the destructive cutover is approved.
+
+The installation-auth patch and `tools/configure-installation-auth.cjs` are
+retired and must not be used for new deployments. Historical release and rollback
+notes below document past operations only; they do not describe a supported
+current authentication path.
+
 ## Architecture
 
 - Build Linux images locally using `Dockerfile.production`; do not build on production.
@@ -34,15 +48,17 @@ Use `/opt/orange-glow` as the application directory:
 
 - `compose.production.yml`: this application's services only.
 - `.env`: `RELEASE_TAG`, no business credentials.
-- `backend.env`: production database/provider/identity configuration, mode `0600`.
+- `backend.env`: production database/provider/account-auth/SMTP configuration, mode `0600`.
 - `mysql.env`: independent application database and root credentials, mode `0600`.
 - `photo-assets`, `generation-tmp`: writable by UID/GID `1000`, mode `0750`.
 - `backups`: protected Nginx and database backups; do not serve publicly.
 
 `tools/prepare-production-environment.js` initializes these environment files
 via SSH stdin and refuses to overwrite existing files. It copies only allowed
-server-side provider variables and generates independent production database and
-JWT credentials. It does not copy local user data or the development JWT secret.
+server-side provider and SMTP variables and generates independent production
+database and account-auth JWT credentials. SMTP requires the Aliyun Mail
+third-party client security password; never put it in the app bundle or image.
+It does not copy local user data or the development JWT secret.
 
 ## Operations
 
@@ -65,13 +81,14 @@ Nginx must overwrite `X-Real-IP` with `$remote_addr`, not trust a caller-provide
 forwarded header. The controller trusts this value only from loopback. A CDN or
 other external proxy is not included in this trust model.
 
-The health endpoint requires a valid server-issued device identity. Container
-health checks test the loopback listener only; they do not prove provider quality,
-App Attest enrollment, or authenticated business operations.
+The health endpoint is public. Container health checks test the loopback listener
+only; they do not prove provider quality, account authentication, or business
+operations.
 
-## Transitional Installation Authentication
+## Historical Installation Authentication Release
 
-The current client uses `identityMode: installation`. Set
+This section is retained as an audit record, not an operational guide. The former
+client used `identityMode: installation`. It set
 `DEVICE_IDENTITY_MODE=installation` and configure the server-only
 `INSTALLATION_AUTH_PRIVATE_KEY` (base64 PKCS8 Ed25519). Installation keys are not
 Apple hardware attestation; see `docs/reference/delivery/contracts/installation-identity-v1.md`.
@@ -110,7 +127,7 @@ Restoring App Attest-only code will reject installation credentials.
 For a future full image release that incorporates this code, remove all six
 mounts after backup and validation, or mounted old files will override the new image.
 
-## Diary Deletion Module Release
+## Historical Diary Deletion Module Release
 
 Release `20261029-diary-delete-01` keeps the production image tag unchanged and
 adds five locally compiled, read-only JS mounts under
@@ -128,7 +145,7 @@ longer required. A future full image that includes these modules must remove
 their five mounts after backup and validation, or the mounted files override
 the image contents.
 
-## Postcard Message Module Release
+## Historical Postcard Message Module Release
 
 Release `20261029-postcard-message-01` keeps the production image unchanged and
 adds six locally compiled, read-only JS mounts under

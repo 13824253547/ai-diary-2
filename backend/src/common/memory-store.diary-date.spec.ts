@@ -37,7 +37,7 @@ describe('MemoryStoreService diary publication date', () => {
     const diaries = await store.listDiaries('device-1');
 
     expect(prisma.diary.findMany).toHaveBeenCalledWith({
-      where: { ownerDeviceId: 'device-1' },
+      where: { ownerUserId: 'device-1' },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     expect(diaries[0].date).toBe('2026.04.25');
@@ -51,8 +51,10 @@ describe('MemoryStoreService diary publication date', () => {
           id: data.id ?? 'diary-1',
           createdAt: data.date,
           version: data.version,
+          privacy: 'private',
         })),
       },
+      discoveryStory: { findUnique: jest.fn().mockResolvedValue(null) },
       saveCommand: { create: jest.fn().mockResolvedValue(undefined) },
     };
     const prisma = {
@@ -102,7 +104,7 @@ describe('MemoryStoreService diary publication date', () => {
     const createdAt = new Date('2026-04-25T15:30:00.000Z');
     const sourceDiary = {
       id: 'diary-1',
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
       version: 3,
       createdAt,
     };
@@ -113,8 +115,10 @@ describe('MemoryStoreService diary publication date', () => {
           id: 'diary-1',
           createdAt,
           version: 4,
+            privacy: 'private',
         }),
       },
+      discoveryStory: { findUnique: jest.fn().mockResolvedValue(null) },
       saveCommand: { create: jest.fn().mockResolvedValue(undefined) },
     };
     const prisma = {

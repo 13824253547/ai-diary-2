@@ -4,7 +4,7 @@ import {
   resolveGrowthDiaryDate,
   GrowthInsightsService,
 } from './growth-insights.service';
-import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
+import { AccountAiTaskCoordinator } from '../../common/account-ai-task-coordinator';
 
 describe('growth milestone dates', () => {
   test('uses the newest continuous run only and deduplicates multiple diaries on one day', () => {
@@ -64,7 +64,7 @@ describe('growth deletion source guard', () => {
     };
     const run = {
       id: 'run-1',
-      ownerDeviceId: 'device-1',
+      ownerUserId: 'device-1',
       status: 'pending',
       sourceDiaryRefs: [{ id: diary.id, version: diary.version }],
       sourceDiaryId: diary.id,
@@ -99,23 +99,23 @@ describe('growth deletion source guard', () => {
       })),
     };
     const coordinator = {
-      runBackground: jest.fn(async (_ownerDeviceId: string, task: () => Promise<unknown>) => task()),
+      runBackground: jest.fn(async (_ownerUserId: string, task: () => Promise<unknown>) => task()),
     };
     const service = new GrowthInsightsService(
       prisma as never,
       provider as never,
-      coordinator as unknown as DeviceAiTaskCoordinator,
+      coordinator as unknown as AccountAiTaskCoordinator,
       {} as never,
     );
 
     await (service as unknown as {
-      processRecognitionRun: (runId: string, ownerDeviceId: string) => Promise<void>;
+      processRecognitionRun: (runId: string, ownerUserId: string) => Promise<void>;
     }).processRecognitionRun('run-1', 'device-1');
 
     expect(tx.growthFlower.upsert).not.toHaveBeenCalled();
     expect(tx.growthMilestone.upsert).not.toHaveBeenCalled();
     expect(prisma.growthRecognitionRun.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'run-1', ownerDeviceId: 'device-1', status: { in: ['pending', 'running'] } },
+      where: { id: 'run-1', ownerUserId: 'device-1', status: { in: ['pending', 'running'] } },
       data: expect.objectContaining({ status: 'failed', failureCode: 'source_changed' }),
     }));
   });

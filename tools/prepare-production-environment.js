@@ -15,10 +15,15 @@ const keys = [
   'AI_IMAGE_PROVIDER', 'AI_IMAGE_MODEL', 'AI_IMAGE_API_KEY', 'AI_IMAGE_TIMEOUT_MS', 'AI_IMAGE_SIZE',
   'AI_PROVIDER', 'AI_PROVIDER_BASE_URL', 'AI_PROVIDER_MODEL', 'AI_PROVIDER_API_KEY',
   'DIARY_GENERATION_PROVIDER',
+  'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASSWORD', 'SMTP_FROM',
 ];
 const backend = Object.fromEntries(keys.filter(key => values[key]).map(key => [key, values[key]]));
 if (!backend.PET_CHAT_API_KEY || backend.PET_CHAT_PROVIDER !== 'ark-openai-compatible') {
   throw new Error('Expected configured server-side provider credentials.');
+}
+if (!backend.SMTP_HOST || !backend.SMTP_USER || !backend.SMTP_PASSWORD
+  || !backend.SMTP_FROM || backend.SMTP_FROM.toLowerCase() !== backend.SMTP_USER.toLowerCase()) {
+  throw new Error('Expected configured enterprise SMTP credentials with a matching sender address.');
 }
 const databasePassword = crypto.randomBytes(24).toString('hex');
 Object.assign(backend, {
@@ -26,10 +31,7 @@ Object.assign(backend, {
   PORT: '3001',
   DATABASE_URL: `mysql://orange_glow:${databasePassword}@127.0.0.1:33307/orange_glow`,
   REDIS_URL: 'redis://127.0.0.1:36380',
-  DEVICE_IDENTITY_MODE: 'attested',
-  APP_ATTEST_TEAM_ID: 'JWTMTK2F34',
-  APP_ATTEST_BUNDLE_ID: 'io.com.shihangbiji.www.aidiary',
-  DEVICE_AUTH_JWT_SECRET: crypto.randomBytes(48).toString('hex'),
+  ACCOUNT_AUTH_JWT_SECRET: crypto.randomBytes(48).toString('hex'),
   PHOTO_ASSET_STORAGE_DIR: '/data/photo-assets',
   DIARY_GENERATION_TMP_DIR: '/data/generation-tmp',
   DIARY_GENERATION_TMP_TTL_MS: '7200000',

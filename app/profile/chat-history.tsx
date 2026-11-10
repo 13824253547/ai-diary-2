@@ -6,7 +6,7 @@ import { TopBar } from '../../src/components/layout/top-bar';
 import { Button } from '../../src/components/common/button';
 import { createBackendPetChatRepository } from '../../src/store/adapters/backend-pet-chat-adapter';
 import { createBackendAnchorReadModelRepository } from '../../src/store/adapters/backend-anchor-read-model-adapter';
-import { ensureDeviceIdentity } from '../../src/services/device-identity';
+import { getAccountUserId } from '../../src/services/account-auth';
 import type { PetChatMessage } from '../../src/contracts/pet-chat-contract';
 import { art } from '../../src/theme/assets';
 import { colors } from '../../src/theme/tokens';
@@ -31,7 +31,7 @@ export default function ChatHistoryScreen() {
     offsets.current = {};
     focused.current = false;
     void (async () => {
-      const deviceId = await ensureDeviceIdentity();
+      const userId = await getAccountUserId();
       let loaded: PetChatMessage[];
       if (anchorBatchId) {
         const repository = createBackendAnchorReadModelRepository();
@@ -44,7 +44,7 @@ export default function ChatHistoryScreen() {
           if (result.batchId !== anchorBatchId || result.page !== page || result.pageSize !== 100
             || (sourceVersion !== undefined && sourceVersion !== result.sourceVersion)
             || (total !== undefined && total !== result.total)
-            || await ensureDeviceIdentity() !== deviceId) throw new Error('history source changed');
+            || await getAccountUserId() !== userId) throw new Error('history source changed');
           sourceVersion = result.sourceVersion;
           total = result.total;
           items.push(...result.items);
@@ -62,7 +62,7 @@ export default function ChatHistoryScreen() {
         if (result.id !== conversationId) throw new Error('history conversation changed');
         loaded = result.messages;
       }
-      if (await ensureDeviceIdentity() !== deviceId) throw new Error('history identity changed');
+      if (await getAccountUserId() !== userId) throw new Error('history identity changed');
       if (!active) return;
       setMessages(loaded);
       setStatus('ready');

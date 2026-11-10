@@ -27,7 +27,7 @@ const client = {
   buildUrl: jest.fn((path: string) => `http://localhost:3001/api${path}`),
   getHeaders: jest.fn(async (extra?: Record<string, string>) => ({
     ...extra,
-    'x-device-id': 'device-1',
+    Authorization: 'Bearer test-token',
   })),
 } as unknown as ApiClient;
 
@@ -192,7 +192,7 @@ describe('HttpPetChatRepository', () => {
       '/chat/conversations/conversation-1/turns/request-1/generate/stream',
     );
     expect(request?.timeout).toBe(PROVIDER_REQUEST_CLIENT_TIMEOUT_MS);
-    expect(request?.headers['x-device-id']).toBe('device-1');
+    expect(request?.headers['Authorization']).toBe('Bearer test-token');
     expect(onTextDelta.mock.calls.flat()).toEqual(['我在', '这里陪你。']);
   });
 

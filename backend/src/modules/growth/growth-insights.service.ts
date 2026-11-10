@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
-import { DeviceAiTaskCoordinator } from '../../common/device-ai-task-coordinator';
+import { AccountAiTaskCoordinator } from '../../common/account-ai-task-coordinator';
 import { PrismaService } from '../../common/prisma.service';
 import { AnchorReadModelService } from '../anchors/anchor-read-model.service';
 import {
@@ -237,7 +237,7 @@ export class GrowthInsightsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly provider: ArkGrowthInsightProvider,
-    private readonly taskCoordinator: DeviceAiTaskCoordinator,
+    private readonly taskCoordinator: AccountAiTaskCoordinator,
     private readonly anchors: AnchorReadModelService,
   ) {}
 
@@ -246,12 +246,12 @@ export class GrowthInsightsService implements OnModuleInit {
     const [recognitionRuns, reportJobs] = await Promise.all([
       this.prisma.growthRecognitionRun.findMany({
         where: { status: { in: ['pending', 'running'] } },
-        select: { id: true, ownerDeviceId: true, status: true, inFlightBatchIndex: true },
+        select: { id: true, ownerUserId: true, status: true, inFlightBatchIndex: true },
         orderBy: { createdAt: 'asc' },
       }),
       this.prisma.growthReportJob.findMany({
         where: { status: { in: ['pending', 'running'] } },
-        select: { id: true, ownerDeviceId: true, status: true, inFlightBatchIndex: true },
+        select: { id: true, ownerUserId: true, status: true, inFlightBatchIndex: true },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
@@ -267,7 +267,7 @@ export class GrowthInsightsService implements OnModuleInit {
         where: { id: run.id },
         data: { status: 'pending' },
       });
-      this.scheduleRecognitionRun(run.id, run.ownerDeviceId);
+      this.scheduleRecognitionRun(run.id, run.ownerUserId);
     }
     for (const job of reportJobs) {
       if (job.status === 'running' && job.inFlightBatchIndex !== null) {
@@ -286,26 +286,26 @@ export class GrowthInsightsService implements OnModuleInit {
         where: { id: job.id },
         data: { status: 'pending' },
       });
-      this.scheduleReportJob(job.id, job.ownerDeviceId);
+      this.scheduleReportJob(job.id, job.ownerUserId);
     }
   }
 
-  async enqueueDiaryVersion(ownerDeviceId: string, diaryId: string, diaryVersion: number) {
-    if (!ownerDeviceId.trim() || !diaryId.trim() || !Number.isSafeInteger(diaryVersion) || diaryVersion < 1) return;
-    const source = await this.loadDiarySource(ownerDeviceId, diaryId, diaryVersion);
+  async enqueueDiaryVersion(ownerUserId: string, diaryId: string, diaryVersion: number) {
+    if (!ownerUserId.trim() || !diaryId.trim() || !Number.isSafeInteger(diaryVersion) || diaryVersion < 1) return;
+    const source = await this.loadDiarySource(ownerUserId, diaryId, diaryVersion);
     if (!source) return;
     const sourceHash = makeDiarySourceHash(source);
     const runKey = `diary:${diaryId}:${diaryVersion}`;
     const run = await this.prisma.$transaction(async transaction => {
-      await this.lockDiaryRefs(transaction, ownerDeviceId, [{ id: diaryId, version: diaryVersion }]);
+      await this.lockDiaryRefs(transaction, ownerUserId, [{ id: diaryId, version: diaryVersion }]);
       const existing = await transaction.growthRecognitionRun.findUnique({
-        where: { ownerDeviceId_runKey: { ownerDeviceId, runKey } },
+        where: { ownerUserId_runKey: { ownerUserId, runKey } },
       });
       if (existing) return undefined;
       const batchCount = makeDiaryBatches([source]).length;
       return transaction.growthRecognitionRun.create({
         data: {
-          ownerDeviceId,
+          ownerUserId,
           runKey,
           kind: 'diary',
           sourceVersion: sourceHash,
@@ -317,27 +317,27 @@ export class GrowthInsightsService implements OnModuleInit {
         },
       });
     });
-    if (run) this.scheduleRecognitionRun(run.id, ownerDeviceId);
+    if (run) this.scheduleRecognitionRun(run.id, ownerUserId);
   }
 
-  enqueueAfterDiarySaved(ownerDeviceId: string, diaryId: string, diaryVersion: number) {
-    void this.enqueueDiaryVersion(ownerDeviceId, diaryId, diaryVersion).catch(error => {
+  enqueueAfterDiarySaved(ownerUserId: string, diaryId: string, diaryVersion: number) {
+    void this.enqueueDiaryVersion(ownerUserId, diaryId, diaryVersion).catch(error => {
       const code = error instanceof GrowthInsightProviderError ? error.code : 'provider_failed';
       this.logger.warn(`Growth diary task could not be queued (${code}).`);
     });
   }
 
-  async initializeFlowers(ownerDeviceId: string) {
+  async initializeFlowers(ownerUserId: string) {
     const run = await this.prisma.$transaction(async transaction => {
       await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
         SELECT \`id\`
         FROM \`Diary\`
-        WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+        WHERE \`ownerUserId\` = ${ownerUserId}
         ORDER BY \`id\`
         FOR UPDATE
       `);
       const diaries = await transaction.diary.findMany({
-        where: { ownerDeviceId },
+        where: { ownerUserId },
         select: { id: true, version: true, title: true, contentSnapshot: true },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
@@ -347,13 +347,13 @@ export class GrowthInsightsService implements OnModuleInit {
       });
       const refs = allSources.map(({ id, version }) => ({ id, version }));
       const existing = await transaction.growthRecognitionRun.findUnique({
-        where: { ownerDeviceId_runKey: { ownerDeviceId, runKey: BASELINE_RUN_KEY } },
+        where: { ownerUserId_runKey: { ownerUserId, runKey: BASELINE_RUN_KEY } },
       });
       if (existing) return existing;
       const batches = makeDiaryBatches(allSources);
       return transaction.growthRecognitionRun.create({
         data: {
-          ownerDeviceId,
+          ownerUserId,
           runKey: BASELINE_RUN_KEY,
           kind: 'baseline',
           sourceVersion: makeSourceVersion(refs),
@@ -363,18 +363,18 @@ export class GrowthInsightsService implements OnModuleInit {
         },
       });
     });
-    if (run.status === 'pending') this.scheduleRecognitionRun(run.id, ownerDeviceId);
-    return this.getState(ownerDeviceId);
+    if (run.status === 'pending') this.scheduleRecognitionRun(run.id, ownerUserId);
+    return this.getState(ownerUserId);
   }
 
-  async retryFlowerAnalysis(ownerDeviceId: string) {
+  async retryFlowerAnalysis(ownerUserId: string) {
     const failedRuns = await this.prisma.growthRecognitionRun.findMany({
-      where: { ownerDeviceId, status: 'failed' },
+      where: { ownerUserId, status: 'failed' },
       orderBy: { createdAt: 'asc' },
     });
     for (const run of failedRuns) {
       if (run.kind === 'baseline') {
-        const sources = await this.listCurrentDiarySources(ownerDeviceId);
+        const sources = await this.listCurrentDiarySources(ownerUserId);
         const refs = sources.map(({ id, version }) => ({ id, version }));
         const batches = makeDiaryBatches(sources);
         await this.prisma.growthRecognitionRun.update({
@@ -391,11 +391,11 @@ export class GrowthInsightsService implements OnModuleInit {
             failureCode: null,
           },
         });
-        if (batches.length) this.scheduleRecognitionRun(run.id, ownerDeviceId);
+        if (batches.length) this.scheduleRecognitionRun(run.id, ownerUserId);
         continue;
       }
       if (!run.sourceDiaryId || !run.sourceDiaryVersion) continue;
-      const source = await this.loadDiarySource(ownerDeviceId, run.sourceDiaryId, run.sourceDiaryVersion);
+      const source = await this.loadDiarySource(ownerUserId, run.sourceDiaryId, run.sourceDiaryVersion);
       if (!source || makeDiarySourceHash(source) !== run.sourceVersion) continue;
       await this.prisma.growthRecognitionRun.update({
         where: { id: run.id },
@@ -409,35 +409,35 @@ export class GrowthInsightsService implements OnModuleInit {
           failureCode: null,
         },
       });
-      this.scheduleRecognitionRun(run.id, ownerDeviceId);
+      this.scheduleRecognitionRun(run.id, ownerUserId);
     }
-    return this.getState(ownerDeviceId);
+    return this.getState(ownerUserId);
   }
 
-  async getState(ownerDeviceId: string) {
+  async getState(ownerUserId: string) {
     const [flowers, baseline, milestones, diaries, latestReport] = await Promise.all([
       this.prisma.growthFlower.findMany({
-        where: { ownerDeviceId },
+        where: { ownerUserId },
         orderBy: { awardedAt: 'asc' },
       }),
       this.prisma.growthRecognitionRun.findUnique({
-        where: { ownerDeviceId_runKey: { ownerDeviceId, runKey: BASELINE_RUN_KEY } },
+        where: { ownerUserId_runKey: { ownerUserId, runKey: BASELINE_RUN_KEY } },
       }),
-      this.prisma.growthMilestone.findMany({ where: { ownerDeviceId } }),
+      this.prisma.growthMilestone.findMany({ where: { ownerUserId } }),
       this.prisma.diary.findMany({
-        where: { ownerDeviceId },
+        where: { ownerUserId },
         select: { id: true, version: true, date: true, publishedLocalDate: true, createdAt: true },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       }),
       this.prisma.growthInsightReport.findFirst({
-        where: { ownerDeviceId },
+        where: { ownerUserId },
         orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
       }),
     ]);
     let anchorCount: number | undefined;
     let anchorCountUnavailable = false;
     try {
-      anchorCount = await this.anchors.countFeed(ownerDeviceId);
+      anchorCount = await this.anchors.countFeed(ownerUserId);
     } catch {
       anchorCountUnavailable = true;
     }
@@ -449,7 +449,7 @@ export class GrowthInsightsService implements OnModuleInit {
       const evidence = findStreakEvidence(diaries, 30);
       if (evidence) {
         const milestone = await this.persistMilestone(
-          ownerDeviceId,
+          ownerUserId,
           'streak-30',
           evidence.sourceDiaryIds,
           evidence.achievedAt,
@@ -459,7 +459,7 @@ export class GrowthInsightsService implements OnModuleInit {
     }
     if (anchorCount !== undefined && anchorCount >= 100
       && !milestoneById.has('anchors-100')) {
-      const milestone = await this.persistMilestone(ownerDeviceId, 'anchors-100', []);
+      const milestone = await this.persistMilestone(ownerUserId, 'anchors-100', []);
       milestoneById.set(milestone.milestoneId, milestone);
     }
     const flowerById = new Map(flowers.map(flower => [flower.flowerKey, flower]));
@@ -472,11 +472,11 @@ export class GrowthInsightsService implements OnModuleInit {
     const currentVersionReport = latestReport?.sourceVersion === currentSourceVersion
       ? latestReport
       : await this.prisma.growthInsightReport.findUnique({
-        where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion: currentSourceVersion } },
+        where: { ownerUserId_sourceVersion: { ownerUserId, sourceVersion: currentSourceVersion } },
       });
     const visibleReport = currentVersionReport ?? latestReport;
     const currentReportJob = await this.prisma.growthReportJob.findUnique({
-      where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion: currentSourceVersion } },
+      where: { ownerUserId_sourceVersion: { ownerUserId, sourceVersion: currentSourceVersion } },
     });
     const reportUnlocked = bloomedCount === GROWTH_FLOWER_IDS.length;
     const staleReport = Boolean(visibleReport && visibleReport.sourceVersion !== currentSourceVersion);
@@ -548,19 +548,19 @@ export class GrowthInsightsService implements OnModuleInit {
     };
   }
 
-  async ensureCurrentReport(ownerDeviceId: string) {
-    if (!(await this.getState(ownerDeviceId)).report.unlocked) {
+  async ensureCurrentReport(ownerUserId: string) {
+    if (!(await this.getState(ownerUserId)).report.unlocked) {
       throw new GrowthInsightServiceError('not_unlocked');
     }
-    const sourceSnapshot = await this.listCurrentDiarySources(ownerDeviceId);
+    const sourceSnapshot = await this.listCurrentDiarySources(ownerUserId);
     if (!sourceSnapshot.length) throw new GrowthInsightServiceError('no_sources');
-    const sourceVersion = await this.currentDiarySetVersion(ownerDeviceId);
+    const sourceVersion = await this.currentDiarySetVersion(ownerUserId);
     const existingJob = await this.prisma.growthReportJob.findUnique({
-      where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion } },
+      where: { ownerUserId_sourceVersion: { ownerUserId, sourceVersion } },
     });
     if (existingJob) {
-      if (existingJob.status === 'pending') this.scheduleReportJob(existingJob.id, ownerDeviceId);
-      return this.getState(ownerDeviceId);
+      if (existingJob.status === 'pending') this.scheduleReportJob(existingJob.id, ownerUserId);
+      return this.getState(ownerUserId);
     }
     const batches = makeDiaryBatches(sourceSnapshot);
     const requestId = `growth-report-${randomUUID()}`;
@@ -568,7 +568,7 @@ export class GrowthInsightsService implements OnModuleInit {
       const lockedDiaries = await transaction.$queryRaw<Array<{ id: string; version: number }>>(Prisma.sql`
         SELECT \`id\`, \`version\`
         FROM \`Diary\`
-        WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+        WHERE \`ownerUserId\` = ${ownerUserId}
         ORDER BY \`id\`
         FOR UPDATE
       `);
@@ -576,12 +576,12 @@ export class GrowthInsightsService implements OnModuleInit {
         throw new GrowthInsightServiceError('source_changed');
       }
       const racedJob = await transaction.growthReportJob.findUnique({
-        where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion } },
+        where: { ownerUserId_sourceVersion: { ownerUserId, sourceVersion } },
       });
       if (racedJob) return racedJob;
       return transaction.growthReportJob.create({
         data: {
-          ownerDeviceId,
+          ownerUserId,
           requestId,
           sourceVersion,
           sourceDiaryRefs: inputJson(sourceSnapshot.map(({ id, version }) => ({ id, version }))),
@@ -590,22 +590,22 @@ export class GrowthInsightsService implements OnModuleInit {
         },
       });
     });
-    if (job.status === 'pending') this.scheduleReportJob(job.id, ownerDeviceId);
-    return this.getState(ownerDeviceId);
+    if (job.status === 'pending') this.scheduleReportJob(job.id, ownerUserId);
+    return this.getState(ownerUserId);
   }
 
-  async retryCurrentReport(ownerDeviceId: string) {
-    if (!(await this.getState(ownerDeviceId)).report.unlocked) {
+  async retryCurrentReport(ownerUserId: string) {
+    if (!(await this.getState(ownerUserId)).report.unlocked) {
       throw new GrowthInsightServiceError('not_unlocked');
     }
-    const currentSourceVersion = await this.currentDiarySetVersion(ownerDeviceId);
+    const currentSourceVersion = await this.currentDiarySetVersion(ownerUserId);
     const job = await this.prisma.growthReportJob.findUnique({
-      where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion: currentSourceVersion } },
+      where: { ownerUserId_sourceVersion: { ownerUserId, sourceVersion: currentSourceVersion } },
     });
-    if (!job || job.status !== 'failed') return this.ensureCurrentReport(ownerDeviceId);
+    if (!job || job.status !== 'failed') return this.ensureCurrentReport(ownerUserId);
     const refs = parseSourceRefs(job.sourceDiaryRefs);
-    const sourceSnapshot = await this.loadSourcesByRefs(ownerDeviceId, refs);
-    if (!sourceSnapshot.length || await this.currentDiarySetVersion(ownerDeviceId) !== currentSourceVersion) {
+    const sourceSnapshot = await this.loadSourcesByRefs(ownerUserId, refs);
+    if (!sourceSnapshot.length || await this.currentDiarySetVersion(ownerUserId) !== currentSourceVersion) {
       throw new GrowthInsightServiceError('source_changed');
     }
     await this.prisma.growthReportJob.update({
@@ -622,13 +622,13 @@ export class GrowthInsightsService implements OnModuleInit {
         failureCode: null,
       },
     });
-    this.scheduleReportJob(job.id, ownerDeviceId);
-    return this.getState(ownerDeviceId);
+    this.scheduleReportJob(job.id, ownerUserId);
+    return this.getState(ownerUserId);
   }
 
-  private async listCurrentDiarySources(ownerDeviceId: string): Promise<GrowthSourceDiary[]> {
+  private async listCurrentDiarySources(ownerUserId: string): Promise<GrowthSourceDiary[]> {
     const diaries = await this.prisma.diary.findMany({
-      where: { ownerDeviceId },
+      where: { ownerUserId },
       select: { id: true, version: true, title: true, contentSnapshot: true },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
@@ -638,9 +638,9 @@ export class GrowthInsightsService implements OnModuleInit {
     });
   }
 
-  private async loadDiarySource(ownerDeviceId: string, diaryId: string, version: number) {
+  private async loadDiarySource(ownerUserId: string, diaryId: string, version: number) {
     const diary = await this.prisma.diary.findFirst({
-      where: { id: diaryId, ownerDeviceId, version },
+      where: { id: diaryId, ownerUserId, version },
       select: { id: true, version: true, title: true, contentSnapshot: true },
     });
     if (!diary) return null;
@@ -648,10 +648,10 @@ export class GrowthInsightsService implements OnModuleInit {
     return blocks.length ? { id: diary.id, version: diary.version, title: diary.title, blocks } : null;
   }
 
-  private async loadSourcesByRefs(ownerDeviceId: string, refs: SourceDiaryRef[]) {
+  private async loadSourcesByRefs(ownerUserId: string, refs: SourceDiaryRef[]) {
     if (!refs.length) return [];
     const diaries = await this.prisma.diary.findMany({
-      where: { ownerDeviceId, id: { in: refs.map(ref => ref.id) } },
+      where: { ownerUserId, id: { in: refs.map(ref => ref.id) } },
       select: { id: true, version: true, title: true, contentSnapshot: true },
       orderBy: [{ id: 'asc' }],
     });
@@ -666,29 +666,29 @@ export class GrowthInsightsService implements OnModuleInit {
     });
   }
 
-  private async currentDiarySetVersion(ownerDeviceId: string) {
+  private async currentDiarySetVersion(ownerUserId: string) {
     const refs = await this.prisma.diary.findMany({
-      where: { ownerDeviceId },
+      where: { ownerUserId },
       select: { id: true, version: true },
       orderBy: [{ id: 'asc' }],
     });
     return makeSourceVersion(refs);
   }
 
-  private scheduleRecognitionRun(runId: string, ownerDeviceId: string) {
+  private scheduleRecognitionRun(runId: string, ownerUserId: string) {
     if (process.env.NODE_ENV === 'test') return;
-    void this.processRecognitionRun(runId, ownerDeviceId).catch(error => {
+    void this.processRecognitionRun(runId, ownerUserId).catch(error => {
       const code = error instanceof GrowthInsightProviderError ? error.code : 'provider_failed';
       this.logger.warn(`Growth recognition task stopped (${code}).`);
     });
   }
 
-  private async processRecognitionRun(runId: string, ownerDeviceId: string) {
+  private async processRecognitionRun(runId: string, ownerUserId: string) {
     if (this.activeRecognitionRuns.has(runId)) return;
     this.activeRecognitionRuns.add(runId);
     try {
       const run = await this.prisma.growthRecognitionRun.findFirst({
-        where: { id: runId, ownerDeviceId },
+        where: { id: runId, ownerUserId },
       });
       if (!run || run.status === 'succeeded') return;
       if (run.status === 'failed') return;
@@ -697,7 +697,7 @@ export class GrowthInsightsService implements OnModuleInit {
         data: { status: 'running' },
       });
       const refs = parseSourceRefs(run.sourceDiaryRefs);
-      const sources = await this.loadSourcesByRefs(ownerDeviceId, refs);
+      const sources = await this.loadSourcesByRefs(ownerUserId, refs);
       const batches = makeDiaryBatches(sources);
       if (batches.length !== run.batchCount) {
         throw new GrowthInsightServiceError('source_changed');
@@ -708,7 +708,7 @@ export class GrowthInsightsService implements OnModuleInit {
           data: { status: 'running', inFlightBatchIndex: index },
         });
         const result = await this.taskCoordinator.runBackground(
-          ownerDeviceId,
+          ownerUserId,
           () => this.provider.recognizeFlowers(batches[index]),
         );
         const allowedDiaryIds = new Set(batches[index].map(diary => diary.id));
@@ -717,14 +717,14 @@ export class GrowthInsightsService implements OnModuleInit {
           throw new GrowthInsightProviderError('invalid_response');
         }
         await this.prisma.$transaction(async transaction => {
-          await this.lockDiaryRefs(transaction, ownerDeviceId, refs);
+          await this.lockDiaryRefs(transaction, ownerUserId, refs);
           const currentRun = await transaction.growthRecognitionRun.findFirst({
-            where: { id: runId, ownerDeviceId, status: 'running' },
+            where: { id: runId, ownerUserId, status: 'running' },
             select: { id: true },
           });
           if (!currentRun) throw new GrowthInsightServiceError('source_changed');
-          await this.grantFlowers(transaction, ownerDeviceId, result, refs);
-          await this.grantFirstTrip(transaction, ownerDeviceId, result.tripDiaryIds);
+          await this.grantFlowers(transaction, ownerUserId, result, refs);
+          await this.grantFirstTrip(transaction, ownerUserId, result.tripDiaryIds);
           await transaction.growthRecognitionRun.update({
             where: { id: runId },
             data: {
@@ -745,7 +745,7 @@ export class GrowthInsightsService implements OnModuleInit {
           ? 'source_changed'
           : 'provider_failed';
       await this.prisma.growthRecognitionRun.updateMany({
-        where: { id: runId, ownerDeviceId, status: { in: ['pending', 'running'] } },
+        where: { id: runId, ownerUserId, status: { in: ['pending', 'running'] } },
         data: { status: 'failed', failureCode: code, inFlightBatchIndex: null },
       });
     } finally {
@@ -755,7 +755,7 @@ export class GrowthInsightsService implements OnModuleInit {
 
   private async grantFlowers(
     transaction: Prisma.TransactionClient,
-    ownerDeviceId: string,
+    ownerUserId: string,
     result: GrowthFlowerRecognitionResult,
     sourceRefs: SourceDiaryRef[],
   ) {
@@ -765,9 +765,9 @@ export class GrowthInsightsService implements OnModuleInit {
       if (versions.some(ref => !ref.version)) throw new GrowthInsightProviderError('invalid_response');
       const sourceHash = createHash('sha256').update(JSON.stringify(versions)).digest('hex');
       await transaction.growthFlower.upsert({
-        where: { ownerDeviceId_flowerKey: { ownerDeviceId, flowerKey: flower.flowerId } },
+        where: { ownerUserId_flowerKey: { ownerUserId, flowerKey: flower.flowerId } },
         create: {
-          ownerDeviceId,
+          ownerUserId,
           flowerKey: flower.flowerId,
           summary: flower.summary,
           sourceDiaryIds: inputJson(flower.sourceDiaryIds),
@@ -781,14 +781,14 @@ export class GrowthInsightsService implements OnModuleInit {
 
   private async grantFirstTrip(
     transaction: Prisma.TransactionClient,
-    ownerDeviceId: string,
+    ownerUserId: string,
     sourceDiaryIds: string[],
   ) {
     if (!sourceDiaryIds.length) return;
     await transaction.growthMilestone.upsert({
-      where: { ownerDeviceId_milestoneId: { ownerDeviceId, milestoneId: 'first-trip' } },
+      where: { ownerUserId_milestoneId: { ownerUserId, milestoneId: 'first-trip' } },
       create: {
-        ownerDeviceId,
+        ownerUserId,
         milestoneId: 'first-trip',
         sourceDiaryIds: inputJson(sourceDiaryIds),
       },
@@ -798,7 +798,7 @@ export class GrowthInsightsService implements OnModuleInit {
 
   private async lockDiaryRefs(
     transaction: Prisma.TransactionClient,
-    ownerDeviceId: string,
+    ownerUserId: string,
     refs: SourceDiaryRef[],
   ) {
     if (!refs.length) throw new GrowthInsightServiceError('source_changed');
@@ -806,14 +806,14 @@ export class GrowthInsightsService implements OnModuleInit {
     const locked = await transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
       SELECT \`id\`
       FROM \`Diary\`
-      WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+      WHERE \`ownerUserId\` = ${ownerUserId}
         AND \`id\` IN (${Prisma.join(diaryIds)})
       ORDER BY \`id\`
       FOR UPDATE
     `);
     if (locked.length !== diaryIds.length) throw new GrowthInsightServiceError('source_changed');
     const current = await transaction.diary.findMany({
-      where: { ownerDeviceId, id: { in: diaryIds } },
+      where: { ownerUserId, id: { in: diaryIds } },
       select: { id: true, version: true },
     });
     const versionById = new Map(current.map(diary => [diary.id, diary.version]));
@@ -824,15 +824,15 @@ export class GrowthInsightsService implements OnModuleInit {
   }
 
   private async persistMilestone(
-    ownerDeviceId: string,
+    ownerUserId: string,
     milestoneId: string,
     sourceDiaryIds: string[],
     achievedAt?: Date,
   ) {
     return this.prisma.growthMilestone.upsert({
-      where: { ownerDeviceId_milestoneId: { ownerDeviceId, milestoneId } },
+      where: { ownerUserId_milestoneId: { ownerUserId, milestoneId } },
       create: {
-        ownerDeviceId,
+        ownerUserId,
         milestoneId,
         sourceDiaryIds: inputJson(sourceDiaryIds),
         ...(achievedAt ? { achievedAt } : {}),
@@ -841,20 +841,20 @@ export class GrowthInsightsService implements OnModuleInit {
     });
   }
 
-  private async scheduleReportJob(jobId: string, ownerDeviceId: string) {
+  private async scheduleReportJob(jobId: string, ownerUserId: string) {
     if (process.env.NODE_ENV === 'test') return;
-    void this.processReportJob(jobId, ownerDeviceId).catch(error => {
+    void this.processReportJob(jobId, ownerUserId).catch(error => {
       const code = error instanceof GrowthInsightProviderError ? error.code : 'provider_failed';
       this.logger.warn(`Growth report task stopped (${code}).`);
     });
   }
 
-  private async processReportJob(jobId: string, ownerDeviceId: string) {
+  private async processReportJob(jobId: string, ownerUserId: string) {
     if (this.activeReportJobs.has(jobId)) return;
     this.activeReportJobs.add(jobId);
     try {
       const job = await this.prisma.growthReportJob.findFirst({
-        where: { id: jobId, ownerDeviceId },
+        where: { id: jobId, ownerUserId },
       });
       if (!job || job.status === 'succeeded' || job.status === 'failed') return;
       await this.prisma.growthReportJob.update({
@@ -862,8 +862,8 @@ export class GrowthInsightsService implements OnModuleInit {
         data: { status: 'running' },
       });
       const refs = parseSourceRefs(job.sourceDiaryRefs);
-      const sources = await this.loadSourcesByRefs(ownerDeviceId, refs);
-      if (!sources.length || await this.currentDiarySetVersion(ownerDeviceId) !== job.sourceVersion) {
+      const sources = await this.loadSourcesByRefs(ownerUserId, refs);
+      if (!sources.length || await this.currentDiarySetVersion(ownerUserId) !== job.sourceVersion) {
         throw new GrowthInsightServiceError('source_changed');
       }
       const batches = makeDiaryBatches(sources);
@@ -875,7 +875,7 @@ export class GrowthInsightsService implements OnModuleInit {
           data: { status: 'running', inFlightBatchIndex: index },
         });
         const batchObservations = await this.taskCoordinator.runBackground(
-          ownerDeviceId,
+          ownerUserId,
           () => this.provider.summarizeReportChunk(batches[index]),
         );
         const allowed = new Set(batches[index].map(diary => diary.id));
@@ -898,23 +898,23 @@ export class GrowthInsightsService implements OnModuleInit {
         data: { status: 'running', inFlightBatchIndex: batches.length },
       });
       const dimensions = await this.taskCoordinator.runBackground(
-        ownerDeviceId,
+        ownerUserId,
         () => this.provider.synthesizeReport(observations, evidenceIds),
       );
       if (dimensions.some(item => item.sourceDiaryIds.some(id => !evidenceIds.includes(id)))) {
         throw new GrowthInsightProviderError('invalid_response');
       }
-      if (await this.currentDiarySetVersion(ownerDeviceId) !== job.sourceVersion) {
+      if (await this.currentDiarySetVersion(ownerUserId) !== job.sourceVersion) {
         throw new GrowthInsightServiceError('source_changed');
       }
-      if (!(await this.getState(ownerDeviceId)).report.unlocked) {
+      if (!(await this.getState(ownerUserId)).report.unlocked) {
         throw new GrowthInsightServiceError('not_unlocked');
       }
       await this.prisma.$transaction(async transaction => {
         const lockedDiaries = await transaction.$queryRaw<Array<{ id: string; version: number }>>(Prisma.sql`
           SELECT \`id\`, \`version\`
           FROM \`Diary\`
-          WHERE \`ownerDeviceId\` = ${ownerDeviceId}
+          WHERE \`ownerUserId\` = ${ownerUserId}
           ORDER BY \`id\`
           FOR UPDATE
         `);
@@ -922,14 +922,14 @@ export class GrowthInsightsService implements OnModuleInit {
           throw new GrowthInsightServiceError('source_changed');
         }
         const currentJob = await transaction.growthReportJob.findFirst({
-          where: { id: jobId, ownerDeviceId, status: 'running' },
+          where: { id: jobId, ownerUserId, status: 'running' },
           select: { id: true },
         });
         if (!currentJob) throw new GrowthInsightServiceError('source_changed');
         const savedReport = await transaction.growthInsightReport.upsert({
-          where: { ownerDeviceId_sourceVersion: { ownerDeviceId, sourceVersion: job.sourceVersion } },
+          where: { ownerUserId_sourceVersion: { ownerUserId, sourceVersion: job.sourceVersion } },
           create: {
-            ownerDeviceId,
+            ownerUserId,
             sourceVersion: job.sourceVersion,
             sourceDiaryIds: inputJson(refs.map(ref => ref.id)),
             sourceDiaryVersions: inputJson(refs),
@@ -939,7 +939,7 @@ export class GrowthInsightsService implements OnModuleInit {
           update: {},
         });
         await transaction.growthInsightReport.deleteMany({
-          where: { ownerDeviceId, id: { not: savedReport.id } },
+          where: { ownerUserId, id: { not: savedReport.id } },
         });
       });
       await this.prisma.growthReportJob.update({
@@ -958,7 +958,7 @@ export class GrowthInsightsService implements OnModuleInit {
           ? error.code
           : 'provider_failed';
       await this.prisma.growthReportJob.updateMany({
-        where: { id: jobId, ownerDeviceId, status: { in: ['pending', 'running'] } },
+        where: { id: jobId, ownerUserId, status: { in: ['pending', 'running'] } },
         data: {
           status: 'failed',
           failureCode: code,
@@ -972,9 +972,9 @@ export class GrowthInsightsService implements OnModuleInit {
     }
   }
 
-  private async getLatestReport(ownerDeviceId: string) {
+  private async getLatestReport(ownerUserId: string) {
     return this.prisma.growthInsightReport.findFirst({
-      where: { ownerDeviceId },
+      where: { ownerUserId },
       orderBy: [{ generatedAt: 'desc' }, { id: 'desc' }],
     });
   }

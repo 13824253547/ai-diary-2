@@ -6,12 +6,12 @@ function createHarness() {
   const turns = new Map<string, Record<string, any>>();
   const messages = new Map<string, Record<string, any>>();
 
-  const turnKey = (ownerDeviceId: string, conversationId: string, requestId: string) =>
-    `${ownerDeviceId}:${conversationId}:${requestId}`;
+  const turnKey = (ownerUserId: string, conversationId: string, requestId: string) =>
+    `${ownerUserId}:${conversationId}:${requestId}`;
   const findTurn = (where: Record<string, any>) => {
     if (where.id) return [...turns.values()].find(turn => turn.id === where.id) ?? null;
-    const key = where.ownerDeviceId_conversationId_requestId;
-    return turns.get(turnKey(key.ownerDeviceId, key.conversationId, key.requestId)) ?? null;
+    const key = where.ownerUserId_conversationId_requestId;
+    return turns.get(turnKey(key.ownerUserId, key.conversationId, key.requestId)) ?? null;
   };
   let nextId = 1;
 
@@ -27,7 +27,7 @@ function createHarness() {
       create: jest.fn(async ({ data }: { data: Record<string, any> }) => {
         const conversation = {
           id: data.id,
-          ownerDeviceId: data.ownerDeviceId,
+          ownerUserId: data.ownerUserId,
           nextTurnSequence: 1,
           createdAt: new Date('2026-10-16T00:00:00.000Z'),
           updatedAt: new Date('2026-10-16T00:00:00.000Z'),
@@ -78,7 +78,7 @@ function createHarness() {
           updatedAt: new Date('2026-10-16T00:00:00.000Z'),
           ...data,
         };
-        turns.set(turnKey(data.ownerDeviceId, data.conversationId, data.requestId), turn);
+        turns.set(turnKey(data.ownerUserId, data.conversationId, data.requestId), turn);
         return turn;
       }),
       update: jest.fn(async ({ where, data }: { where: { id: string }; data: Record<string, any> }) => {
@@ -367,7 +367,10 @@ describe('ChatSessionsService', () => {
     const harness = createHarness();
     await harness.service.beginTurn(beginInput, 'device-1');
     const previousNodeEnv = process.env.NODE_ENV;
+    const providerKeys = ['PET_CHAT_PROVIDER', 'PET_CHAT_BASE_URL', 'PET_CHAT_MODEL', 'PET_CHAT_API_KEY'] as const;
+    const previousProviderConfig = Object.fromEntries(providerKeys.map(key => [key, process.env[key]]));
     process.env.NODE_ENV = 'production';
+    providerKeys.forEach(key => { delete process.env[key]; });
     try {
       await expect(harness.service.beginTurn({
         ...beginInput,
@@ -393,6 +396,11 @@ describe('ChatSessionsService', () => {
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;
+      providerKeys.forEach(key => {
+        const value = previousProviderConfig[key];
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      });
     }
     expect(harness.messages.size).toBe(1);
     expect(harness.conversations.has('conversation-production')).toBe(false);

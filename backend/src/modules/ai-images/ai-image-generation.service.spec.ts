@@ -55,8 +55,8 @@ describe('AIImageGenerationService', () => {
     const assets = {
       findGeneratedMaterial: jest.fn().mockResolvedValue(undefined),
       assertMaterialCapacity: jest.fn().mockResolvedValue(undefined),
-      saveGeneratedMaterial: jest.fn().mockImplementation(async (ownerDeviceId: string) => ({
-        id: `material-${ownerDeviceId}`,
+      saveGeneratedMaterial: jest.fn().mockImplementation(async (ownerUserId: string) => ({
+        id: `material-${ownerUserId}`,
         generationRequestId: request.requestId,
         generationPrompt: request.description,
       })),

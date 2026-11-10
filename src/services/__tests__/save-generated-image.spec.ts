@@ -25,7 +25,7 @@ const generatedPhoto: DiaryPhoto = {
   date: '2026.10.23',
   filename: 'generated-1.jpg',
   uri: 'https://api.example.test/photos/materials/material-1/content',
-  remoteHeaders: { 'x-device-id': 'device-1', Authorization: 'Bearer test-token' },
+  remoteHeaders: {  Authorization: 'Bearer test-token' },
   source: 'generated',
 };
 
