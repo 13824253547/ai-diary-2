@@ -5,7 +5,7 @@ import {
   subscribeAccountSession,
   type AccountSession,
 } from '../../services/account-auth';
-import { clearLegacyAnonymousLocalData, clearTransientAccountMediaCache } from '../../services/legacy-account-data-cleanup';
+import { clearTransientAccountMediaCache } from '../../services/legacy-account-data-cleanup';
 import { useAppStore } from '../../store/use-app-store';
 
 type AccountSessionContextValue = {
@@ -42,7 +42,6 @@ export function AccountSessionProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       try {
-        await clearLegacyAnonymousLocalData();
         const restored = await restoreAccountSession();
         currentUserId = restored?.user.id;
         if (restored) await hydrateAccountData();

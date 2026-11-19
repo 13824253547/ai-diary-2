@@ -122,17 +122,17 @@ describe('diary photo upload preparation', () => {
     expect(mockDownloadFileAsync).toHaveBeenCalledWith(
       material.uri,
       expect.objectContaining({
-        uri: expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
+        uri: expect.stringMatching(/^file:\/\/\/cache\/account-diary-material-v1-material-1-/),
       }),
       { headers: material.remoteHeaders, idempotent: true },
     );
     expect(mockManipulateAsync).toHaveBeenCalledWith(
-      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
+      expect.stringMatching(/^file:\/\/\/cache\/account-diary-material-v1-material-1-/),
       [{ resize: { width: 2048, height: 1365 } }],
       { compress: 0.84, format: 'jpeg' },
     );
     expect(mockDeleteAsync).toHaveBeenCalledWith(
-      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-1-/),
+      expect.stringMatching(/^file:\/\/\/cache\/account-diary-material-v1-material-1-/),
       { idempotent: true },
     );
     expect(result[0]).toMatchObject({ photoId: 'material-1', mimeType: 'image/jpeg' });
@@ -167,7 +167,7 @@ describe('diary photo upload preparation', () => {
       message: '所选照片暂时无法处理，请返回相册重新选择。',
     });
     expect(mockDeleteAsync).toHaveBeenCalledWith(
-      expect.stringMatching(/^file:\/\/\/cache\/diary-material-material-failed-/),
+      expect.stringMatching(/^file:\/\/\/cache\/account-diary-material-v1-material-failed-/),
       { idempotent: true },
     );
   });

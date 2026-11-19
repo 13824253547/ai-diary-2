@@ -1,0 +1,52 @@
+name: orange-glow-account
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    env_file:
+      - path: /opt/orange-glow-account/shared/mysql.env
+        format: raw
+    ports: ["127.0.0.1:33308:3306"]
+    command:
+      - --innodb-buffer-pool-size=96M
+      - --innodb-log-buffer-size=8M
+      - --max-connections=25
+      - --performance-schema=OFF
+      - --mysqlx=OFF
+    mem_limit: 380m
+    volumes:
+      - /opt/orange-glow-account/shared/mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  migrate:
+    image: orange-glow-account-backend:${RELEASE_TAG:?RELEASE_TAG required}-migration
+    profiles: [tools]
+    network_mode: host
+    env_file:
+      - path: /opt/orange-glow-account/shared/backend.env
+        format: raw
+    mem_limit: 220m
+  backend:
+    image: orange-glow-account-backend:${RELEASE_TAG:?RELEASE_TAG required}
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - path: /opt/orange-glow-account/shared/backend.env
+        format: raw
+    environment:
+      NODE_OPTIONS: --max-old-space-size=256
+    mem_limit: 340m
+    volumes:
+      - /opt/orange-glow-account/shared/photo-assets:/data/photo-assets
+      - /opt/orange-glow-account/shared/generation-tmp:/data/generation-tmp
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3002/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),3000).unref()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}

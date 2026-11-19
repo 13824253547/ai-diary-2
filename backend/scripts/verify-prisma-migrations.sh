@@ -94,7 +94,7 @@ docker compose -f docker-compose.local.yml exec -T mysql \
   "DELETE FROM _prisma_migrations WHERE migration_name <> '20261015000000_initial_schema'"
 docker compose -f docker-compose.local.yml exec -T mysql \
   mysql -uroot -proot -D "${baseline_database}" -e \
-  "INSERT INTO Diary (id, ownerDeviceId, draftId, title, summary, location, date, privacy, photoIds, publicBlockIds, contentSnapshot, version, createdAt, updatedAt) VALUES ('baseline-diary', 'baseline-device', 'baseline-draft', 'Baseline diary', 'Existing data', 'Taipei', '2026-10-15 12:00:00.000', 'private', JSON_ARRAY('photo-1'), NULL, JSON_OBJECT('type', 'travel', 'blocks', JSON_ARRAY()), 1, '2026-10-15 12:00:00.000', '2026-10-15 12:00:00.000')"
+  "INSERT INTO Diary (id, ownerUserId, draftId, title, summary, location, date, privacy, photoIds, publicBlockIds, contentSnapshot, version, createdAt, updatedAt) VALUES ('baseline-diary', 'baseline-user', 'baseline-draft', 'Baseline diary', 'Existing data', 'Taipei', '2026-10-15 12:00:00.000', 'private', JSON_ARRAY('photo-1'), NULL, JSON_OBJECT('type', 'travel', 'blocks', JSON_ARRAY()), 1, '2026-10-15 12:00:00.000', '2026-10-15 12:00:00.000')"
 
 if confirmation_output=$(DATABASE_URL="mysql://root:root@127.0.0.1:33306/${baseline_database}" \
   npx ts-node scripts/baseline-prisma-migrations.ts 2>&1); then

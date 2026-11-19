@@ -26,6 +26,7 @@ export default function RegisterScreen() {
   const [error, setError] = useState('');
 
   const sendEmailCode = async () => {
+    if (busy || sendingCode) return;
     const normalizedEmail = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setError('请输入有效邮箱地址。');
@@ -57,6 +58,7 @@ export default function RegisterScreen() {
   };
 
   const submit = async () => {
+    if (busy || sendingCode) return;
     if (!/^[A-Za-z0-9_]{4,32}$/.test(username.trim())) {
       setError('用户名需为4至32位字母、数字或下划线。');
       return;
@@ -85,11 +87,6 @@ export default function RegisterScreen() {
       );
     } catch (caught) {
       setError(caught instanceof AccountAuthError ? caught.message : '注册暂时未完成，请重试。');
-      if (caught instanceof AccountAuthError
-        && ['account_unavailable', 'email_verification_failed'].includes(caught.code)) {
-        setEmailChallengeId('');
-        setEmailCodeMessage('请重新获取邮箱验证码后再试。');
-      }
     } finally {
       setBusy(false);
     }
@@ -179,7 +176,7 @@ export default function RegisterScreen() {
         />
         {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
         <Text style={styles.warning}>邮箱用于验证注册和账号注销，不用于密码找回。忘记密码后将无法恢复账号及其中的数据。</Text>
-        <Button label="创建账号" onPress={() => void submit()} disabled={busy} loading={busy} loadingLabel="正在创建账号" />
+        <Button label="创建账号" onPress={() => void submit()} disabled={busy || sendingCode} loading={busy} loadingLabel="正在创建账号" />
       </View>
       <Pressable accessibilityRole="button" onPress={() => router.replace('/auth/login')} style={styles.link}>
         <Text style={styles.linkText}>已有账号？返回登录</Text>

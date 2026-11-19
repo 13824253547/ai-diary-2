@@ -1,9 +1,13 @@
 import * as SecureStore from 'expo-secure-store';
+import { sha256 } from '@noble/hashes/sha256';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
 import { Platform } from 'react-native';
 import { appConfig } from '../config/app-config';
 import { clearAccountPrivateData, clearTransientAccountMediaCache } from './legacy-account-data-cleanup';
 
-const SESSION_KEY = 'orange-glow-account-session-v1';
+function sessionKey() {
+  return `orange-glow-account-session-v2-${bytesToHex(sha256(utf8ToBytes(appConfig.backendBaseUrl)))}`;
+}
 
 export type AccountSession = {
   accessToken: string;
@@ -66,9 +70,10 @@ async function request<T>(
   method: string,
   body?: unknown,
   token?: string,
+  timeoutMs = 15_000,
 ): Promise<{ status: number; data: Envelope<T> }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${appConfig.backendBaseUrl}${path}`, {
       method,
@@ -110,11 +115,11 @@ function readError<T>(status: number, envelope: Envelope<T>): never {
 async function persistSession(value: AccountSession | undefined) {
   if (Platform.OS !== 'web') {
     if (value) {
-      await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(value), {
+      await SecureStore.setItemAsync(sessionKey(), JSON.stringify(value), {
         keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
       });
     } else {
-      await SecureStore.deleteItemAsync(SESSION_KEY);
+      await SecureStore.deleteItemAsync(sessionKey());
     }
   }
   session = value;
@@ -154,7 +159,7 @@ export async function restoreAccountSession() {
     }
     let stored: unknown;
     try {
-      const serialized = await SecureStore.getItemAsync(SESSION_KEY);
+      const serialized = await SecureStore.getItemAsync(sessionKey());
       stored = serialized ? JSON.parse(serialized) as unknown : undefined;
     } catch {
       await persistSession(undefined);
@@ -169,6 +174,7 @@ export async function restoreAccountSession() {
     notifySession();
     try {
       const response = await request<{ id: string; username: string }>('/auth/me', 'GET', undefined, stored.accessToken);
+      if (response.status >= 500) return stored;
       if (response.status === 401 || response.status === 403 || response.data.ok !== true
         || response.data.data?.id !== stored.user.id) {
         await persistSession(undefined);
@@ -176,7 +182,7 @@ export async function restoreAccountSession() {
       }
       return stored;
     } catch (error) {
-      if (error instanceof AccountAuthError && error.status === 0) return stored;
+      if (error instanceof AccountAuthError && (error.status === 0 || error.status >= 500)) return stored;
       await persistSession(undefined);
       return undefined;
     }
@@ -223,7 +229,7 @@ export async function requestRegistrationEmailCode(
   const response = await request<EmailCodeChallenge>('/auth/register/email-code', 'POST', {
     email,
     captcha: { challengeId: captchaChallengeId, x: captchaX },
-  });
+  }, undefined, 60_000);
   return readEmailCodeChallenge(response.status, response.data);
 }
 
@@ -235,6 +241,7 @@ export async function requestAccountDeletionEmailCode(password: string): Promise
     'POST',
     { password },
     active.accessToken,
+    60_000,
   );
   const challenge = readEmailCodeChallenge(response.status, response.data);
   if (typeof challenge.maskedEmail !== 'string') {

@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { File } from 'expo-file-system';
+import { ACCOUNT_MATERIAL_CACHE_PREFIX } from './account-media-cache';
 import { createDiagnosticRequestId, isDevDiagnosticsEnabled, logDevDiagnostic } from './dev-diagnostics';
 import { getMaterialPhotoContentUrl } from './material-photo-api';
 import type { DiaryPhoto } from '../types/diary';
@@ -57,7 +58,7 @@ async function getReadableUri(
     return undefined;
   }
 
-  const destination = `${FileSystem.cacheDirectory}diary-material-${encodeURIComponent(photo.id)}-${Date.now()}.jpg`;
+  const destination = `${FileSystem.cacheDirectory}${ACCOUNT_MATERIAL_CACHE_PREFIX}${encodeURIComponent(photo.id)}-${Date.now()}.jpg`;
   const requestId = isDevDiagnosticsEnabled() ? createDiagnosticRequestId() : undefined;
   let downloaded: File;
   if (requestId) {

@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import * as argon2 from 'argon2';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
@@ -155,6 +156,7 @@ describe('Backend foundation (e2e)', () => {
     global.fetch = originalFetch;
     sentEmailCodes.length = 0;
     await store.reset();
+    await prisma.authRateLimit.deleteMany();
   });
 
   afterAll(async () => {
@@ -192,13 +194,25 @@ describe('Backend foundation (e2e)', () => {
       return { challengeId, x: challenge.targetX };
     };
 
+    const registrationCaptcha = await issueCaptcha('register');
     const emailChallenge = await request(app.getHttpServer())
       .post('/api/auth/register/email-code')
-      .send({ email, captcha: await issueCaptcha('register') })
+      .send({ email, captcha: registrationCaptcha })
       .expect(201);
     expect(emailChallenge.body.data).not.toHaveProperty('code');
     const registrationCode = sentEmailCodes.at(-1);
     expect(registrationCode).toMatchObject({ email, purpose: 'register' });
+
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({
+        username,
+        email,
+        password,
+        emailChallengeId: emailChallenge.body.data.challengeId,
+        emailCode: registrationCode?.code === '000000' ? '000001' : '000000',
+      })
+      .expect(400);
 
     const registration = await request(app.getHttpServer())
       .post('/api/auth/register')
@@ -218,9 +232,10 @@ describe('Backend foundation (e2e)', () => {
       select: { email: true, emailVerifiedAt: true },
     })).toMatchObject({ email, emailVerifiedAt: expect.any(Date) });
 
+    const loginCaptcha = await issueCaptcha('login');
     const login = await request(app.getHttpServer())
       .post('/api/auth/login')
-      .send({ username, password, captcha: await issueCaptcha('login') })
+      .send({ username, password, captcha: loginCaptcha })
       .expect(201);
     const secondToken = login.body.data.accessToken as string;
     expect(secondToken).not.toBe(firstToken);
@@ -242,11 +257,25 @@ describe('Backend foundation (e2e)', () => {
       .set('Authorization', `Bearer ${secondToken}`)
       .expect(401);
 
+    const deletionCaptcha = await issueCaptcha('login');
     const deletionLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
-      .send({ username, password, captcha: await issueCaptcha('login') })
+      .send({ username, password, captcha: deletionCaptcha })
       .expect(201);
     const deletionToken = deletionLogin.body.data.accessToken as string;
+    const diaryId = `auth-diary-${randomUUID()}`;
+    const otherDiaryId = `other-diary-${randomUUID()}`;
+    await prisma.diary.createMany({
+      data: [
+        { id: diaryId, ownerUserId: userId, draftId: randomUUID(), title: 'Auth diary', summary: '', date: new Date(), privacy: 'private', photoIds: [], version: 1 },
+        { id: otherDiaryId, ownerUserId: accountB, draftId: randomUUID(), title: 'Other diary', summary: '', date: new Date(), privacy: 'private', photoIds: [], version: 1 },
+      ],
+    });
+    const conversationId = `auth-chat-${randomUUID()}`;
+    await prisma.chatConversation.create({ data: { id: conversationId, ownerUserId: userId } });
+    await prisma.chatMessage.create({
+      data: { id: randomUUID(), conversationId, turnSequence: 1, order: 1, requestId: randomUUID(), role: 'user', text: 'test' },
+    });
     const deletionChallenge = await request(app.getHttpServer())
       .post('/api/auth/account/deletion-code')
       .set('Authorization', `Bearer ${deletionToken}`)
@@ -266,10 +295,112 @@ describe('Backend foundation (e2e)', () => {
 
     expect(await prisma.userAccount.findUnique({ where: { id: userId } })).toBeNull();
     expect(await prisma.accountDeletionJob.findUnique({ where: { ownerUserId: userId } })).toBeNull();
+    expect(await prisma.diary.findUnique({ where: { id: diaryId } })).toBeNull();
+    expect(await prisma.chatConversation.findUnique({ where: { id: conversationId } })).toBeNull();
+    expect(await prisma.chatMessage.count({ where: { conversationId } })).toBe(0);
+    expect(await prisma.diary.findUnique({ where: { id: otherDiaryId } })).not.toBeNull();
     await request(app.getHttpServer())
       .get('/api/auth/me')
       .set('Authorization', `Bearer ${deletionToken}`)
       .expect(401);
+  });
+
+  it('rolls back email code consumption when registration or account deletion fails', async () => {
+    const username = `e2e_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    const email = `${username}@example.test`;
+    const password = 'e2e-account-password-2026';
+    const captchaResponse = await request(app.getHttpServer())
+      .post('/api/auth/captcha')
+      .send({ purpose: 'register' })
+      .expect(201);
+    const captchaId = captchaResponse.body.data.challengeId as string;
+    const captcha = await prisma.captchaChallenge.findUniqueOrThrow({ where: { id: captchaId } });
+    const emailResponse = await request(app.getHttpServer())
+      .post('/api/auth/register/email-code')
+      .send({ email, captcha: { challengeId: captchaId, x: captcha.targetX } })
+      .expect(201);
+    const challengeId = emailResponse.body.data.challengeId as string;
+    const code = sentEmailCodes.at(-1)?.code;
+
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ username: 'e2e_user_a', email, password, emailChallengeId: challengeId, emailCode: code })
+      .expect(409);
+    expect((await prisma.emailVerificationChallenge.findUniqueOrThrow({
+      where: { id: challengeId },
+    })).consumedAt).toBeNull();
+
+    const registration = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ username, email, password, emailChallengeId: challengeId, emailCode: code })
+      .expect(201);
+    const userId = registration.body.data.user.id as string;
+    const authorization = `Bearer ${registration.body.data.accessToken}`;
+    const deletion = await request(app.getHttpServer())
+      .post('/api/auth/account/deletion-code')
+      .set('Authorization', authorization)
+      .send({ password })
+      .expect(201);
+    const deletionChallengeId = deletion.body.data.challengeId as string;
+    const deletionCode = sentEmailCodes.at(-1)?.code;
+    await prisma.accountDeletionJob.create({
+      data: { id: randomUUID(), ownerUserId: userId, status: 'pending' },
+    });
+
+    await request(app.getHttpServer())
+      .delete('/api/auth/account')
+      .set('Authorization', authorization)
+      .send({ password, emailChallengeId: deletionChallengeId, emailCode: deletionCode })
+      .expect(500);
+    expect((await prisma.emailVerificationChallenge.findUniqueOrThrow({
+      where: { id: deletionChallengeId },
+    })).consumedAt).toBeNull();
+    expect(await prisma.userAccount.findUnique({ where: { id: userId } })).not.toBeNull();
+
+    await prisma.accountDeletionJob.delete({ where: { ownerUserId: userId } });
+    await request(app.getHttpServer())
+      .delete('/api/auth/account')
+      .set('Authorization', authorization)
+      .send({ password, emailChallengeId: deletionChallengeId, emailCode: deletionCode })
+      .expect(200);
+    expect(await prisma.userAccount.findUnique({ where: { id: userId } })).toBeNull();
+  });
+
+  it('keeps only one active session when two logins happen concurrently', async () => {
+    const username = `e2e_${randomUUID().replace(/-/g, '').slice(0, 20)}`;
+    const password = 'e2e-account-password-2026';
+    const userId = randomUUID();
+    await prisma.userAccount.create({
+      data: {
+        id: userId,
+        username,
+        email: `${username}@example.test`,
+        emailVerifiedAt: new Date(),
+        passwordHash: await argon2.hash(password),
+      },
+    });
+    const proofs: Array<{ challengeId: string; x: number }> = [];
+    for (let index = 0; index < 2; index += 1) {
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/captcha')
+        .send({ purpose: 'login' })
+        .expect(201);
+      const challengeId = response.body.data.challengeId as string;
+      const challenge = await prisma.captchaChallenge.findUniqueOrThrow({ where: { id: challengeId } });
+      proofs.push({ challengeId, x: challenge.targetX });
+    }
+
+    const logins = await Promise.all(proofs.map(captcha =>
+      request(app.getHttpServer()).post('/api/auth/login').send({ username, password, captcha }),
+    ));
+    expect(logins.map(result => result.status)).toEqual([201, 201]);
+    expect(await prisma.accountSession.count({ where: { userId, revokedAt: null } })).toBe(1);
+    const statuses = await Promise.all(logins.map(result =>
+      request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${result.body.data.accessToken}`),
+    ));
+    expect(statuses.map(result => result.status).sort()).toEqual([200, 401]);
   });
 
   it('keeps health public while requiring account sessions for private APIs', async () => {

@@ -213,29 +213,29 @@ export class AccountAuthService implements OnModuleInit {
     const sessionId = randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
-    const emailVerified = await this.prisma.$transaction(tx =>
-      this.consumeEmailCode(tx, {
-        challengeId: emailChallengeId,
-        email,
-        purpose: 'register',
-        code: data.emailCode,
-      }),
-    );
-    if (!emailVerified) {
-      throw authError('email_verification_failed', '邮箱验证码无效、已过期或已使用。');
-    }
+    let emailVerified: boolean;
     try {
-      await this.prisma.$transaction(async tx => {
+      emailVerified = await this.prisma.$transaction(async tx => {
+        if (!await this.consumeEmailCode(tx, {
+          challengeId: emailChallengeId,
+          email,
+          purpose: 'register',
+          code: data.emailCode,
+        })) return false;
         await tx.userAccount.create({
           data: { id: userId, username, email, emailVerifiedAt: now, passwordHash },
         });
         await tx.accountSession.create({ data: { id: sessionId, userId, expiresAt } });
+        return true;
       });
     } catch (error) {
       if ((error as { code?: unknown })?.code === 'P2002') {
         throw authError('account_unavailable', '该用户名或邮箱暂不可用。', 409);
       }
       throw error;
+    }
+    if (!emailVerified) {
+      throw authError('email_verification_failed', '邮箱验证码无效、已过期或已使用。');
     }
     return this.sessionResponse(userId, sessionId, username, now);
   }
@@ -273,6 +273,10 @@ export class AccountAuthService implements OnModuleInit {
     const sessionId = randomUUID();
     const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
     await this.prisma.$transaction(async tx => {
+      await tx.userAccount.update({
+        where: { id: account.id },
+        data: { updatedAt: now },
+      });
       await tx.accountSession.deleteMany({ where: { userId: account.id } });
       await tx.accountSession.create({ data: { id: sessionId, userId: account.id, expiresAt } });
     });
@@ -322,20 +326,14 @@ export class AccountAuthService implements OnModuleInit {
     if (!account.emailVerifiedAt) {
       throw authError('account_email_unverified', '该账号没有可用的已验证邮箱。', 400);
     }
-    const emailVerified = await this.prisma.$transaction(tx =>
-      this.consumeEmailCode(tx, {
+    const emailVerified = await this.prisma.$transaction(async tx => {
+      if (!await this.consumeEmailCode(tx, {
         challengeId: emailChallengeId,
         email: account.email,
         purpose: 'delete',
         ownerUserId: userId,
         code: emailCode,
-      }),
-    );
-    if (!emailVerified) {
-      throw authError('email_verification_failed', '邮箱验证码无效、已过期或已使用。');
-    }
-
-    await this.prisma.$transaction(async tx => {
+      })) return false;
       await tx.accountDeletionJob.create({
         data: { id: randomUUID(), ownerUserId: userId, status: 'pending' },
       });
@@ -379,7 +377,11 @@ export class AccountAuthService implements OnModuleInit {
       });
       await tx.accountSession.deleteMany({ where: { userId } });
       await tx.userAccount.delete({ where: { id: userId } });
+      return true;
     });
+    if (!emailVerified) {
+      throw authError('email_verification_failed', '邮箱验证码无效、已过期或已使用。');
+    }
     await this.finishDeletion(userId);
     return { ok: true };
   }
@@ -645,12 +647,22 @@ export class AccountAuthService implements OnModuleInit {
     const bucket = Math.floor(now.getTime() / windowMs);
     const id = createHmac('sha256', secret).update(`${key}:${bucket}`).digest('hex');
     const expiresAt = new Date((bucket + 1) * windowMs);
-    const counter = await this.prisma.authRateLimit.upsert({
-      where: { id },
-      create: { id, count: 1, expiresAt },
-      update: { count: { increment: 1 } },
-      select: { count: true },
-    });
+    let counter: { count: number };
+    try {
+      counter = await this.prisma.authRateLimit.upsert({
+        where: { id },
+        create: { id, count: 1, expiresAt },
+        update: { count: { increment: 1 } },
+        select: { count: true },
+      });
+    } catch (error) {
+      if ((error as { code?: unknown })?.code !== 'P2002') throw error;
+      counter = await this.prisma.authRateLimit.update({
+        where: { id },
+        data: { count: { increment: 1 } },
+        select: { count: true },
+      });
+    }
     if (counter.count > limit) {
       throw authError('rate_limited', '请求过于频繁，请稍后再试。', 429);
     }

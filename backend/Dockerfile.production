@@ -12,7 +12,10 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
-FROM build AS migration
+FROM base AS migration
+COPY deployment/migration/package.json deployment/migration/package-lock.json ./
+RUN npm ci --omit=dev
+COPY prisma ./prisma
 CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
 
 FROM base AS runtime

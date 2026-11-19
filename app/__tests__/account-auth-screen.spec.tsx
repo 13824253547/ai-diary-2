@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import RegisterScreen from '../auth/register';
 import {
+  AccountAuthError,
   registerAccount,
   requestRegistrationEmailCode,
 } from '../../src/services/account-auth';
@@ -84,5 +85,49 @@ describe('RegisterScreen email verification', () => {
         '001234',
       );
     });
+  });
+
+  test('allows retrying an incorrect email code without requesting a new challenge', async () => {
+    jest.mocked(registerAccount).mockRejectedValueOnce(
+      new AccountAuthError('邮箱验证码无效、已过期或已使用。', 'email_verification_failed', 400),
+    );
+    const screen = await render(<RegisterScreen />);
+    await fireEvent.changeText(screen.getByLabelText('用户名'), 'travel_user');
+    await fireEvent.changeText(screen.getByLabelText('注册邮箱'), 'travel@example.com');
+    await fireEvent.changeText(screen.getByLabelText('设置密码'), 'secret-pass-123');
+    await fireEvent.changeText(screen.getByLabelText('确认密码'), 'secret-pass-123');
+    await fireEvent.press(screen.getByRole('button', { name: '发送邮箱验证码' }));
+    await fireEvent.changeText(screen.getByLabelText('邮箱验证码'), '000000');
+    await fireEvent.press(screen.getByRole('button', { name: '创建账号' }));
+    expect(screen.getByText('邮箱验证码无效、已过期或已使用。')).toBeTruthy();
+
+    await fireEvent.changeText(screen.getByLabelText('邮箱验证码'), '001234');
+    await fireEvent.press(screen.getByRole('button', { name: '创建账号' }));
+    expect(registerAccount).toHaveBeenLastCalledWith(
+      'travel_user', 'travel@example.com', 'secret-pass-123', 'email-register-1', '001234',
+    );
+    expect(requestRegistrationEmailCode).toHaveBeenCalledTimes(1);
+  });
+
+  test('allows changing a taken username without requesting another email code', async () => {
+    jest.mocked(registerAccount).mockRejectedValueOnce(
+      new AccountAuthError('该用户名或邮箱暂不可用。', 'account_unavailable', 409),
+    );
+    const screen = await render(<RegisterScreen />);
+    await fireEvent.changeText(screen.getByLabelText('用户名'), 'travel_user');
+    await fireEvent.changeText(screen.getByLabelText('注册邮箱'), 'travel@example.com');
+    await fireEvent.changeText(screen.getByLabelText('设置密码'), 'secret-pass-123');
+    await fireEvent.changeText(screen.getByLabelText('确认密码'), 'secret-pass-123');
+    await fireEvent.press(screen.getByRole('button', { name: '发送邮箱验证码' }));
+    await fireEvent.changeText(screen.getByLabelText('邮箱验证码'), '001234');
+    await fireEvent.press(screen.getByRole('button', { name: '创建账号' }));
+    expect(screen.getByText('该用户名或邮箱暂不可用。')).toBeTruthy();
+
+    await fireEvent.changeText(screen.getByLabelText('用户名'), 'travel_user_2');
+    await fireEvent.press(screen.getByRole('button', { name: '创建账号' }));
+    expect(registerAccount).toHaveBeenLastCalledWith(
+      'travel_user_2', 'travel@example.com', 'secret-pass-123', 'email-register-1', '001234',
+    );
+    expect(requestRegistrationEmailCode).toHaveBeenCalledTimes(1);
   });
 });

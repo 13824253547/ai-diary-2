@@ -1,4 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
+import { sha256 } from '@noble/hashes/sha256';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
+import { appConfig } from '../../config/app-config';
 import { clearAccountPrivateData } from '../legacy-account-data-cleanup';
 import {
   clearAccountSession,
@@ -27,6 +30,9 @@ jest.mock('../legacy-account-data-cleanup', () => ({
 describe('account auth client', () => {
   const fetchMock = jest.fn();
   const accessToken = 'header.payload.signature-with-enough-length-for-validation';
+  const sessionKey = () => `orange-glow-account-session-v2-${bytesToHex(
+    sha256(utf8ToBytes(appConfig.backendBaseUrl)),
+  )}`;
 
   beforeAll(() => {
     global.fetch = fetchMock as unknown as typeof fetch;
@@ -65,7 +71,7 @@ describe('account auth client', () => {
       }),
     }));
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
-      'orange-glow-account-session-v1',
+      sessionKey(),
       expect.stringContaining('"id":"user-1"'),
       expect.objectContaining({ keychainAccessible: 'when-unlocked-this-device-only' }),
     );
@@ -119,7 +125,7 @@ describe('account auth client', () => {
       }),
     }));
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
-      'orange-glow-account-session-v1',
+      sessionKey(),
       expect.stringContaining('"id":"user-1"'),
       expect.any(Object),
     );
@@ -135,7 +141,21 @@ describe('account auth client', () => {
     fetchMock.mockResolvedValueOnce({ status: 401, json: async () => ({ ok: false }) });
 
     await expect(restoreAccountSession()).resolves.toBeUndefined();
-    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('orange-glow-account-session-v1');
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(sessionKey());
+  });
+
+  test('keeps the stored session when the account server temporarily fails', async () => {
+    const stored = {
+      accessToken,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      user: { id: 'user-1', username: 'travel_user' },
+    };
+    jest.mocked(SecureStore.getItemAsync).mockResolvedValue(JSON.stringify(stored));
+    fetchMock.mockResolvedValueOnce({ status: 503, json: async () => { throw new Error('gateway error'); } });
+    jest.mocked(SecureStore.deleteItemAsync).mockClear();
+
+    await expect(restoreAccountSession()).resolves.toEqual(stored);
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
   });
 
   test('logout attempts server revocation and always clears the local token', async () => {
@@ -161,7 +181,7 @@ describe('account auth client', () => {
       method: 'POST',
       headers: expect.objectContaining({ Authorization: `Bearer ${accessToken}` }),
     }));
-    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('orange-glow-account-session-v1');
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(sessionKey());
   });
 
   test('clears local account data when server deletion is committed but media cleanup is pending', async () => {
@@ -200,6 +220,43 @@ describe('account auth client', () => {
     await expect(deleteAccount('secret-pass-123', 'delete-challenge-1', '001234'))
       .resolves.toEqual({ cleanupPending: true });
     expect(clearAccountPrivateData).toHaveBeenCalledWith('user-1');
-    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('orange-glow-account-session-v1');
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(sessionKey());
+  });
+
+  test('stores and restores sessions under keys scoped to the backend address', async () => {
+    const originalBaseUrl = appConfig.backendBaseUrl;
+    const storedByKey = new Map<string, string>();
+    jest.mocked(SecureStore.setItemAsync).mockImplementation(async (key, value) => {
+      storedByKey.set(key, value);
+    });
+    jest.mocked(SecureStore.getItemAsync).mockImplementation(async key => storedByKey.get(key) ?? null);
+    jest.mocked(SecureStore.deleteItemAsync).mockImplementation(async key => {
+      storedByKey.delete(key);
+    });
+    try {
+      appConfig.backendBaseUrl = 'https://production.example.test/api';
+      fetchMock.mockResolvedValueOnce({
+        status: 201,
+        json: async () => ({
+          ok: true,
+          data: {
+            accessToken,
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            user: { id: 'user-1', username: 'travel_user' },
+          },
+        }),
+      });
+      await loginAccount('travel_user', 'secret-pass-123', 'captcha-1', 222);
+      const productionKey = sessionKey();
+      appConfig.backendBaseUrl = 'http://127.0.0.1:3001/api';
+      const localKey = sessionKey();
+
+      expect(localKey).not.toBe(productionKey);
+      await expect(restoreAccountSession()).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(storedByKey.has(productionKey)).toBe(true);
+    } finally {
+      appConfig.backendBaseUrl = originalBaseUrl;
+    }
   });
 });

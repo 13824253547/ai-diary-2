@@ -72,6 +72,7 @@ describe('AccountAuthService', () => {
       },
       userAccount: {
         create: jest.fn(async ({ data }) => data),
+        update: jest.fn(async ({ data }) => data),
       },
       accountSession: {
         deleteMany: jest.fn(),
@@ -80,7 +81,10 @@ describe('AccountAuthService', () => {
       emailVerificationChallenge: emailChallengeModel,
     };
     prisma = {
-      authRateLimit: { upsert: jest.fn().mockResolvedValue({ count: 1 }) },
+      authRateLimit: {
+        upsert: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({ count: 2 }),
+      },
       captchaChallenge: {
         create: jest.fn(async ({ data }) => {
           captchaRow = { id: data.id, purpose: data.purpose, targetX: data.targetX };
@@ -150,6 +154,16 @@ describe('AccountAuthService', () => {
     const createInput = tx.userAccount.create.mock.calls[0][0].data;
     expect(createInput.passwordHash).not.toBe('secret-pass-123');
     expect(tx.accountSession.create).toHaveBeenCalledTimes(1);
+  });
+
+  test('increments an existing rate limit after a concurrent initial insert conflict', async () => {
+    prisma.authRateLimit.upsert.mockRejectedValueOnce({ code: 'P2002' });
+    await service.createCaptcha('register', '127.0.0.1');
+    expect(prisma.authRateLimit.update).toHaveBeenCalledWith({
+      where: { id: expect.any(String) },
+      data: { count: { increment: 1 } },
+      select: { count: true },
+    });
   });
 
   test('consumes an incorrect puzzle answer and rejects replay', async () => {
@@ -352,6 +366,10 @@ describe('AccountAuthService', () => {
     }, '127.0.0.1');
 
     expect(response.data.user.id).toBe('user-1');
+    expect(tx.userAccount.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { updatedAt: expect.any(Date) },
+    });
     expect(tx.accountSession.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
     expect(tx.accountSession.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ userId: 'user-1', id: expect.any(String) }),

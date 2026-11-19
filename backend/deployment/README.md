@@ -1,5 +1,11 @@
 # Production Deployment
 
+For the new account-based backend, see the isolated full-release procedure:
+[backend-account-deployment.md](../../docs/handoff/backend-account-deployment.md).
+It uses a separate database and media directory, and does not migrate or delete
+the historical installation-identity data. The procedure below describes the
+historical deployment and is retained for reference.
+
 Deployment files are specific to this application. Never copy the local development
 Compose file or development credentials to production.
 
@@ -8,9 +14,9 @@ Compose file or development credentials to production.
 The checked-in application now uses username/password accounts, verified
 registration email, email-confirmed account deletion, and
 `ACCOUNT_AUTH_JWT_SECRET`; the existing production deployment still uses the
-historical installation-identity release. Do not deploy this source, run its
-account migration, or purge production data until the database and media targets
-have been independently confirmed and the destructive cutover is approved.
+historical installation-identity release. Do not apply the account migration
+or purge to the historical database or media. Use the separate account stack
+above, which leaves historical data in place.
 
 The installation-auth patch and `tools/configure-installation-auth.cjs` are
 retired and must not be used for new deployments. Historical release and rollback
