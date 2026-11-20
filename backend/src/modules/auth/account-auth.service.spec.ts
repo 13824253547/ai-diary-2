@@ -1,6 +1,7 @@
 import * as argon2 from 'argon2';
 import { PrismaService } from '../../common/prisma.service';
 import { AccountAuthService } from './account-auth.service';
+import * as captchaImage from './captcha-image';
 
 jest.mock('argon2', () => ({
   argon2id: 2,
@@ -183,6 +184,23 @@ describe('AccountAuthService', () => {
     }, '127.0.0.1'))
       .rejects.toMatchObject({ response: { error: { code: 'captcha_failed' } } });
     expect(tx.userAccount.create).not.toHaveBeenCalled();
+  });
+
+  test.each([[160, 180], [180, 160]])('rejects overlapping decoy %i -> %i and consumes the challenge', async (targetX, decoyX) => {
+    const positions = jest.spyOn(captchaImage, 'chooseCaptchaPositions').mockReturnValue({
+      left: 160, right: 180, targetX, targetY: 50,
+    });
+    try {
+      const challenge = await service.createCaptcha('register', '127.0.0.1');
+      expect(challenge.data).not.toHaveProperty('targetX');
+      await expect(service.requestRegistrationEmailCode({
+        email: 'travel@example.com',
+        captcha: { challengeId: challenge.data.challengeId, x: decoyX },
+      }, '127.0.0.1')).rejects.toMatchObject({ response: { error: { code: 'captcha_failed' } } });
+      expect(captchaRow.consumedAt).toBeDefined();
+    } finally {
+      positions.mockRestore();
+    }
   });
 
   test('rejects an incorrect email code after five attempts without creating an account', async () => {

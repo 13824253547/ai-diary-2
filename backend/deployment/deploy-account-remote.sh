@@ -70,11 +70,11 @@ case "$action" in
 import hashlib, json, re, sys
 runtime = json.loads(sys.stdin.readline())
 migration = json.loads(sys.stdin.readline())
-if not isinstance(runtime, list) or len(runtime) < 4 or not isinstance(migration, list) or len(migration) < 2:
+if not isinstance(runtime, list) or len(runtime) < 5 or not isinstance(migration, list) or len(migration) < 2:
     raise SystemExit(1)
 if not all(isinstance(v, str) and re.fullmatch(r"sha256:[a-f0-9]{64}", v) for v in runtime + migration):
     raise SystemExit(1)
-data = json.dumps([runtime[:-3], migration[:-1]], separators=(",", ":")).encode()
+data = json.dumps([runtime[:-4], migration[:-1]], separators=(",", ":")).encode()
 print(hashlib.sha256(data).hexdigest())
 ' 2>/dev/null || true)"
       if [ "$old_layers_sha" != "$nginx_sha" ]; then

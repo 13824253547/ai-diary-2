@@ -1087,3 +1087,10 @@ SHR-001 契约补充：`POST /sharing/project` 先要求有效设备身份，再
 - 保存相册通过带设备身份头的后端内容下载至临时缓存，再使用 `expo-media-library/legacy` 写入系统相册并清理临时文件；Expo 插件与 iOS plist 已增加写入用途说明。保存权限尚未通过重建原生包的 iOS 实机/模拟器测试。生产仍需持久卷承载 `PHOTO_ASSET_STORAGE_DIR`。
 - 验证：页面交互 1 suite / 2 tests；客户端 HTTP provider/保存服务 2 suites / 4 tests；后端 Ark provider、生图 service/controller、PhotoAssetService 4 suites / 17 tests；backend build、root typecheck、client secret-boundary 3 tests 通过。UI 测试期间修复测试事件同步：等待受控输入提交后再调用异步 handler，最终运行无失败且无 act 警告。
 - 当日未配置模型 endpoint、未执行任何真实/可能计费模型请求；未验证真实图片质量、provenance migration、持久卷重启或设备系统相册落盘。后续模型与 Key 来源见 DEV-51；CASE-MAT-005-001/002/003/005 状态仍未执行；CASE-MAT-005-004/006/007/008 仍待决策。当前自动化证据不提升正式验收通过数。
+
+## 账号拼图验证码修复（2026-11-20）
+
+- 共享注册及登录组件使用实际布局宽度换算拖动坐标；服务端从同一张照片裁切拼图，随机设置相邻的正确和迷惑缺口，保留用途绑定、单次消费及服务端校验。
+- 新增 12 张照片和来源记录，生产镜像携带素材。Unsplash 原始页面因访问验证尚未逐张复核，发布前须完成单图许可检查；不将这一点记作已完成的版权验收。
+- 定向测试覆盖像素裁剪、迷惑坑拒绝、一次性消费、不同宽度下的触摸位移及注册流程；前端类型检查、后端编译通过。生产镜像在本机构建并验证能够生成图片，尚未部署或进行 iOS 实际交互验收。
+- 按用户要求将相邻缺口间距缩小至原图 16–24 像素，使轮廓部分重叠；合并遮罩避免重叠区域加深。后端定向测试 2 suites / 16 tests 及编译通过，未进行 iOS 实际交互验收或上线。

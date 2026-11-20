@@ -60,12 +60,13 @@ test('dependency fingerprint changes only when image dependency configuration ch
 
 test('image fingerprint includes dependency layers but excludes complete code layers', () => {
   const layer = char => `sha256:${char.repeat(64)}`;
-  const runtime = [layer('a'), layer('b'), layer('c'), layer('d'), layer('e')];
+  const runtime = [layer('a'), layer('b'), layer('c'), layer('d'), layer('e'), layer('f')];
   const migration = [layer('f'), layer('a'), layer('b')];
   assert.deepEqual(imageDependencyLayers(runtime, migration), [
     [layer('a'), layer('b')], [layer('f'), layer('a')],
   ]);
   assert.throws(() => imageDependencyLayers([], migration));
+  assert.throws(() => imageDependencyLayers(runtime.slice(0, 4), migration));
   assert.throws(() => imageDependencyLayers(runtime, ['invalid', layer('a')]));
   const dockerfile = fs.readFileSync(path.join(__dirname, '../backend/Dockerfile.production'));
   assert.equal(hasKnownLayerLayout(dockerfile), true);

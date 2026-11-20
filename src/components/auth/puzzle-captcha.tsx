@@ -37,15 +37,19 @@ export const PuzzleCaptcha = forwardRef<PuzzleCaptchaHandle, Props>(function Puz
   const startOffset = useRef(0);
   const offsetRef = useRef(offset);
   const widthRef = useRef(width);
+  const challengeRef = useRef(challenge);
   const enabledRef = useRef(Boolean(challenge) && !loading);
   offsetRef.current = offset;
   widthRef.current = width;
+  challengeRef.current = challenge;
   enabledRef.current = Boolean(challenge) && !loading;
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
     setChallenge(undefined);
+    challengeRef.current = undefined;
+    offsetRef.current = 0;
     setOffset(0);
     try {
       setChallenge(await requestCaptcha(purpose));
@@ -61,14 +65,15 @@ export const PuzzleCaptcha = forwardRef<PuzzleCaptchaHandle, Props>(function Puz
   }, [refresh]);
 
   useImperativeHandle(ref, () => ({
-    getProof: () => challenge
-      ? { challengeId: challenge.challengeId, x: Math.round(offset / width * challenge.width) }
+    getProof: () => challengeRef.current
+      ? { challengeId: challengeRef.current.challengeId, x: Math.round(offsetRef.current / widthRef.current * challengeRef.current.width) }
       : undefined,
     refresh,
   }), [challenge, offset, refresh, width]);
 
   const setClampedOffset = (next: number) => {
-    const max = Math.max(0, widthRef.current - PIECE_SIZE * widthRef.current / DESIGN_WIDTH);
+    const current = challengeRef.current;
+    const max = Math.max(0, widthRef.current * (1 - (current?.pieceSize ?? PIECE_SIZE) / (current?.width ?? DESIGN_WIDTH)));
     const value = Math.max(0, Math.min(max, next));
     offsetRef.current = value;
     setOffset(value);
@@ -85,7 +90,7 @@ export const PuzzleCaptcha = forwardRef<PuzzleCaptchaHandle, Props>(function Puz
     onPanResponderTerminate: () => { startOffset.current = 0; },
   })).current;
 
-  const scale = width / DESIGN_WIDTH;
+  const scale = width / (challenge?.width ?? DESIGN_WIDTH);
   const pieceSize = (challenge?.pieceSize ?? PIECE_SIZE) * scale;
 
   return (
@@ -98,8 +103,15 @@ export const PuzzleCaptcha = forwardRef<PuzzleCaptchaHandle, Props>(function Puz
       </View>
       <View
         accessibilityLabel="拼图验证背景"
-        onLayout={event => setWidth(Math.min(DESIGN_WIDTH, event.nativeEvent.layout.width))}
-        style={[styles.puzzle, { aspectRatio: DESIGN_WIDTH / PUZZLE_HEIGHT }]}
+        onLayout={event => {
+          const nextWidth = event.nativeEvent.layout.width;
+          if (nextWidth <= 0) return;
+          const nextOffset = offsetRef.current * nextWidth / widthRef.current;
+          widthRef.current = nextWidth;
+          setWidth(nextWidth);
+          setClampedOffset(nextOffset);
+        }}
+        style={[styles.puzzle, { aspectRatio: (challenge?.width ?? DESIGN_WIDTH) / (challenge?.height ?? PUZZLE_HEIGHT) }]}
       >
         {challenge ? (
           <>

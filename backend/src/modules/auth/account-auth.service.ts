@@ -12,16 +12,13 @@ import {
 import { randomBytes, randomInt, randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
-import sharp from 'sharp';
 import { PrismaService } from '../../common/prisma.service';
 import { TemporaryGenerationPhotoStore } from '../../common/temporary-generation-photo-store';
 import { PhotoAssetService } from '../photos/photo-asset.service';
 import { signAccountToken, verifyAccountToken } from './account-token';
 import { EmailVerificationMailer, type EmailVerificationPurpose } from './email-verification-mailer';
+import { CAPTCHA_HEIGHT, CAPTCHA_PIECE_SIZE, CAPTCHA_WIDTH, chooseCaptchaPositions, createCaptchaImage } from './captcha-image';
 
-const CAPTCHA_WIDTH = 320;
-const CAPTCHA_HEIGHT = 160;
-const CAPTCHA_PIECE_SIZE = 48;
 const CAPTCHA_TTL_MS = 2 * 60 * 1000;
 const EMAIL_CODE_TTL_MS = 10 * 60 * 1000;
 const EMAIL_CODE_MAX_ATTEMPTS = 5;
@@ -93,8 +90,8 @@ export class AccountAuthService implements OnModuleInit {
     const now = new Date();
     const id = randomUUID();
     const seed = randomBytes(16).toString('hex');
-    const targetX = randomInt(190, CAPTCHA_WIDTH - CAPTCHA_PIECE_SIZE - 12);
-    const targetY = randomInt(46, CAPTCHA_HEIGHT - CAPTCHA_PIECE_SIZE - 12);
+    const { targetX, targetY, left, right } = chooseCaptchaPositions();
+    const { background, piece } = await createCaptchaImage(targetX, targetY, targetX === left ? right : left);
     await this.prisma.captchaChallenge.create({
       data: {
         id,
@@ -106,28 +103,6 @@ export class AccountAuthService implements OnModuleInit {
     });
     await this.prisma.captchaChallenge.deleteMany({ where: { expiresAt: { lt: now } } });
 
-    const color = `#${seed.slice(0, 6)}`;
-    const backgroundSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CAPTCHA_WIDTH}" height="${CAPTCHA_HEIGHT}" viewBox="0 0 ${CAPTCHA_WIDTH} ${CAPTCHA_HEIGHT}">
-      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff0d8"/><stop offset="1" stop-color="#f5bb72"/></linearGradient></defs>
-      <rect width="320" height="160" rx="14" fill="url(#g)"/>
-      <circle cx="${36 + parseInt(seed.slice(6, 8), 16)}" cy="38" r="52" fill="${color}" opacity=".14"/>
-      <path d="M0 124 Q72 75 132 126 T320 110 V160 H0Z" fill="#dc9550" opacity=".24"/>
-      <path d="M0 139 Q74 100 150 143 T320 128 V160 H0Z" fill="#8f715d" opacity=".2"/>
-      <g fill="#fff" opacity=".45">${Array.from({ length: 12 }, (_, index) => {
-        const x = (parseInt(seed.slice((index % 8) * 2, (index % 8) * 2 + 2), 16) * 7 + index * 31) % CAPTCHA_WIDTH;
-        const y = 18 + ((index * 29 + parseInt(seed.slice(8, 10), 16)) % 90);
-        return `<circle cx="${x}" cy="${y}" r="${3 + index % 5}"/>`;
-      }).join('')}</g>
-      <path d="M${targetX + 5} ${targetY + 5} h12 a7 7 0 1 1 14 0 h12 v38 h-38Z" fill="#745d4d" opacity=".5"/>
-    </svg>`;
-    const pieceSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${CAPTCHA_PIECE_SIZE}" height="${CAPTCHA_PIECE_SIZE}" viewBox="0 0 ${CAPTCHA_PIECE_SIZE} ${CAPTCHA_PIECE_SIZE}">
-      <path d="M5 5 H17 a7 7 0 1 1 14 0 H43 V43 H5Z" fill="#fffaf1" stroke="#8b643f" stroke-width="2"/>
-      <path d="M5 5 H17 a7 7 0 1 1 14 0 H43 V43 H5Z" fill="${color}" opacity=".48"/>
-    </svg>`;
-    const [background, piece] = await Promise.all([
-      sharp(Buffer.from(backgroundSvg)).png().toBuffer(),
-      sharp(Buffer.from(pieceSvg)).png().toBuffer(),
-    ]);
     return {
       ok: true,
       data: {

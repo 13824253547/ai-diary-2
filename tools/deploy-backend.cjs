@@ -18,7 +18,7 @@ const dependencyFiles = [
   'deployment/migration/package.json', 'deployment/migration/package-lock.json',
 ];
 // Only this reviewed Dockerfile layout supports the code-layer exclusions below.
-const knownLayerLayoutDockerfileSha = 'f5b9ec2addc234ab1c5372634d4e2da627ad056905d1ae563753b88db44010b5';
+const knownLayerLayoutDockerfileSha = 'f22c97f5b015000f391e1540580a5a2ef746b73067897a2644b32056fe7466f1';
 const allowedEnvironmentKeys = [
   'PET_CHAT_PROVIDER', 'PET_CHAT_BASE_URL', 'PET_CHAT_MODEL', 'PET_CHAT_API_KEY',
   'PET_CHAT_TIMEOUT_MS', 'PET_CHAT_TEMPERATURE', 'PET_CHAT_MAX_TOKENS', 'PET_CHAT_HISTORY_ITEMS',
@@ -62,12 +62,12 @@ function dependencyFingerprint(directory = backend, dependencyLayers = []) {
 
 function imageDependencyLayers(runtimeLayers, migrationLayers) {
   const valid = layers => Array.isArray(layers) && layers.every(layer => /^sha256:[a-f0-9]{64}$/.test(layer));
-  if (!valid(runtimeLayers) || runtimeLayers.length < 4
+  if (!valid(runtimeLayers) || runtimeLayers.length < 5
     || !valid(migrationLayers) || migrationLayers.length < 2) {
     throw new Error('Could not determine image dependency layers safely.');
   }
-  // The Dockerfile ends with runtime client/code/server layers and one migration schema layer.
-  return [runtimeLayers.slice(0, -3), migrationLayers.slice(0, -1)];
+  // The runtime ends with client, code, CAPTCHA assets and server layers.
+  return [runtimeLayers.slice(0, -4), migrationLayers.slice(0, -1)];
 }
 
 function hasKnownLayerLayout(contents) {

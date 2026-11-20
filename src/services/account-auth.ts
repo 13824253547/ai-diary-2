@@ -202,7 +202,13 @@ export async function requestCaptcha(purpose: 'register' | 'login'): Promise<Cap
   const response = await request<CaptchaChallenge>('/auth/captcha', 'POST', { purpose });
   if (response.status < 200 || response.status >= 300 || response.data.ok !== true
     || !response.data.data || typeof response.data.data.challengeId !== 'string'
-    || typeof response.data.data.background !== 'string' || typeof response.data.data.piece !== 'string') {
+    || typeof response.data.data.background !== 'string' || typeof response.data.data.piece !== 'string'
+    || !Number.isFinite(response.data.data.width) || response.data.data.width <= 0
+    || !Number.isFinite(response.data.data.height) || response.data.data.height <= 0
+    || !Number.isFinite(response.data.data.pieceSize) || response.data.data.pieceSize <= 0
+    || response.data.data.pieceSize > response.data.data.width
+    || !Number.isFinite(response.data.data.pieceTop) || response.data.data.pieceTop < 0
+    || response.data.data.pieceTop + response.data.data.pieceSize > response.data.data.height) {
     readError(response.status, response.data);
   }
   return response.data.data!;
